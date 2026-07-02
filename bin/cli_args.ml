@@ -32,7 +32,7 @@ let db_uri =
   let open Cmdliner in
   Arg.(value & opt (some string) None &
     info [ "db-uri" ] ~docv:"URI"
-      ~doc:"SQLite database path (default: ~/.par-code/par_code.db)")
+      ~doc:"SQLite database path (default: ~/.par/par.db)")
 
 let system_prompt_arg =
   let open Cmdliner in

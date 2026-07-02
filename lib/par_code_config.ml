@@ -1,6 +1,6 @@
 (* par_code_config.ml — Configuration for the par-code coding agent.
  *
- * Mirrors PAR's Par_config but lives at ~/.par-code/ and ships coding-agent
+ * Mirrors PAR's Par_config but lives at ~/.par/ and ships coding-agent
  * defaults. Supports openai / anthropic / ollama / custom (OpenAI-compatible).
  *
  * Part of par-code's internal bootstrap layer (方案 C): does NOT depend on
@@ -26,7 +26,7 @@ type config = {
 }
 
 let default_system_prompt =
-  "You are par-code, an interactive coding assistant. You help the user read, \
+  "You are par, an interactive coding assistant. You help the user read, \
    write, and edit code, run shell commands, and search the codebase. You have \
    access to tools: read, write, edit, grep, find, ls, and bash. Always prefer \
    the minimal change that solves the problem. When unsure about intent, ask \
@@ -50,13 +50,13 @@ let default = {
 
 let config_dir () =
   let home = try Sys.getenv "HOME" with Not_found -> "/" in
-  let dir = Filename.concat home ".par-code" in
+  let dir = Filename.concat home ".par" in
   if not (Sys.file_exists dir) then
     (try Unix.mkdir dir 0o755 with Unix.Unix_error _ -> ());
   dir
 
 let config_path () = Filename.concat (config_dir ()) "config.json"
-let db_path () = Filename.concat (config_dir ()) "par_code.db"
+let db_path () = Filename.concat (config_dir ()) "par.db"
 
 let to_json (cfg : config) : Yojson.Safe.t =
   let opt_str = function Some s -> `String s | None -> `Null in
@@ -178,7 +178,7 @@ let require_config () =
   match load () with
   | Some cfg -> cfg
   | None ->
-    Printf.eprintf "No config found at %s.\nRun `par-code config` first.\n%!"
+    Printf.eprintf "No config found at %s.\nRun `par config` first.\n%!"
       (config_path ());
     exit 1
 
@@ -205,7 +205,7 @@ let run_wizard () =
      Printf.printf "  Max iter:    %d\n" cfg.max_iterations;
      Printf.printf "\nEnter new values or press Enter to keep current.\n\n%!"
    | None ->
-     Printf.printf "Welcome to par-code! First-time setup.\n\n%!");
+     Printf.printf "Welcome to par! First-time setup.\n\n%!");
 
   let prov_default = match existing with Some c -> Some c.provider | None -> Some default.provider in
   let provider = prompt_line "Provider (openai/anthropic/ollama/+custom-name)" prov_default in

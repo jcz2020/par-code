@@ -20,7 +20,7 @@
  (name par_code)
  (synopsis "Interactive coding agent built on the PAR SDK")
  (description
-   "par-code is an interactive coding agent (Claude-Code-style terminal assistant) \
+    "par-code is an interactive coding agent (Claude-Code-style terminal assistant) \
     built on top of PAR (Programmable Agent Runtime). It drives the full PAR SDK \
     surface - ReAct loop, tool dispatch, type-safe bash, MCP client, skills, \
     workflows, streaming - and doubles as a validation case for the PAR project.")

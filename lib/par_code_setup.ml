@@ -130,7 +130,7 @@ let make_runtime_config (cfg : Par_code_config.config) =
     event_retention_seconds = cfg.Par_code_config.event_retention_days *. 24. *. 60. *. 60.;
   }
 
-let agent_id = "par-code"
+let agent_id = "par"
 
 let setup_runtime (cfg : Par_code_config.config) ~f =
   ensure_rng ();

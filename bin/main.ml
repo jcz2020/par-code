@@ -52,7 +52,7 @@ let cmd_ask
       ()
   in
   if question = "" then begin
-    Printf.eprintf "Usage: par-code ask <question>\n%!";
+    Printf.eprintf "Usage: par ask <question>\n%!";
     exit 1
   end;
   Par_code_setup.setup_runtime cfg ~f:(fun rt ->
@@ -80,8 +80,8 @@ let info_config = Cmd.info "config" ~doc:"Configure provider and model settings"
 
 let cmd =
   Cmd.group ~default:term_chat
-    (Cmd.info "par-code" ~version:Par_code.version_info
-       ~doc:"Interactive coding agent built on the PAR SDK — run 'par-code' to start the REPL, 'par-code config' to configure, 'par-code ask \"question\"' for one-shot")
+    (Cmd.info "par" ~version:Par_code.version_info
+       ~doc:"Interactive coding agent built on the PAR SDK — run 'par' to start the REPL, 'par config' to configure, 'par ask \"question\"' for one-shot")
     [ Cmd.v info_config term_config;
       Cmd.v info_ask term_ask; ]
 

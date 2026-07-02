@@ -1,15 +1,25 @@
 let test_version () =
   Alcotest.(check string) "version is 0.2.0-dev" "0.2.0-dev" Par_code.version
 
-let test_config_paths_independent_from_par () =
+let test_version_info_prefix () =
+  Alcotest.(check bool) "version_info starts with 'par '"
+    true (Astring.String.is_prefix ~affix:"par " Par_code.version_info)
+
+let test_config_paths () =
   let path = Par_code_config.config_path () in
   let dir = Par_code_config.config_dir () in
-  Alcotest.(check bool) "config dir is ~/.par-code (not ~/.par)"
-    true (Astring.String.is_infix ~affix:".par-code" dir);
-  Alcotest.(check bool) "config path ends with .par-code/config.json"
-    true (Astring.String.is_infix ~affix:".par-code/config.json" path);
-  Alcotest.(check bool) "config dir does not collide with ~/.par"
-    false (Astring.String.is_infix ~affix:".par/config" dir)
+  let db = Par_code_config.db_path () in
+  Alcotest.(check bool) "config dir is ~/.par"
+    true (Astring.String.is_infix ~affix:".par" dir);
+  Alcotest.(check bool) "config path ends with .par/config.json"
+    true (Astring.String.is_infix ~affix:".par/config.json" path);
+  Alcotest.(check bool) "db path ends with par.db"
+    true (Astring.String.is_suffix ~affix:"par.db" db);
+  Alcotest.(check bool) "config dir is not the old ~/.par-code"
+    false (Astring.String.is_infix ~affix:".par-code" dir)
+
+let test_agent_id () =
+  Alcotest.(check string) "agent_id is par" "par" Par_code_setup.agent_id
 
 let test_config_roundtrip () =
   let cfg : Par_code_config.config =
@@ -33,7 +43,9 @@ let test_config_roundtrip () =
     Alcotest.(check (option string)) "api_base roundtrip" cfg.api_base cfg'.api_base
 
 let () =
-  Alcotest.run "par-code"
-    [ "version", [ Alcotest.test_case "version" `Quick test_version ];
-      "config", [ Alcotest.test_case "paths independent from ~/.par" `Quick test_config_paths_independent_from_par;
+  Alcotest.run "par"
+    [ "version", [ Alcotest.test_case "version" `Quick test_version;
+                   Alcotest.test_case "version_info prefix" `Quick test_version_info_prefix ];
+      "identity", [ Alcotest.test_case "agent_id" `Quick test_agent_id ];
+      "config", [ Alcotest.test_case "paths are ~/.par" `Quick test_config_paths;
                   Alcotest.test_case "JSON round-trip" `Quick test_config_roundtrip ] ]
