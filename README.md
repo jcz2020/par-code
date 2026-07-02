@@ -94,6 +94,7 @@ Version numbers stay minimal (no 1.0 until core parity is earned).
 |---|---|
 | **v0.1.0** ✅ | Project skeleton — links the PAR SDK; `par --version` works. |
 | **v0.2.0** ✅ | Interactive coding agent — REPL, provider config, read/write/edit/grep/find/bash, streaming, session persistence. *"It reads and edits my code."* |
+| **v0.2.1** | One-line install & self-update — `curl … \| bash` (Linux/macOS) / `irm … \| iex` (Windows), no OCaml/opam required; pre-built binaries on GitHub Releases; `par upgrade` keeps it current. *"Install in one line. Updates itself."* |
 | **v0.3.0** | Project memory — `MEMORY.md` + FTS5 full-text search + memory/history tools. *"It remembers my project across sessions."* |
 | **v0.4.0** | Long-session continuity — checkpoint-writer subagent, budgeted context injection, context reconstruction. *"Hours-long sessions never lose the thread."* |
 | **v0.5.0** | Plan mode — read-only plan agent, build/plan switching, plan_enter/plan_exit. *"It plans before it touches code."* |
