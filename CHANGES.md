@@ -15,3 +15,7 @@
 - Alcotest harness (`test/`).
 - Apache-2.0 license, README, CHANGES, CONTRIBUTING, Makefile, editorconfig,
   gitignore, GitHub Actions CI.
+
+### Planning
+- Roadmap defined (v0.2.0 → v1.0.0): one user-perceivable capability per
+  release. See README "Roadmap" and docs/DECISIONS.md.

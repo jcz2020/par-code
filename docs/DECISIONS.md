@@ -26,13 +26,32 @@
 
 **已知限制**：
 - PAR 尚未发布到公开 opam 仓库，需 `opam pin add par https://github.com/jcz2020/par.git`。
-- GitHub Actions 工作流文件（`.github/workflows/ci.yml`）需 token 具备 `workflow`
-  scope 才能 push；当前 gh token 仅有 `gist/read:org/repo`，待刷新后补推。
+- GitHub Actions（`.github/workflows/ci.yml`）已推送（gh token 已补 `workflow` scope）。
 
-## Roadmap
+## Roadmap（2026-07-02 经源码核查后确认）
 
-- **v0.1.0** — 项目骨架 + README（本次）。
-- **v0.2.0** — 交互式 REPL：config 向导、多轮对话、内置文件工具、类型安全 bash、
-  流式输出、SQLite 持久化。
-- **v0.3.0** — 自定义代码工具（AST 感知编辑、语义搜索）+ skill 打包。
-- **v0.4.0** — MCP client 集成（filesystem/git/GitHub）+ 多步 workflow。
+> 先对 PAR 与对齐目标做了双侧源码逐条核查（PAR 9 大能力全部真实；目标 9 个招牌
+> 特性全部实打实实现、非 stub；PAR 在记忆/上下文整块为零覆盖）。据此重定路线图。
+
+每版交付**一个**用户可感知的核心功能（垂直薄片，做完即可演示）；版本号最小递增，
+核心能力对齐前不升 1.0。
+
+- **v0.1.0** ✅ 项目骨架（链接 PAR SDK，`par-code --version` 可用）。
+- **v0.2.0** 能用：交互编码 agent（REPL + provider 配置 + read/write/edit/grep/find/bash + 流式 + 会话持久）。
+- **v0.3.0** 记得住：项目记忆（MEMORY.md + FTS5 全文检索 + memory/history 工具）。
+- **v0.4.0** 长程不断线：checkpoint-writer 子 agent + 预算式上下文注入 + 上下文重建（最硬一役，PAR 零覆盖块）。
+- **v0.5.0** 先想后做：plan 模式（只读）+ build/plan 切换 + plan_enter/plan_exit。
+- **v0.6.0** 会分身：general/explore 子 agent + actor 工具 + 任务树。
+- **v0.7.0** 干到底：/goal + 独立 judge 模型 + doom_loop 检测。
+- **v0.8.0** 择优：max-mode（N 路并行候选 + judge 选取）。
+- **v0.9.0** 会自学：/dream + /distill + 自定义 slash 命令系统。
+- **v0.10.0** 全流程编排：compose 模式 + 内置 plan/execute/review/tdd/debug/verify/merge skill。
+- **v0.11.0** 连万物：MCP OAuth + 热重载 + 多源 skill（远程 URL/.claude/.agents 等）。
+- **v0.12.0** 懂代码：LSP 集成（诊断/跳定义/引用/调用层级）+ lsp 工具。
+- **v0.13.0** 安全可控：权限规则集（allow/ask/deny + 持久批准）+ 文件快照/undo。
+- **v0.14.0** 好用好看：富 TUI（流式渲染 + 内联权限提示 + i18n）。
+- **v1.0.0** 核心能力对齐里程碑（v0.2–v0.14 齐备 + 稳定化）。
+- **1.x** 扩展轨（按需）：语音输入/控制、插件系统、codesearch、notebook_edit、apply_patch、LSP rename。
+
+**排序原则**：先能用再出彩（0.2 地基）；招牌优先且难度爬坡（0.3–0.4 直接上记忆/长程
+零覆盖块；0.5–0.8 自主性爬坡；0.9–0.10 自进化+编排）；安全/UX 收口（0.13–0.14 兜底 1.0）。

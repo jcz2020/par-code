@@ -75,13 +75,29 @@ par-code/
 
 ## Roadmap
 
-- **v0.1.0** — Project skeleton + README (this release).
-- **v0.2.0** — Interactive REPL: config wizard, multi-turn chat, built-in file
-  tools, type-safe bash, streaming output, SQLite persistence.
-- **v0.3.0** — Custom code tools (AST-aware edits, semantic search) and skill
-  packaging (review / refactor / test behaviors).
-- **v0.4.0** — MCP client integration (filesystem, git, GitHub) and multi-step
-  workflows (lint → test → commit).
+Each release ships **one** user-facing capability — a thin, demonstrable slice.
+Version numbers stay minimal (no 1.0 until core parity is earned).
+
+| Version | User-perceivable capability |
+|---|---|
+| **v0.1.0** ✅ | Project skeleton — links the PAR SDK; `par-code --version` works. |
+| **v0.2.0** | Interactive coding agent — REPL, provider config, read/write/edit/grep/find/bash, streaming, session persistence. *"It reads and edits my code."* |
+| **v0.3.0** | Project memory — `MEMORY.md` + FTS5 full-text search + memory/history tools. *"It remembers my project across sessions."* |
+| **v0.4.0** | Long-session continuity — checkpoint-writer subagent, budgeted context injection, context reconstruction. *"Hours-long sessions never lose the thread."* |
+| **v0.5.0** | Plan mode — read-only plan agent, build/plan switching, plan_enter/plan_exit. *"It plans before it touches code."* |
+| **v0.6.0** | Subagent delegation — general/explore subagents, actor tool, task tree. *"It spawns helpers to explore and work in parallel."* |
+| **v0.7.0** | Goal-driven autonomy — `/goal` + independent judge model + doom-loop detection. *"It won't declare done until the goal is truly met."* |
+| **v0.8.0** | Best-of-N reasoning — max-mode (parallel candidates + judge selection). *"It tries several approaches and picks the best."* |
+| **v0.9.0** | Self-improvement — `/dream` + `/distill` + custom slash commands. *"It turns my repeated workflows into reusable skills."* |
+| **v0.10.0** | Compose mode — spec-driven orchestration with plan/execute/review/tdd/debug/verify/merge skills. *"Give a spec, it designs, codes, reviews, and tests end-to-end."* |
+| **v0.11.0** | Ecosystem connections — MCP OAuth + hot-reload + multi-source skills (remote URLs, `.claude`/`.agents`/…). *"Connect any MCP server; pull skills from URLs."* |
+| **v0.12.0** | Code intelligence — LSP integration (diagnostics, go-to-def, references, call hierarchy) + lsp tool. *"It navigates code like an IDE."* |
+| **v0.13.0** | Safe & reversible — permission ruleset (allow/ask/deny + persisted approvals) + filesystem snapshot/undo. *"It asks before destructive ops; changes can be undone."* |
+| **v0.14.0** | Polished terminal app — rich TUI (streaming render, inline permission prompts, i18n). *"A real terminal application."* |
+| **v1.0.0** | **Core-parity milestone** — v0.2–v0.14 capabilities complete and stabilized. |
+
+Post-1.0 (extended, on demand): voice input/control, plugin system, codesearch,
+notebook editing, apply_patch, LSP rename.
 
 ## License
 
