@@ -149,7 +149,7 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
     Printf.eprintf "Error creating runtime: %s\n%!" (error_to_string e);
     exit 1
   | Ok rt ->
-    let tools = Builtin_tools.builtin_tools ~switch ~net in
+    let tools = Builtin_tools.builtin_tools ~switch ~net ~workspace:(Runtime.workspace rt) in
     List.iter (fun (tb : Types.tool_binding) ->
       (match Runtime.register_tool rt
          ~name:tb.descriptor.Types.name

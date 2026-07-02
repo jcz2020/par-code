@@ -13,7 +13,7 @@ bug-reports: "https://github.com/jcz2020/par-code/issues"
 depends: [
   "ocaml"
   "dune" {>= "3.16" & >= "3.16"}
-  "par" {>= "0.6.2"}
+  "par" {>= "0.6.5"}
   "cmdliner"
   "eio"
   "eio_main"
