@@ -24,7 +24,7 @@ make test       # dune runtest
 
 ## Layout
 
-- `bin/` — the `par-code` executable and CLI argument definitions.
+- `bin/` — the `par` executable and CLI argument definitions.
 - `lib/` — the `par_code` library facade (agent-building helpers land here).
 - `test/` — Alcotest suite.
 

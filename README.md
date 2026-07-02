@@ -59,14 +59,14 @@ dune build
 Run:
 
 ```sh
-dune exec -- par-code --version
+dune exec -- par --version
 ```
 
 ## Project layout
 
 ```
 par-code/
-├── bin/          # `par-code` executable + CLI args (mirrors PAR's bin/)
+├── bin/          # `par` executable + CLI args (mirrors PAR's bin/)
 ├── lib/          # `par_code` library facade (agent helpers land here)
 ├── test/         # Alcotest suite
 └── dune-project  # par_code package, depends on par (>= 0.6.2)
@@ -76,13 +76,13 @@ par-code/
 
 ```sh
 # 1. Configure a provider (interactive wizard)
-par-code config
+par config
 
 # 2. Start the REPL
-par-code
+par
 
 # Or ask a single question
-par-code ask "What does this project do?"
+par ask "What does this project do?"
 ```
 
 ## Roadmap
@@ -92,7 +92,7 @@ Version numbers stay minimal (no 1.0 until core parity is earned).
 
 | Version | User-perceivable capability |
 |---|---|
-| **v0.1.0** ✅ | Project skeleton — links the PAR SDK; `par-code --version` works. |
+| **v0.1.0** ✅ | Project skeleton — links the PAR SDK; `par --version` works. |
 | **v0.2.0** ✅ | Interactive coding agent — REPL, provider config, read/write/edit/grep/find/bash, streaming, session persistence. *"It reads and edits my code."* |
 | **v0.3.0** | Project memory — `MEMORY.md` + FTS5 full-text search + memory/history tools. *"It remembers my project across sessions."* |
 | **v0.4.0** | Long-session continuity — checkpoint-writer subagent, budgeted context injection, context reconstruction. *"Hours-long sessions never lose the thread."* |

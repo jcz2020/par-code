@@ -45,7 +45,7 @@ Par_code_config, Par_code_repl），不依赖 `par_cli`。
 - `lib/`：新增 Par_code_setup、Par_code_config、Par_code_repl 三个模块。
 - `bin/`：仅负责命令行参数解析和调用 lib/ 层。
 - 构建：`par_code` 库不再尝试链接 `par_cli`。
-- 用户体验：配置路径 `~/.par-code/config.json` 与 PAR 的 `~/.par/` 独立。
+- 用户体验：配置路径 `~/.par/config.json`。
 
 **回退方式**：若 PAR 未来暴露 bootstrap 库（library），可将三个模块迁移至
 该库的 wrapper，现有 API 不受影响。
@@ -62,7 +62,7 @@ Par_code_config, Par_code_repl），不依赖 `par_cli`。
 每版交付**一个**用户可感知的核心功能（垂直薄片，做完即可演示）；版本号最小递增，
 核心能力对齐前不升 1.0。
 
-- **v0.1.0** ✅ 项目骨架（链接 PAR SDK，`par-code --version` 可用）。
+- **v0.1.0** ✅ 项目骨架（链接 PAR SDK，`par --version` 可用）。
 - **v0.2.0** 能用：交互编码 agent（REPL + provider 配置 + read/write/edit/grep/find/bash + 流式 + 会话持久）。
 - **v0.3.0** 记得住：项目记忆（MEMORY.md + FTS5 全文检索 + memory/history 工具）。
 - **v0.4.0** 长程不断线：checkpoint-writer 子 agent + 预算式上下文注入 + 上下文重建（最硬一役，PAR 零覆盖块）。

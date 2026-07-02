@@ -6,15 +6,17 @@
 > with REPL, single-shot ask, provider configuration, PAR builtin tools,
 > streaming output, and session persistence/resume.
 
+**Rename:** command `par-code` → `par`; config dir `~/.par-code/` → `~/.par/`.
+
 ### Added
-- **REPL** (`par-code`): interactive loop with token streaming to stdout via
+- Renamed command from `par-code` to `par`; config dir from `~/.par-code/` to `~/.par/`.
+- **REPL** (`par`): interactive loop with token streaming to stdout via
   `on_chunk` callback. Coding system prompt (not a generic assistant).
-- **Single-shot mode** (`par-code ask "<question>"`): run one query and exit.
-- **Config wizard** (`par-code config`): interactive setup for provider, model,
-  API key. Config stored at `~/.par-code/config.json` (independent of PAR's
-  `~/.par/`).
-- **Session resume** (`par-code -r` most recent, `par-code -c <id>` specific).
-  DB stored at `~/.par-code/par_code.db`.
+- **Single-shot mode** (`par ask "<question>"`): run one query and exit.
+- **Config wizard** (`par config`): interactive setup for provider, model,
+  API key. Config stored at `~/.par/config.json`.
+- **Session resume** (`par -r` most recent, `par -c <id>` specific).
+  DB stored at `~/.par/par.db`.
 - **All 20 PAR builtin tools** plus bash via type-safe `install_bash_tool`.
 - **Four providers**: openai, anthropic, ollama, custom (use `+name` prefix).
 - **CLI flags**: `--provider`, `--api-key`, `--model`, `--session-id`,
@@ -32,13 +34,13 @@
 ## v0.1.0-dev — Project skeleton (UNRELEASED)
 
 > Initial public scaffolding. No agent logic yet — par-code links against the
-> PAR SDK and exposes a `par-code` executable with `--version`/`--help`. The
+> PAR SDK and exposes a `par` executable with `--version`/`--help`. The
 > interactive coding REPL lands in v0.2.0.
 
 ### Added
 - dune project (`par_code` package) depending on `par` (>= 0.6.2), cmdliner,
   eio, yojson, with generated `par_code.opam`.
-- `par-code` executable (`bin/`) with cmdliner `--version`/`--help`, CLI arg
+- `par` executable (`bin/`) with cmdliner `--version`/`--help`, CLI arg
   definitions mirroring PAR's CLI for drop-in flag compatibility.
 - `par_code` library facade (`lib/`) with `version`.
 - Alcotest harness (`test/`).
