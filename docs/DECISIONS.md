@@ -28,6 +28,32 @@
 - PAR 尚未发布到公开 opam 仓库，需 `opam pin add par https://github.com/jcz2020/par.git`。
 - GitHub Actions（`.github/workflows/ci.yml`）已推送（gh token 已补 `workflow` scope）。
 
+## [2026-07-02] Architecture: scheme-C bootstrap layer
+
+**变更前**：par-code 依赖 PAR 的 `par_cli` 可执行包提供 bootstrap 能力
+（配置解析、CLI 参数、启动流程）。
+
+**变更后**：par-code 在 `lib/` 中实现自己的内部 bootstrap 层（Par_code_setup,
+Par_code_config, Par_code_repl），不依赖 `par_cli`。
+
+**原因**：`par_cli` 是可执行包（executable package），OCaml 的 dune 构建系统
+不允许库链接可执行包。要使用 `par_cli` 的 bootstrap 能力，必须 fork 或重写，
+而非直接依赖。因此选择自建轻量 bootstrap 层，通过 PAR SDK 的库接口（而非 CLI
+接口）驱动 agent 循环。
+
+**影响范围**：
+- `lib/`：新增 Par_code_setup、Par_code_config、Par_code_repl 三个模块。
+- `bin/`：仅负责命令行参数解析和调用 lib/ 层。
+- 构建：`par_code` 库不再尝试链接 `par_cli`。
+- 用户体验：配置路径 `~/.par-code/config.json` 与 PAR 的 `~/.par/` 独立。
+
+**回退方式**：若 PAR 未来暴露 bootstrap 库（library），可将三个模块迁移至
+该库的 wrapper，现有 API 不受影响。
+
+**已知限制**：
+- 与 PAR 的 CLI flag 定义存在重复维护成本（PAR 升级 CLI 时需同步检查）。
+- 配置路径与 PAR 分离，用户需分别管理两套配置。
+
 ## Roadmap（2026-07-02 经源码核查后确认）
 
 > 先对 PAR 与对齐目标做了双侧源码逐条核查（PAR 9 大能力全部真实；目标 9 个招牌

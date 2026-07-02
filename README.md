@@ -9,9 +9,8 @@ CLI conventions and drives the full PAR surface — ReAct loop, tool dispatch,
 type-safe bash, MCP client, skills, workflows, streaming — to both ship a
 useful agent and prove out the PAR SDK in anger.
 
-**Status:** `v0.1.0-dev` — project skeleton. The `par-code` executable links
-against the PAR SDK and exposes `--version` / `--help`. The interactive REPL
-lands in `v0.2.0`.
+**Status:** `v0.2.0-dev` — interactive coding agent. par-code is a working
+REPL with provider config, builtin tools, streaming, and session persistence.
 
 ---
 
@@ -73,6 +72,19 @@ par-code/
 └── dune-project  # par_code package, depends on par (>= 0.6.2)
 ```
 
+## Quickstart
+
+```sh
+# 1. Configure a provider (interactive wizard)
+par-code config
+
+# 2. Start the REPL
+par-code
+
+# Or ask a single question
+par-code ask "What does this project do?"
+```
+
 ## Roadmap
 
 Each release ships **one** user-facing capability — a thin, demonstrable slice.
@@ -81,7 +93,7 @@ Version numbers stay minimal (no 1.0 until core parity is earned).
 | Version | User-perceivable capability |
 |---|---|
 | **v0.1.0** ✅ | Project skeleton — links the PAR SDK; `par-code --version` works. |
-| **v0.2.0** | Interactive coding agent — REPL, provider config, read/write/edit/grep/find/bash, streaming, session persistence. *"It reads and edits my code."* |
+| **v0.2.0** ✅ | Interactive coding agent — REPL, provider config, read/write/edit/grep/find/bash, streaming, session persistence. *"It reads and edits my code."* |
 | **v0.3.0** | Project memory — `MEMORY.md` + FTS5 full-text search + memory/history tools. *"It remembers my project across sessions."* |
 | **v0.4.0** | Long-session continuity — checkpoint-writer subagent, budgeted context injection, context reconstruction. *"Hours-long sessions never lose the thread."* |
 | **v0.5.0** | Plan mode — read-only plan agent, build/plan switching, plan_enter/plan_exit. *"It plans before it touches code."* |
