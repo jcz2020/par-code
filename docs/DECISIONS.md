@@ -164,3 +164,111 @@ macOS 用户也陪等。分两步是主动提议，不是被动妥协。
 
 **详细实施计划**：`.sisyphus/plans/v0.2.1.md`。
 
+## [2026-07-02] v0.2.1 范围修订：Linux + macOS only，Windows 整体推 v0.2.2
+
+**变更前**：v0.2.1 立项范围是"Linux + macOS + Windows 三平台一键安装 + 自更新"。Windows v0.2.1
+不签名、签名推 v0.2.2；macOS 不签名（架构正确）；分发产物 5 个 target（linux-x64 / linux-x64-musl /
+darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.1.md`（commit
+`acbc469`）。
+
+**变更后**：基于两份独立评审（plan 严苛性评审 + 架构评审）发现 4 个 BLOCKER 级工程根因，**v0.2.1
+范围收缩**：
+
+1. **平台收缩**：v0.2.1 只发 **Linux (x86_64, glibc ≥ 2.17) + macOS (arm64)** 两个 target。
+   Windows（含签名）整体推到 **v0.2.2**。darwin-x64（Intel Mac）由"arm64 binary 走 Rosetta"覆盖；
+   native x64 推到 v0.2.2 决策（universal lipo vs 永久 Rosetta-only）。linux-x64-musl 推到 v0.2.3
+   且要求 musl-**static**（动态 musl 只在 Alpine 能跑，几乎零价值，已从范围移除）。
+
+2. **C 库打包**（新增 IN）：v0.2.1 **bundle** `libsqlite3.so.0` + `libgmp.so.10`（Linux）/对应
+   `.dylib`（macOS）到 tarball/zip，与 `par` 同目录，RPATH 设 `$ORIGIN`（Linux）/
+   `@loader_path`（macOS）。**这一步同时是 v0.3.0 FTS5 的硬前置**（FTS5 是 sqlite3 编译期扩展；
+   若 v0.2.1 走 system sqlite，v0.3.0 必须强制用户换 FTS5-enabled libsqlite3——跨发行版不可行）。
+   典型"一次做对"原则（R3）应用：现在 bundle = v0.3.0 只重编 bundled sqlite，不是分发革命。
+
+3. **Linux 构建 base 改为 CentOS 7**（glibc 2.17，manylinux 标准）：用 `container: centos:7`
+   在 GitHub Actions 里跑。Ubuntu 22.04（glibc 2.35）构建的产物在 Ubuntu 20.04 / Debian 11 /
+   RHEL 8 上跑不起来——评审指出原 plan 的 verification #1 只测 ubuntu:22.04 = 自测自。
+
+4. **`par upgrade` 加 post-swap smoke test + rollback**：原 plan 直接 atomic replace，新版本
+   启动 crash 无回滚。修订后：replace 后 fork 子进程跑 `par --version`（3s 超时），exit≠0 则
+   reverse-swap 回 `.old` 并报错。代价 ~20 行代码，救命的鲁棒性。
+
+5. **新增 `lib/par_code_version.ml` 生成模块**：解决"`par upgrade --check` 怎么知道当前版本"
+   的实现空白。dune 规则从 `dune-project` 的 `(version)` 字段生成 `let version = "..."`。
+
+6. **完整性模型显式化**：v0.2.1 完整性 = HTTPS + checksum（**仅防传输损坏，不防 MITM**）。
+   真正的对抗完整性（签名）随 v0.2.2 Windows 一起。README + 本文件明确措辞，避免用户误以为
+   checksum 是安全保证。
+
+7. **CI cache 策略明确**：三层 cache（`setup-ocaml` 内置 + dune `_build` + PAR source pin）
+   把首次 release 从 ~30min 压到 ≤15min。
+
+8. **启动版本检查是"purely additive"**：与 v0.2.0 "frozen" Non-Goal 修订——加一条 stderr 行、
+   不阻塞、`PAR_NO_UPDATE_CHECK=1` 可关。v0.2.0 REPL/config/ask 行为不变。
+
+**原因**（评审关键发现摘要）：
+- **Windows 承诺与 fallback 矛盾**：原 plan 的 "Windows spike 失败 → WSL fallback" 是伪清晰——
+  WSL 不是 Windows-native（装机率 <5%），等于 silently 砍 Windows 但 README 还写"Works on
+  Windows"。诚实做法是显式声明 "v0.2.1 = Linux+macOS only"，Windows 整体推 v0.2.2。
+- **Linux glibc 兼容性是 silent breakage**：ubuntu-22.04 build 在企业主流发行版（Ubuntu 20.04
+  LTS、Debian 11、RHEL 8）上启动失败。必须用 CentOS 7（glibc 2.17）做 build base 才能覆盖
+  "几乎所有 Linux"。
+- **C 库不 bundle = 二进制跑不起来**：`libsqlite3.so.0` + `libgmp.so.10` 在 minimal 容器 / 企业
+  Server 上不存在。bundle 是 standard practice（Haskell Stack / Rust sqlite3 crate / esy-packed
+  都这么做）。
+- **darwin-x64 构建机制未定**：GitHub 已退役 Intel runner（`macos-13` 退出倒计时），`macos-15`
+  是 M1。产 x64 native 需双 build + lipo，复杂度不值得（Intel Mac 已 EOL，Rosetta 兼容 arm64）。
+- **musl-dynamic 几乎零价值**：原 plan 的 musl tarball 描述为"动态链接 musl"——只在 Alpine 能
+  跑，而 Alpine 用户 `apk add` 装依赖本就能用 glibc 版。真 musl 价值在 static linking，推到 v0.2.3。
+
+**R3（一次做对 vs 分两步）评估**：
+- Windows：理想态是 v0.2.1 直接三平台。分两步合法（R3 b/c/d 全满足：Windows 原生构建未验证、
+  签名基础设施账户审核延迟、用户明确指示）。第 1 步（v0.2.1 Linux+macOS）已为第 2 步（v0.2.2
+  Windows）铺路：release.yml 预留 Windows job slot、CI Docker 化方便后续加 Windows 容器、bundle
+  策略对 Windows DLL 同样适用。
+- darwin-x64：分两步合法（Rosetta 是合理桥接，非"以后再说"）。
+- sqlite3 bundle：**不分两步**——R3 直接一次做对。v0.3.0 FTS5 是真实 landmine。
+- musl-static：分两步合法（v0.2.3 独立任务，v0.2.1 不阻塞）。
+
+**R4 自问**：抛开周期，只看用户长远体验，v0.2.1 砍 Windows 还成立吗？答：成立。Windows 半
+承诺（unsigned + Defender 误报 + SmartScreen 拦截）比"v0.2.1 不发 Windows，README 明确说 v0.2.2
+带签名一起"用户体验更差。砍掉换诚实，且把签名基础设施 + Windows 原生构建验证（spike）放
+到 v0.2.2 周期里专心做。
+
+**影响范围**：
+- README 路线表：v0.2.1 描述改为"Linux + macOS"；新增 v0.2.2 行（Windows native + 签名 +
+  darwin-x64）。
+- `.sisyphus/plans/v0.2.1.md`：整体重写（279 行 → ~350 行）。新增：bundle C 库、CentOS 7
+  Docker build、post-swap smoke test、Version.ml 生成、4-wave dependency graph（移除原 spike
+  节点）、可执行 verification 21 条（含 disclosure grep 命令 + e2e upgrade 脚本 spec）、
+  CI cache 策略。
+- 不影响：v0.2.0 现有功能冻结不变（除 purely additive 启动 hook）。
+- v0.2.2 范围扩大：原仅"Windows 签名"，现 + "Windows 原生二进制 + install.ps1 + darwin-x64"。
+  v0.2.2 立项时第一动作仍是"Windows 原生构建 spike"。
+
+**回退方式**：
+- 本决策本身可逆：还原 README v0.2.1 行 + 删除本 DECISIONS 段，回到 commit `acbc469` 状态。
+- v0.2.1 实施过程中若 CentOS 7 上 OCaml 5.2 编译失败（gcc 4.8 太老）：fallback 到 Debian
+  `bullseye`（glibc 2.31，gcc 10）。在 Wave 1 决策，记录在本文件追加段。
+
+**已知限制**：
+- **Intel Mac 用户**：v0.2.1 不发 native x64 二进制，靠 Rosetta 跑 arm64。性能损失 ~20-40%，
+  对 CLI 可接受。native x64 在 v0.2.2 决策。
+- **Alpine Linux 用户**：v0.2.1 不支持（glibc-only）。v0.2.3 跟随 musl-static 一起。
+- **Windows 用户**：v0.2.1 不支持。v0.2.2 跟随签名一起（unsigned Windows 用户体验灾难，
+  必须签）。
+- **v0.2.1 完整性仅 HTTPS**：checksum 防传输损坏，不防 MITM。企业 / 高安全场景等 v0.2.2
+  签名。
+- **CentOS 7 OCaml 5.2 编译未验证**：gcc 4.8.5 可能太老。Wave 1 第一动作验证，失败则 fallback
+  Debian bullseye。
+- **bundle 后二进制 + 库体积**：估计 15-25MB。可接受，瘦身是后续可选项。
+
+**评审证据**：
+- Plan 严苛性评审（Momus）：11 BLOCKER + 12 FLAG + 15 NIT，总评 CONDITIONAL PASS。
+- 架构评审（Oracle）：4 BLOCKER（glibc 兼容、darwin-x64 runner、C 库打包、Windows spike 语义）
+  + 9 实现级 RISK + 4 可持续性 RISK，总评"不进实施，否则回炉"。
+- 本修订解决全部 4 个架构 BLOCKER + 全部 plan BLOCKER 的根因。
+
+**详细实施计划**：`.sisyphus/plans/v0.2.1.md`（已重写，反映本范围修订）。
+
+
