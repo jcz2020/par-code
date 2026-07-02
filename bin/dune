@@ -3,4 +3,4 @@
  (public_name par-code)
  (package par_code)
  (modules main cli_args)
- (libraries cmdliner par eio eio_main yojson logs))
+  (libraries cmdliner par_code par eio eio_main mirage-crypto-rng.unix yojson logs))

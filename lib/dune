@@ -2,4 +2,4 @@
  (name par_code)
  (public_name par_code)
  (wrapped false)
- (libraries par yojson))
+  (libraries par yojson eio eio_main mirage-crypto-rng.unix sqlite3 logs))
