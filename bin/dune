@@ -1,0 +1,6 @@
+(executable
+ (name main)
+ (public_name par-code)
+ (package par_code)
+ (modules main cli_args)
+ (libraries cmdliner par eio eio_main yojson logs))

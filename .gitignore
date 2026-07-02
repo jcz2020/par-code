@@ -1,0 +1,20 @@
+# Build artifacts
+_build/
+.merlin
+*.install
+
+# opam local switch
+_opam/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*~
+
+# Agent / planning state (kept out of the public repo)
+.sisyphus/
+.opencode/
+.beads/
+.dolt/
+*.db

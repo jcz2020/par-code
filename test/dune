@@ -1,0 +1,4 @@
+(test
+ (name test_par_code)
+ (libraries par_code alcotest)
+ (modules test_par_code))
