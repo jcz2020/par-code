@@ -84,6 +84,11 @@ Par_code_config, Par_code_repl），不依赖 `par_cli`。
 
 ## [2026-07-02] 路线插入 v0.2.1：一键安装 + 自更新
 
+> ⚠️ **范围已修订** — 本条的签名策略、Windows 处理、target 数量已被下一条
+> `[2026-07-02] v0.2.1 范围修订` 更新（v0.2.1 改为 Linux+macOS only，Windows
+> 整体推 v0.2.2，bundle C 库，CentOS 7 build base）。以下原文保留作历史审计；
+> **实施时以下一条为准**。
+
 **变更前**：v0.2.0 之后直接进 v0.3.0（项目记忆）。用户安装 par-code 必须先装
 OCaml + opam，再 `opam pin add par`（源码编译 PAR SDK），再装 par-code。这是当前
 最大的上手门槛。
