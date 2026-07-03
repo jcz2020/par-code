@@ -49,6 +49,8 @@ else
           | head -1 \
           | sed -E 's/\(version "([^"]+)"\)/\1/')
 fi
+# Strip leading 'v' — CI passes 'v0.2.1' but filenames want 'par-v0.2.1' not 'par-vv0.2.1'.
+VER="${VER#v}"
 [ -n "$VER" ] || die "could not determine version (pass it as \$1 or set dune-project (version ...))"
 info "version: $VER"
 

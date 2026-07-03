@@ -49,11 +49,14 @@ jobs:
 
       - name: Extract release artifacts from container
         run: |
-          VERSION=${{ github.event.inputs.version || github.ref_name }}
           id=$(docker create par-linux-builder)
-          docker cp "$id:/tmp/par-v${VERSION}-linux-x64.tar.gz" .
-          docker cp "$id:/tmp/par-v${VERSION}-linux-x64.tar.gz.sha256" .
+          # Copy everything from /tmp/ — the Dockerfile strips 'v' prefix
+          # internally, so filenames are par-v<ver>-linux-x64.tar.gz (single v).
+          mkdir -p /tmp/par-extract
+          docker cp "$id:/tmp/." /tmp/par-extract/
           docker rm "$id"
+          cp /tmp/par-extract/par-v*-linux-x64.tar.gz .
+          cp /tmp/par-extract/par-v*-linux-x64.tar.gz.sha256 .
           ls -lh par-v*.tar.gz*
 
       - name: Upload Linux artifacts

@@ -69,32 +69,11 @@ RUN eval $(opam env --switch=default) && \
 # ---------------------------------------------------------------------------
 # Stage 2: bundle binary + shared libs, patch RPATH, package tarball.
 # ---------------------------------------------------------------------------
+# Package: strip leading 'v' from VERSION (CI passes 'v0.2.1', filenames
+# want 'par-v0.2.1' not 'par-vv0.2.1').
 ARG VERSION=dev
-
-RUN mkdir -p /out && \
-    cp _build/default/bin/main.exe /out/par && \
-    cp /usr/lib64/libsqlite3.so.0 /out/ && \
-    cp /usr/lib64/libgmp.so.10 /out/ && \
-    chmod +x /out/par
-
-# Patch RPATH so the binary finds bundled libs in the same directory.
-# Single-quotes prevent shell expansion of the literal $ORIGIN.
-RUN patchelf --set-rpath '$ORIGIN' /out/par
-
-# Verify RPATH was written correctly.
-RUN readelf -d /out/par | grep -E 'RUNPATH|RPATH' | grep -q '\$ORIGIN' || \
-    { echo "ERROR: RPATH patch failed — \$ORIGIN not found in binary"; exit 1; }
-
-# Verify bundled libs resolve from $ORIGIN (not system paths).
-RUN ldd /out/par | grep -E 'libsqlite3|libgmp' && \
-    echo "Shared library resolution looks correct."
-
-# Package: flat tarball (no subdirectory) matching install.sh expectations.
-# install.sh does: tar -xzf $asset -C $PREFIX/bin — expects par, lib*.so at top level.
-RUN cd /out && \
-    tar czf "/tmp/par-v${VERSION}-linux-x64.tar.gz" par libsqlite3.so.0 libgmp.so.10 && \
-    sha256sum "/tmp/par-v${VERSION}-linux-x64.tar.gz" \
-      > "/tmp/par-v${VERSION}-linux-x64.tar.gz.sha256"
-
-# Default: print the tarball to stdout (useful with docker build --output).
-CMD ["sh", "-c", "cat /tmp/par-v${VERSION:-dev}-linux-x64.tar.gz"]
+RUN VER="${VERSION#v}" && \
+    cd /out && \
+    tar czf "/tmp/par-v${VER}-linux-x64.tar.gz" par libsqlite3.so.0 libgmp.so.10 && \
+    sha256sum "/tmp/par-v${VER}-linux-x64.tar.gz" \
+      > "/tmp/par-v${VER}-linux-x64.tar.gz.sha256"
