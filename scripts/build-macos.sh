@@ -160,7 +160,7 @@ info "patching binary dylib references ..."
 patch_ref() {
     local lib_basename="$1"
     local current
-    current=$(otool -L par | grep -E "/[^ ]*$lib_basename" | awk '{print $1}' | head -1)
+    current=$(otool -L par | grep -E "/[^ ]*$lib_basename" | awk '{print $1}' | head -1 || true)
     if [ -z "$current" ]; then
         warn "no link ref for $lib_basename in par (already @rpath?)"
         return 0

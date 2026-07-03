@@ -47,8 +47,10 @@ RUN curl -fsSL https://github.com/ocaml/opam/releases/download/2.1.5/opam-2.1.5-
     chmod +x /usr/local/bin/opam
 
 # OCaml switch. --disable-sandboxing: bubblewrap + Docker is unreliable.
+# opam 2.1.5 rejects 'switch create NAME VER --packages=X' (can't mix
+# positional version + --packages); use --packages with ocaml.VER instead.
 RUN opam init --disable-sandboxing -y --bare --no-setup && \
-    opam switch create default 5.4.0 --packages=ocaml-variants -y && \
+    opam switch create default --packages=ocaml-variants,ocaml.5.4.0 -y && \
     eval $(opam env --switch=default)
 
 # Pin the PAR SDK (not yet on the public opam repository).
