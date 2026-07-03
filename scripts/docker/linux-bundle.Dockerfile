@@ -25,25 +25,31 @@
 # ---------------------------------------------------------------------------
 FROM centos:7 AS builder
 
-# CentOS 7 reached EOL June 2024. Repoint yum repos to the vault archive.
-RUN sed -i 's|mirrorlist=|#mirrorlist=|g' /etc/yum.repos.d/CentOS-*.repo && \
-    sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*.repo
+# CentOS 7 reached EOL June 2024. Repoint ALL baseurl/mirrorlist references
+# in core + SCL repos to the vault archive. Match both active and commented
+# baseurl lines (CentOS-SCL-*.repo uses uncommented baseurl; CentOS-Base.repo
+# uses commented #baseurl — the previous sed missed the former).
+RUN for f in /etc/yum.repos.d/CentOS-*.repo /etc/yum.repos.d/CentOS-SCLo-*.repo; do \
+      [ -f "$f" ] || continue; \
+      sed -i \
+        -e 's|^mirrorlist=|#mirrorlist=|g' \
+        -e 's|^baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' \
+        -e 's|^#baseurl=http://mirror.centos.org|#baseurl=http://vault.centos.org|g' \
+        "$f"; \
+    done
 
-# EPEL (needed for patchelf and bubblewrap).
+# EPEL (needed for patchelf and bubblewrap). EPEL uses its own
+# metalink, not mirror.centos.org, so it's unaffected.
 RUN yum install -y epel-release
 
 # Base system packages (build tools, C libraries for linking).
-# centos-release-scl installs the SCL repo files (mirrorlist.centos.org is gone too).
+# centos-release-scl installs the SCL repo files (handled by the sed above).
 RUN yum install -y \
     make patch m4 perl git curl tar gzip unzip bzip2 \
     sqlite-devel gmp-devel \
     patchelf bubblewrap \
     centos-release-scl \
     && yum clean all
-
-# Fix SCL repo files (mirrorlist.centos.org is dead). Same trick as base repos.
-RUN sed -i 's|mirrorlist=|#mirrorlist=|g' /etc/yum.repos.d/CentOS-SCLo-*.repo && \
-    sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-SCLo-*.repo
 
 # devtoolset-11 (gcc 11 for OCaml 5.x's C11 atomics requirement).
 RUN yum install -y \
