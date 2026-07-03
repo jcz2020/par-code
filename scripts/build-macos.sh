@@ -113,8 +113,10 @@ find_dylib() {
 
 SQLITE_DYLIB=$(find_dylib libsqlite3.0.dylib)
 GMP_DYLIB=$(find_dylib libgmp.10.dylib)
-[ -n "$SQLITE_DYLIB" ] || die "libsqlite3.0.dylib not found on the build host — install sqlite via 'brew install sqlite'"
-[ -n "$GMP_DYLIB" ]    || die "libgmp.10.dylib not found on the build host — install gmp via 'brew install gmp'"
+[ -n "$SQLITE_DYLIB" ] || SQLITE_DYLIB=$(find_dylib libsqlite3.dylib)
+[ -n "$GMP_DYLIB" ]    || GMP_DYLIB=$(find_dylib libgmp.dylib)
+[ -n "$SQLITE_DYLIB" ] || die "libsqlite3.0.dylib / libsqlite3.dylib not found on the build host — install sqlite via 'brew install sqlite'"
+[ -n "$GMP_DYLIB" ]    || die "libgmp.10.dylib / libgmp.dylib not found on the build host — install gmp via 'brew install gmp'"
 info "sqlite3 dylib: $SQLITE_DYLIB"
 info "gmp dylib:     $GMP_DYLIB"
 
