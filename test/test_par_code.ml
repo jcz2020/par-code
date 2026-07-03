@@ -1,9 +1,9 @@
 let test_version () =
-  Alcotest.(check string) "version is 0.2.0-dev" "0.2.0-dev" Par_code.version
+  Alcotest.(check string) "version is 0.2.0-dev" "0.2.0-dev" Par_code_version.version
 
 let test_version_info_prefix () =
   Alcotest.(check bool) "version_info starts with 'par '"
-    true (Astring.String.is_prefix ~affix:"par " Par_code.version_info)
+    true (Astring.String.is_prefix ~affix:"par " Par_code_version.version_info)
 
 let test_config_paths () =
   let path = Par_code_config.config_path () in

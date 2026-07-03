@@ -78,13 +78,100 @@ let term_config =
 
 let info_config = Cmd.info "config" ~doc:"Configure provider and model settings"
 
+let cmd_upgrade check_opt to_opt uninstall_opt purge_opt =
+  if purge_opt && not uninstall_opt then begin
+    Printf.eprintf "Error: --purge requires --uninstall\n%!";
+    exit 2
+  end;
+  if uninstall_opt then begin
+    let dir = Par_code_config.config_dir () in
+    if purge_opt then begin
+      if Unix.isatty Unix.stdin then begin
+        Printf.eprintf "This will delete ALL of %s including config and sessions. Continue? [y/N] " dir;
+        match String.lowercase_ascii (String.trim (input_line stdin)) with
+        | "y" | "yes" -> ()
+        | _ -> Printf.eprintf "Aborted.\n%!"; exit 1
+      end else begin
+        Printf.eprintf "Error: --purge requires interactive terminal (stdin must be a tty)\n%!";
+        exit 2
+      end
+    end;
+    let bin = Filename.concat (Filename.concat dir "bin") "par" in
+    let cache = Filename.concat dir ".latest-cache.json" in
+    (try Sys.remove bin with _ -> ());
+    (try Sys.remove cache with _ -> ());
+    if purge_opt then begin
+      let rec rm_rf p =
+        if Sys.file_exists p then
+          if Sys.is_directory p then begin
+            Array.iter (fun e -> rm_rf (Filename.concat p e)) (Sys.readdir p);
+            Unix.rmdir p
+          end else Sys.remove p
+      in rm_rf dir
+    end;
+    Printf.printf "Uninstalled.\n%!"; exit 0
+  end;
+  if check_opt then begin
+    let cur = Par_code_upgrade.current_version () in
+    (match Par_code_upgrade.fetch_latest_tag ~timeout:2.0 () with
+     | Error `Offline ->
+       Printf.printf "current: %s\noffline — could not check latest\n%!" cur;
+       exit 1
+     | Error (`Http msg) ->
+       Printf.eprintf "Error checking latest: %s\n%!" msg;
+       exit 1
+     | Ok latest ->
+       Printf.printf "current: %s\nlatest:  %s\n%!" cur latest;
+       exit (if cur = latest then 0 else 1))
+  end;
+  match Par_code_upgrade.perform_upgrade ?target:to_opt () with
+  | Ok new_ver -> Printf.printf "Upgraded to %s\n%!" new_ver
+  | Error (`Download_failed msg) -> Printf.eprintf "Upgrade failed (download): %s\n%!" msg; exit 1
+  | Error `Checksum_mismatch -> Printf.eprintf "Upgrade failed: checksum mismatch\n%!"; exit 1
+  | Error (`Smoke_test_failed msg) -> Printf.eprintf "Upgrade failed (smoke test): %s\n%!" msg; exit 1
+
+let term_upgrade =
+  let open Term in
+  const cmd_upgrade
+  $ Cli_args.upgrade_check_arg $ Cli_args.upgrade_to_arg
+  $ Cli_args.upgrade_uninstall_arg $ Cli_args.upgrade_purge_arg
+
+let info_upgrade = Cmd.info "upgrade" ~doc:"Check for and install the latest par version"
+
 let cmd =
   Cmd.group ~default:term_chat
-    (Cmd.info "par" ~version:Par_code.version_info
+    (Cmd.info "par" ~version:Par_code_version.version_info
        ~doc:"Interactive coding agent built on the PAR SDK — run 'par' to start the REPL, 'par config' to configure, 'par ask \"question\"' for one-shot")
     [ Cmd.v info_config term_config;
-      Cmd.v info_ask term_ask; ]
+      Cmd.v info_ask term_ask;
+      Cmd.v info_upgrade term_upgrade; ]
+
+let is_chat_mode () =
+  let args = Array.to_list Sys.argv in
+  let rec scan = function
+    | [] -> true
+    | "--help" :: _ | "-h" :: _ -> false
+    | "--version" :: _ | "-v" :: _ -> false
+    | "config" :: _ | "ask" :: _ | "upgrade" :: _ -> false
+    | _ :: rest -> scan rest
+  in
+  match args with _ :: rest -> scan rest | [] -> true
+
+let maybe_check_version () =
+  match Sys.getenv_opt "PAR_NO_UPDATE_CHECK" with
+  | Some "1" | Some "true" -> ()
+  | _ ->
+    if is_chat_mode () then begin
+      (try
+         let cur = Par_code_upgrade.current_version () in
+         (match Par_code_upgrade.fetch_latest_tag ~timeout:2.0 () with
+          | Ok latest when latest <> cur ->
+            Printf.eprintf "info: par %s is available (current: %s). Run 'par upgrade'.\n%!" latest cur
+          | Ok _ | Error _ -> ())
+       with _ -> ())
+    end
 
 let () =
   if not (Unix.isatty Unix.stdout) then Unix.putenv "TERM" "dumb";
+  maybe_check_version ();
   exit (Cmd.eval cmd)

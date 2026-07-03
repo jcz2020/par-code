@@ -91,3 +91,23 @@ let question_arg =
   Arg.(value & pos_all string [] &
     info [] ~docv:"QUESTION..."
       ~doc:"Question to ask (may contain spaces)")
+
+let upgrade_check_arg =
+  let open Cmdliner in
+  Arg.(value & flag &
+    info ["check"] ~doc:"Print current vs latest version; exit 0 if up-to-date, 1 if behind")
+
+let upgrade_to_arg =
+  let open Cmdliner in
+  Arg.(value & opt (some string) None &
+    info ["to"] ~docv:"VERSION" ~doc:"Upgrade/downgrade to a specific version (e.g., v0.2.5)")
+
+let upgrade_uninstall_arg =
+  let open Cmdliner in
+  Arg.(value & flag &
+    info ["uninstall"] ~doc:"Remove the par binary and update cache (preserves config.json and par.db)")
+
+let upgrade_purge_arg =
+  let open Cmdliner in
+  Arg.(value & flag &
+    info ["purge"] ~doc:"Remove ALL of ~/.par/ including config and sessions (implies --uninstall; prompts y/N)")
