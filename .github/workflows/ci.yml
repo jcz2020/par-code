@@ -22,7 +22,7 @@ jobs:
           cache-prefix: v2-par067
       # PAR SDK is not yet on the public opam repo — pin it from source.
       - name: Pin PAR SDK
-        run: opam pin add par https://github.com/jcz2020/par.git -y || true
+        run: opam pin add par https://github.com/jcz2020/par.git -y
       - name: Install dependencies
         run: opam install . --deps-only --with-test
       - name: Build
