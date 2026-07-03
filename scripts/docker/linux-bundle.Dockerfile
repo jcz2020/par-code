@@ -36,7 +36,7 @@ FROM almalinux:8 AS builder
 RUN dnf config-manager --set-enabled powertools || true && \
     dnf install -y epel-release && \
     dnf install -y \
-      gcc gcc-c++ make patch m4 perl git curl tar gzip unzip bzip2 \
+      gcc gcc-c++ make patch m4 perl git curl tar gzip unzip bzip2 diffutils \
       sqlite-devel gmp-devel \
       patchelf bubblewrap \
     && dnf clean all

@@ -111,15 +111,17 @@ find_dylib() {
     # `|| true` defeats pipefail: `head -1` closes find's stdin, find exits
     # 141 (SIGPIPE), pipefail propagates the failure, set -e kills the script
     # before the caller's fallback lookup runs.
-    find /usr/lib /usr/local/lib /opt/homebrew/lib -name "$name" 2>/dev/null | head -1 || true
+    find /usr/lib /usr/local/lib /opt/homebrew/lib /Library/Apple/usr/lib -name "$name" 2>/dev/null | head -1 || true
 }
 
 SQLITE_DYLIB=$(find_dylib libsqlite3.0.dylib)
 GMP_DYLIB=$(find_dylib libgmp.10.dylib)
 [ -n "$SQLITE_DYLIB" ] || SQLITE_DYLIB=$(find_dylib libsqlite3.dylib)
 [ -n "$GMP_DYLIB" ]    || GMP_DYLIB=$(find_dylib libgmp.dylib)
-[ -n "$SQLITE_DYLIB" ] || die "libsqlite3.0.dylib / libsqlite3.dylib not found on the build host — install sqlite via 'brew install sqlite'"
-[ -n "$GMP_DYLIB" ]    || die "libgmp.10.dylib / libgmp.dylib not found on the build host — install gmp via 'brew install gmp'"
+# Last-resort: brew --prefix sqlite (Homebrew's install dir for sqlite keg).
+[ -n "$SQLITE_DYLIB" ] || SQLITE_DYLIB=$(find "$(brew --prefix sqlite 2>/dev/null)/lib" -name 'libsqlite3*.dylib' 2>/dev/null | head -1 || true)
+[ -n "$SQLITE_DYLIB" ] || die "libsqlite3*.dylib not found on the build host — install sqlite via 'brew install sqlite'"
+[ -n "$GMP_DYLIB" ]    || die "libgmp*.dylib not found on the build host — install gmp via 'brew install gmp'"
 info "sqlite3 dylib: $SQLITE_DYLIB"
 info "gmp dylib:     $GMP_DYLIB"
 
