@@ -59,22 +59,22 @@ command -v zip                >/dev/null || die "zip not found"
 
 # Bundle C dylibs (libsqlite3 + libgmp). macos-15 GitHub runners do NOT
 # ship these by default — install via brew if missing. Idempotent: skip
-# if present.
+# if present. Accept both naming styles:
+#   - Apple system layout: libsqlite3.0.dylib (with .0 version suffix)
+#   - Homebrew layout:     libsqlite3.dylib   (no version suffix, dylib symlink)
+# We probe both in find_dylib below.
 install_dylib() {
-    local pkg="$1" dylib="$2"
-    if ! find_dylib_quick "$dylib" >/dev/null; then
-        info "installing $pkg via brew (provides $dylib) ..."
+    local pkg="$1" name_no_ver="$2" name_with_ver="$3"
+    if find_dylib "$name_with_ver" 2>/dev/null | head -1 | grep -q . \
+       || find_dylib "$name_no_ver" 2>/dev/null | head -1 | grep -q .; then
+        info "$pkg dylib already present"
+    else
+        info "installing $pkg via brew ..."
         brew install "$pkg" || die "brew install $pkg failed"
     fi
 }
-find_dylib_quick() {
-    for p in "/opt/homebrew/lib/$1" "/usr/local/lib/$1"; do
-        [ -f "$p" ] && return 0
-    done
-    return 1
-}
-install_dylib sqlite libsqlite3.0.dylib
-install_dylib gmp    libgmp.10.dylib
+install_dylib sqlite libsqlite3.dylib libsqlite3.0.dylib
+install_dylib gmp    libgmp.dylib    libgmp.10.dylib
 
 # --- build -------------------------------------------------------------------
 
