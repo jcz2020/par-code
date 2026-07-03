@@ -384,4 +384,30 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 - checksums.txt 与二进制同 release——MITM 攻击者可同时替换。GitHub Releases 的 HTTPS 是唯一防线。
 - 没有 key rotation 机制——签名基础设施落地时（v0.2.2）再设计。
 
+## [2026-07-03] Linux bundle base 从 CentOS 7 + devtoolset-11 切换到 AlmaLinux 8
+
+> ⚠️ **取代上一条** `[2026-07-03] Linux bundle base: CentOS 7 + devtoolset-11`。以下为实际发布采用的决策。
+
+**变更前**：v0.2.1 计划使用 `centos:7` + SCL `devtoolset-11`（gcc 11 via Software Collections），glibc 2.17 baseline。
+
+**变更后**：改用 `almalinux:8`（stock gcc 8.5，glibc 2.28 baseline）。不再需要 SCL / devtoolset。
+
+**原因**：
+- CentOS 7 于 2024-06-30 EOL，`mirrorlist.centos.org` DNS 已下线。
+- `vault.centos.org` 的 SCL 仓库路径不稳定——在 5 轮 CI 迭代中均无法可靠拉取 devtoolset-11。
+- AlmaLinux 8 是 CentOS 8 的社区后继，stock gcc 8.5 已满足 OCaml 5.x 的 C11 atomics 要求（gcc ≥ 4.9），无需 SCL。
+- glibc 从 2.17 升到 2.28：失去 CentOS 7 / Debian 10 / Ubuntu 18.04 用户（均已 EOL）。
+
+**影响范围**：
+- `scripts/docker/linux-bundle.Dockerfile`：`FROM almalinux:8`，`dnf install gcc`（不再需要 `scl enable devtoolset-11`）。
+- README / CHANGES.md：Linux 需求从 glibc ≥ 2.17 改为 glibc ≥ 2.28。
+- `release.yml`：step name 从 "CentOS 7" 改为 "AlmaLinux 8"。
+
+**回退方式**：还原 Dockerfile 为 `FROM centos:7` + SCL 方案（但 CentOS 7 vault 不稳定，不推荐）。
+
+**已知限制**：
+- CentOS 7 / Debian 10 / Ubuntu 18.04 用户无法使用预编译二进制（均已 EOL）。
+- 如未来需要覆盖 glibc < 2.28 的发行版，需引入 musl-static 构建（v0.2.3 计划）。
+
+
 

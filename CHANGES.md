@@ -3,7 +3,7 @@
 ## v0.2.1 — One-line install & self-update
 
 > Distribution release. par-code now ships pre-built binaries for Linux (x86_64,
-> glibc ≥ 2.17) and macOS (arm64). Users install with a single `curl | bash`
+> glibc ≥ 2.28) and macOS (arm64). Users install with a single `curl | bash`
 > command — no OCaml/opam prerequisite. The new `par upgrade` subcommand keeps
 > installations current without a package manager.
 
@@ -21,10 +21,10 @@
   newer version exists, gated by `PAR_NO_UPDATE_CHECK=1`, never blocks, never
   crashes on network failure, fires only in default chat mode (not for
   `par config`, `par ask`, `par --version`, etc.).
-- **Pre-built Linux binary** (CentOS 7 + devtoolset-11 build base, glibc ≥ 2.17
+- **Pre-built Linux binary** (AlmaLinux 8 build base, glibc ≥ 2.28
   baseline). Bundles `libsqlite3.so.0` + `libgmp.so.10` with `$ORIGIN` RPATH via
-  patchelf. devtoolset-11 is required because OCaml 5.x's configure hard-rejects
-  gcc < 4.9; CentOS 7's stock gcc 4.8.5 fails.
+  patchelf. AlmaLinux 8's stock gcc 8.5 satisfies OCaml 5.x's C11 atomics
+  requirement; no SCL/devtoolset needed.
 - **Pre-built macOS arm64 binary**. Bundles `libsqlite3.0.dylib` +
   `libgmp.10.dylib` with `@loader_path` RPATH via `install_name_tool`.
 - **Generated version module** (`lib/par_code_version.ml`): emitted at build
@@ -38,7 +38,7 @@
   verification via `Digestif.SHA256`. No shell-out to curl.
 - **CI release pipeline** (`.github/workflows/release.yml`): tag-triggered on
   `v[0-9]+.[0-9]+.[0-9]+` (excludes pre-release tags). Three jobs: build-linux
-  (docker build via CentOS 7 Dockerfile), build-macos (macos-15 runner),
+  (docker build via AlmaLinux 8 Dockerfile), build-macos (macos-15 runner),
   coordinate (concatenate checksums, upload install.sh, create GitHub Release
   via pinned `softprops/action-gh-release@<sha>`). Workflow-dispatch with
   version input for manual re-runs.

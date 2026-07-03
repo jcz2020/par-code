@@ -45,7 +45,7 @@ self-update. No OCaml or opam needed for end users.
 
 ### One-line installer (Linux + macOS)
 
-**Linux** (x86_64, glibc >= 2.17 — covers CentOS 7+, Debian 10+, Ubuntu 18.04+, RHEL 8+, Fedora, Arch, etc.):
+**Linux** (x86_64, glibc >= 2.28 — covers AlmaLinux 8+, Debian 11+, Ubuntu 20.04+, RHEL 8+, Fedora, Arch, etc.):
 
 ```sh
 curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.sh | bash
@@ -99,7 +99,7 @@ exists (gated by `PAR_NO_UPDATE_CHECK=1`).
 
 | Platform | v0.2.1 status | Notes |
 |---|---|---|
-| Linux x86_64 (glibc >= 2.17) | ✅ Pre-built binary | Covers virtually all modern Linux distros |
+| Linux x86_64 (glibc >= 2.28) | ✅ Pre-built binary | Covers AlmaLinux 8+, Debian 11+, Ubuntu 20.04+, RHEL 8+, Fedora |
 | macOS arm64 (Apple Silicon) | ✅ Pre-built binary | Native |
 | macOS x86_64 (Intel) | ✅ Via Rosetta 2 | Same arm64 binary; ~20-40% performance penalty (acceptable for CLI) |
 | Windows x86_64 | ❌ Not in v0.2.1 | Native binary + code signing ship together in v0.2.2 |
@@ -171,7 +171,7 @@ Version numbers stay minimal (no 1.0 until core parity is earned).
 |---|---|
 | **v0.1.0** ✅ | Project skeleton — links the PAR SDK; `par --version` works. |
 | **v0.2.0** ✅ | Interactive coding agent — REPL, provider config, read/write/edit/grep/find/bash, streaming, session persistence. *"It reads and edits my code."* |
-| **v0.2.1** ✅ | One-line install & self-update (Linux + macOS) — `curl … \| bash`, no OCaml/opam required; pre-built binaries bundle sqlite3 + libgmp for true portability (glibc ≥ 2.17); `par upgrade` keeps it current. *"Install in one line. Updates itself."* |
+| **v0.2.1** ✅ | One-line install & self-update (Linux + macOS) — `curl … \| bash`, no OCaml/opam required; pre-built binaries bundle sqlite3 + libgmp for true portability (glibc ≥ 2.28); `par upgrade` keeps it current. *"Install in one line. Updates itself."* |
 | **v0.2.2** | Windows native + code signing — `irm … \| iex` installer, signed Windows binary via cloud signing service; darwin-x64 (universal binary or Rosetta-only formalized). *"It runs on Windows too."* |
 | **v0.3.0** | Project memory — `MEMORY.md` + FTS5 full-text search + memory/history tools. *"It remembers my project across sessions."* |
 | **v0.4.0** | Long-session continuity — checkpoint-writer subagent, budgeted context injection, context reconstruction. *"Hours-long sessions never lose the thread."* |
