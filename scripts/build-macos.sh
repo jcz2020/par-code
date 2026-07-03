@@ -175,6 +175,11 @@ patch_ref() {
 patch_ref libsqlite3.0.dylib
 patch_ref libgmp.10.dylib
 
+# par may link Apple's system /usr/lib/libsqlite3.dylib (no version suffix)
+# instead of Homebrew's libsqlite3.0.dylib. Rewrite it to @rpath so the
+# bundled libsqlite3.0.dylib is used at runtime.
+install_name_tool -change /usr/lib/libsqlite3.dylib @rpath/libsqlite3.0.dylib par 2>/dev/null || true
+
 # --- verify ------------------------------------------------------------------
 
 info "otool -L par (post-patch):"
