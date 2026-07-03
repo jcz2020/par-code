@@ -1,0 +1,161 @@
+# release.yml — tag-triggered multi-platform release pipeline for par-code.
+#
+# Triggered on stable version tags (v*.*.* only, NOT pre-releases like v0.2.1-rc1).
+# Also supports manual workflow_dispatch for re-runs.
+#
+# Jobs:
+#   build-linux   — CentOS 7 + devtoolset-11 Docker build, bundles C libs
+#   build-macos   — macos-15 runner, bundles dylibs via install_name_tool
+#   coordinate    — downloads artifacts, concatenates checksums, creates GitHub Release
+
+name: Release
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']  # stable releases only — no pre-release tags
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag to release (e.g., v0.2.1)'
+        required: true
+        type: string
+
+# Never cancel a release in flight.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write  # needed for creating GitHub Releases
+
+jobs:
+  # =========================================================================
+  # Job 1: Linux x86_64 — build inside CentOS 7 container for max compat
+  # =========================================================================
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Build par-code in CentOS 7 container
+        run: |
+          docker build \
+            -f scripts/docker/linux-bundle.Dockerfile \
+            --build-arg VERSION=${{ github.event.inputs.version || github.ref_name }} \
+            -t par-linux-builder \
+            .
+
+      - name: Extract release artifacts from container
+        run: |
+          VERSION=${{ github.event.inputs.version || github.ref_name }}
+          id=$(docker create par-linux-builder)
+          docker cp "$id:/tmp/par-v${VERSION}-linux-x64.tar.gz" .
+          docker cp "$id:/tmp/par-v${VERSION}-linux-x64.tar.gz.sha256" .
+          docker rm "$id"
+          ls -lh par-v*.tar.gz*
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: linux-x64-artifact
+          path: |
+            par-v*-linux-x64.tar.gz
+            par-v*-linux-x64.tar.gz.sha256
+          retention-days: 7
+
+  # =========================================================================
+  # Job 2: macOS arm64 — build on macos-15 runner, bundle dylibs
+  # =========================================================================
+  build-macos:
+    runs-on: macos-15
+    env:
+      ORIGINAL_CWD: ${{ github.workspace }}  # contract with build-macos.sh
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0
+
+      # Cache layer 1: setup-ocaml internal cache (dune-cache: true)
+      - uses: ocaml/setup-ocaml@373b552c174ac93d90f860bcb385fd2691be06e6  # v3.2.0
+        with:
+          ocaml-compiler: '5.4.0'
+          dune-cache: true
+          opam-disable-sandboxing: true  # runner already sandboxed
+
+      # Cache layer 2: dune _build directory keyed on OCaml source
+      - uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57  # v4.2.0
+        with:
+          path: _build/
+          key: dune-build-${{ runner.os }}-${{ hashFiles('**/*.ml', '**/*.mli', 'par_code.opam') }}
+          restore-keys: |
+            dune-build-${{ runner.os }}-
+
+      # Pin PAR SDK (not yet on public opam repository).
+      - name: Pin PAR SDK
+        run: opam pin add par https://github.com/jcz2020/par.git -y
+
+      - name: Build + bundle + package
+        run: bash scripts/build-macos.sh ${{ github.event.inputs.version || github.ref_name }}
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: darwin-arm64-artifact
+          path: |
+            par-v*-darwin-arm64.zip
+            par-v*-darwin-arm64.zip.sha256
+          retention-days: 7
+
+  # =========================================================================
+  # Job 3: Coordinate — assemble release assets + publish GitHub Release
+  # =========================================================================
+  coordinate:
+    needs: [build-linux, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          path: artifacts/
+
+      - name: Flatten artifacts and concatenate checksums
+        run: |
+          # Move all release files to workspace root
+          find artifacts/ -type f -name 'par-v*' -exec cp {} . \;
+
+          # checksums.sh expects checksum-*.txt files, not *.sha256.
+          # Rename to match the expected glob pattern.
+          for f in par-v*.sha256; do
+            [ -f "$f" ] || continue
+            name=$(basename "$f" .sha256)
+            platform=$(echo "$name" | sed 's/par-v[^-]*-//')
+            cp "$f" "checksum-${platform}.txt"
+          done
+
+          # Concatenate into single checksums.txt
+          bash scripts/checksums.sh
+
+          echo "--- Release assets ---"
+          ls -lh par-v*.tar.gz par-v*.zip checksums.txt scripts/install.sh
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631  # v2.2.2
+        with:
+          tag_name: ${{ github.event.inputs.version || github.ref_name }}
+          name: ${{ github.event.inputs.version || github.ref_name }}
+          files: |
+            par-v*-linux-x64.tar.gz
+            par-v*-linux-x64.tar.gz.sha256
+            par-v*-darwin-arm64.zip
+            par-v*-darwin-arm64.zip.sha256
+            checksums.txt
+            scripts/install.sh
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
