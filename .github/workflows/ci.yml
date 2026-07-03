@@ -19,6 +19,7 @@ jobs:
         with:
           ocaml-compiler: 5.4.0
           dune-cache: true
+          cache-prefix: v2-par067
       # PAR SDK is not yet on the public opam repo — pin it from source.
       - name: Pin PAR SDK
         run: opam pin add par https://github.com/jcz2020/par.git -y || true
