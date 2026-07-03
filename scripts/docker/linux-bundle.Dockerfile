@@ -69,9 +69,24 @@ RUN eval $(opam env --switch=default) && \
 # ---------------------------------------------------------------------------
 # Stage 2: bundle binary + shared libs, patch RPATH, package tarball.
 # ---------------------------------------------------------------------------
+ARG VERSION=dev
+
+RUN mkdir -p /out && \
+    cp _build/default/bin/main.exe /out/par && \
+    cp /usr/lib64/libsqlite3.so.0 /out/ && \
+    cp /usr/lib64/libgmp.so.10 /out/ && \
+    chmod +x /out/par
+
+RUN patchelf --set-rpath '$ORIGIN' /out/par
+
+RUN readelf -d /out/par | grep -E 'RUNPATH|RPATH' | grep -q '\$ORIGIN' || \
+    { echo "ERROR: RPATH patch failed"; exit 1; }
+
+RUN ldd /out/par | grep -E 'libsqlite3|libgmp' && \
+    echo "Shared library resolution looks correct."
+
 # Package: strip leading 'v' from VERSION (CI passes 'v0.2.1', filenames
 # want 'par-v0.2.1' not 'par-vv0.2.1').
-ARG VERSION=dev
 RUN VER="${VERSION#v}" && \
     cd /out && \
     tar czf "/tmp/par-v${VER}-linux-x64.tar.gz" par libsqlite3.so.0 libgmp.so.10 && \
