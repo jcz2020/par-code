@@ -33,13 +33,16 @@ FROM almalinux:8 AS builder
 # C11 atomics (>= gcc 4.9) so no SCL/devtoolset dance is required.
 # - `dnf config-manager --set-enabled powertools`: libsqlite3-devel lives in PowerTools.
 # - `bubblewrap`: needed for `opam init` (opam sandboxing).
-# - `patchelf`: patches the ELF RPATH post-build.
+# - `patchelf`: NOT in AlmaLinux base; fetch the prebuilt static binary from
+#   upstream's GitHub release (single ELF, no install needed).
 RUN dnf config-manager --set-enabled powertools || true && \
     dnf install -y \
       gcc gcc-c++ make patch m4 perl git curl tar gzip unzip bzip2 \
       sqlite-devel gmp-devel \
-      patchelf bubblewrap \
-    && dnf clean all
+      bubblewrap \
+    && dnf clean all && \
+    curl -fsSL https://github.com/NixOS/patchelf/releases/download/0.18.0/patchelf-0.18.0-x86_64.tar.gz \
+      | tar -xz -C /usr/local/bin --strip-components=1 patchelf-0.18.0-x86_64/bin/patchelf
 
 # opam binary (pinned to 2.1.5 stable).
 RUN curl -fsSL https://github.com/ocaml/opam/releases/download/2.1.5/opam-2.1.5-x86_64-linux \
