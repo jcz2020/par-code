@@ -32,13 +32,21 @@ RUN sed -i 's|mirrorlist=|#mirrorlist=|g' /etc/yum.repos.d/CentOS-*.repo && \
 # EPEL (needed for patchelf and bubblewrap).
 RUN yum install -y epel-release
 
-# System packages: build tools, C libraries for linking, and SCL toolchain.
+# Base system packages (build tools, C libraries for linking).
+# centos-release-scl installs the SCL repo files (mirrorlist.centos.org is gone too).
 RUN yum install -y \
     make patch m4 perl git curl tar gzip unzip bzip2 \
     sqlite-devel gmp-devel \
     patchelf bubblewrap \
     centos-release-scl \
-    && yum install -y \
+    && yum clean all
+
+# Fix SCL repo files (mirrorlist.centos.org is dead). Same trick as base repos.
+RUN sed -i 's|mirrorlist=|#mirrorlist=|g' /etc/yum.repos.d/CentOS-SCLo-*.repo && \
+    sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-SCLo-*.repo
+
+# devtoolset-11 (gcc 11 for OCaml 5.x's C11 atomics requirement).
+RUN yum install -y \
     devtoolset-11-gcc \
     devtoolset-11-gcc-c++ \
     devtoolset-11-binutils \

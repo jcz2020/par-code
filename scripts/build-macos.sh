@@ -30,6 +30,7 @@
 #                     If omitted, version is read from dune-project.
 
 set -euo pipefail
+set -x  # echo every command for CI debugging
 
 # --- helpers -----------------------------------------------------------------
 
