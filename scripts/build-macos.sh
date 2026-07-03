@@ -108,7 +108,10 @@ find_dylib() {
         "/usr/local/lib/$name"; do
         [ -f "$p" ] && { printf '%s\n' "$p"; return 0; }
     done
-    find /usr/lib /usr/local/lib /opt/homebrew/lib -name "$name" 2>/dev/null | head -1
+    # `|| true` defeats pipefail: `head -1` closes find's stdin, find exits
+    # 141 (SIGPIPE), pipefail propagates the failure, set -e kills the script
+    # before the caller's fallback lookup runs.
+    find /usr/lib /usr/local/lib /opt/homebrew/lib -name "$name" 2>/dev/null | head -1 || true
 }
 
 SQLITE_DYLIB=$(find_dylib libsqlite3.0.dylib)
