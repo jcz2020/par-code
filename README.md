@@ -3,14 +3,15 @@
 > An interactive coding agent built on the [PAR](https://github.com/jcz2020/par)
 > SDK — and a real-world validation case for PAR itself.
 
-`par-code` is a terminal coding assistant (Claude-Code-style) implemented in
+`par-code` is a terminal coding assistant (terminal-native, REPL-first) implemented in
 OCaml on top of the **PAR (Programmable Agent Runtime)** SDK. It inherits PAR's
 CLI conventions and drives the full PAR surface — ReAct loop, tool dispatch,
 type-safe bash, MCP client, skills, workflows, streaming — to both ship a
 useful agent and prove out the PAR SDK in anger.
 
-**Status:** `v0.2.0-dev` — interactive coding agent. par-code is a working
-REPL with provider config, builtin tools, streaming, and session persistence.
+**Status:** `v0.2.1-dev` — distribution release. pre-built binaries with a
+one-line installer (`curl | bash`) for Linux + macOS, plus `par upgrade`
+self-update. No OCaml or opam needed for end users.
 
 ---
 
@@ -42,8 +43,86 @@ REPL with provider config, builtin tools, streaming, and session persistence.
 
 ## Install
 
-par-code depends on the PAR SDK, which is **not yet on the public opam
-repository**. Install it from source first:
+### One-line installer (Linux + macOS)
+
+**Linux** (x86_64, glibc >= 2.17 — covers CentOS 7+, Debian 10+, Ubuntu 18.04+, RHEL 8+, Fedora, Arch, etc.):
+
+```sh
+curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.sh | bash
+```
+
+**macOS** (arm64 Apple Silicon; Intel Mac runs via Rosetta 2):
+
+```sh
+curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.sh | bash
+```
+
+This downloads a pre-built `par` binary with `libsqlite3` + `libgmp` bundled
+alongside it (no system prerequisites). The binary lands at `~/.par/bin/par`.
+The installer offers to add `~/.par/bin` to your shell's PATH.
+
+**Custom install prefix or version:**
+
+```sh
+# Custom install location
+curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.sh | bash -s -- --prefix /opt/par
+
+# Pin to a specific version
+curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.sh | bash -s -- --version v0.2.1
+```
+
+**Environment variables:**
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `PAR_PREFIX` | `$HOME/.par` | Install directory override |
+| `PAR_MIRROR` | `github.com` | Mirror host (for CN/enterprise users with restricted GitHub access) |
+| `PAR_NO_UPDATE_CHECK` | unset | Set to `1` to disable the startup version check entirely |
+| `PAR_DISABLE_UPDATE_CHECK` | unset | Set to `1` when invoking `install.sh` from `par upgrade` |
+
+### Self-update
+
+Once installed, `par upgrade` keeps you current without a package manager:
+
+```sh
+par upgrade                 # upgrade to latest release
+par upgrade --check         # print current vs latest, exit 0 if up-to-date
+par upgrade --to v0.2.5     # pin to a specific version (downgrades too)
+par upgrade --uninstall     # remove par binary (preserves ~/.par/config.json + par.db)
+par upgrade --uninstall --purge  # remove ALL of ~/.par/ (interactive prompt)
+```
+
+A purely-additive startup check prints one stderr line when a newer version
+exists (gated by `PAR_NO_UPDATE_CHECK=1`).
+
+### Platform support
+
+| Platform | v0.2.1 status | Notes |
+|---|---|---|
+| Linux x86_64 (glibc >= 2.17) | ✅ Pre-built binary | Covers virtually all modern Linux distros |
+| macOS arm64 (Apple Silicon) | ✅ Pre-built binary | Native |
+| macOS x86_64 (Intel) | ✅ Via Rosetta 2 | Same arm64 binary; ~20-40% performance penalty (acceptable for CLI) |
+| Windows x86_64 | ❌ Not in v0.2.1 | Native binary + code signing ship together in v0.2.2 |
+| Alpine Linux (musl) | ❌ Not in v0.2.1 | Static musl binary is a v0.2.3 stretch goal |
+
+### Integrity model
+
+v0.2.1 downloads are protected by HTTPS + GitHub infrastructure + SHA256
+checksum. This catches **transport corruption** (truncated downloads, bit rot)
+but does **not** defend against a determined network attacker (the checksum
+file ships in the same release as the binary; a MITM who can swap one can swap
+both). Real adversarial integrity (signed checksums via cosign/sigstore, signed
+Windows binaries) lands in v0.2.2 alongside Windows support.
+
+macOS binaries are not code-signed in v0.2.1 — this is architecturally correct
+for a CLI installed via `curl | bash` (it never passes through the OS gatekeeper,
+which only intercepts `.app` bundles and browser-downloaded files with quarantine
+attribute). The installer strips `com.apple.quarantine` xattr for the
+browser-download edge case.
+
+### Developer install (from source)
+
+For contributors who want to build par-code from source (requires OCaml 5.x + opam):
 
 ```sh
 # 1. PAR SDK (once)
@@ -54,11 +133,8 @@ git clone https://github.com/jcz2020/par-code.git
 cd par-code
 opam install . --deps-only --with-test
 dune build
-```
 
-Run:
-
-```sh
+# Run
 dune exec -- par --version
 ```
 
@@ -66,10 +142,11 @@ dune exec -- par --version
 
 ```
 par-code/
-├── bin/          # `par` executable + CLI args (mirrors PAR's bin/)
-├── lib/          # `par_code` library facade (agent helpers land here)
+├── bin/          # `par` executable + CLI args
+├── lib/          # `par_code` library facade
+├── scripts/      # install.sh, build-macos.sh, docker/, checksums.sh
 ├── test/         # Alcotest suite
-└── dune-project  # par_code package, depends on par (>= 0.6.2)
+└── dune-project
 ```
 
 ## Quickstart

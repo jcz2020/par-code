@@ -276,4 +276,112 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 
 **详细实施计划**：`.sisyphus/plans/v0.2.1.md`（已重写，反映本范围修订）。
 
+## [2026-07-03] Linux bundle base: CentOS 7 + devtoolset-11
+
+**变更前**：v0.2.1 计划假设 `centos:7` Docker base + 系统 gcc 4.8.5 即可编译 OCaml 5.x，glibc 2.17 baseline。
+
+**变更后**：发现 OCaml 5.x 的 configure.ac 硬性拒绝 gcc < 4.9（exit code 69），原因：OCaml 5.x 运行时依赖 C11 `_Atomic` 与 `<stdatomic.h>`，gcc 4.8 不支持 C11。解决方案：在 `centos:7` 上安装 Software Collections（SCL）的 `devtoolset-11-gcc` + `devtoolset-11-gcc-c++`，构建命令用 `scl enable devtoolset-11 bash -c '...'` 包装获得 gcc 11。**glibc baseline 不变**（仍为 2.17，由 base image 决定），仅升级编译器。
+
+**原因**：
+- OCaml 5.x configure step 在 gcc 4.8.x 上直接 fail，不可绕过。
+- CentOS 7 的 gcc 4.8.5 是系统默认，无法通过简单 yum upgrade 升级。
+- SCL（Software Collections）是 Red Hat 官方支持的并行工具链方案，与 manylinux2014 wheel 构建使用的方法相同。
+- 替代方案比较：(A) `debian:bullseye`（glibc 2.31，丢失 CentOS 7/Debian 10/Ubuntu 18.04 用户）;(C) `almalinux:8`（glibc 2.28，丢失 CentOS 7 用户）。Option B 是唯一保留原 plan "覆盖几乎所有 Linux" 承诺的方案。
+
+**影响范围**：
+- `scripts/docker/linux-bundle.Dockerfile`：base image 不变（仍 `FROM centos:7`），增加 EPEL + SCL 安装步骤，所有 build 命令在 `scl enable devtoolset-11` 子 shell 内执行。
+- `release.yml`（待 Wave 3 编写）：build-linux job 引用此 Dockerfile，无需特殊改动。
+- README（待 Wave 4 编写）：Linux 系统需求仍为 glibc ≥ 2.17，不变。
+- `docs/STRATEGY.md` §Release Strategy：Linux baseline 仍为 glibc 2.17，不变。
+
+**回退方式**：
+- 若 SCL 在某些 CentOS 7 衍生镜像（Oracle Linux 7、Amazon Linux 2）上不可用：fallback 到 Option A `debian:bullseye`，README 改写 Linux 需求为 glibc ≥ 2.31，损失约 5-10% Linux 用户（CentOS 7/Debian 10/Ubuntu 18.04）。
+- 若 devtoolset-11 不稳定：降级到 devtoolset-9（gcc 9，仍满足 C11 要求）。
+
+**已知限制**：
+- CentOS 7 已于 2024-06-30 EOL，`yum` 默认 repo 失效，需 sed 改道 `vault.centos.org`。
+- `bubblewrap`（opam 沙箱依赖）在 CentOS 7 + Docker 组合下不稳，故构建用 `opam init --disable-sandboxing` 绕过。
+- SCL 安装会增加 Docker 构建时间约 1-2 分钟（首次），通过 CI cache 缓解。
+- 此方案仅解决"编译"问题；运行时不需要 SCL（最终用户的机器无需安装 devtoolset）。
+
+## [2026-07-03] par_code_upgrade.ml HTTP client: Cohttp_eio.Client.call (GET via Par.Http_client TLS)
+
+**变更前**：v0.2.1 plan §Pillar 3 设想 `par_code_upgrade.ml` 使用 `Par.Http_client.do_request` 发 HTTP 请求。
+
+**变更后**：发现 `Par.Http_client.do_request` **硬编码 POST method**（http_client.ml:317，POST 是 `Cohttp_eio.Client.call` 的固定参数）。GET 请求（GitHub Releases API 的 `/releases/latest`、二进制资产下载）需要直接使用 `Cohttp_eio.Client.call ~sw ~headers client \`GET uri`。TLS 配置仍复用 PAR 的 `Par.Http_client.tls_config`（lazy_t）与 `tls_host_of_string`；构造 cohttp-eio client 时传入本地 `tls_wrapper` 复用 PAR 的 TLS 上下文。
+
+**原因**：
+- `Par.Http_client.do_request` 的签名 + 实现都是 POST-only，GET 路径不可达。
+- 改 PAR SDK 暴露 GET 是 PAR 上游的决策（v0.6.6+ 候选项），par-code 不应为此阻塞。
+- `cohttp-eio` 是 PAR 的既有 transitive 依赖（PAR 的 http_client.ml 已经使用），par-code 链接 par 时已经间接拉入 cohttp-eio 的代码；显式声明它为 par-code 的 direct 依赖只是把"既成事实"写进 manifest。
+
+**影响范围**：
+- `lib/dune`：`libraries` 字段增加 `cohttp-eio`、`tls-eio`、`digestif`（digestif 用于 SHA256 校验，与 HTTP 无关但同期加入）。
+- `dune-project` 的 `(package ... (depends ...))`：必须增加 `cohttp-eio`、`tls-eio`、`digestif`（W4-T4 配套修改），以保持 `par_code.opam` 元数据完整。
+- `lib/par_code_upgrade.ml`：`tls_wrapper` + `make_client` + `http_get` 三个本地 helper 直接使用 `Cohttp_eio.Client.call` + `Par.Http_client.tls_config`。
+- 用户安装路径：`opam install par-code` 会显式安装这三个包（之前作为 par 的 transitive deps 也会安装，差异仅在 manifest 元数据）。
+- 退役条件：当 PAR SDK v0.6.6+ 暴露 GET-able HTTP 接口时，把 `par_code_upgrade.ml` 改回使用 `Par.Http_client.do_request`，并把 `cohttp-eio`、`tls-eio` 从 par-code 的 direct deps 移除（恢复为 transitive）。
+
+**回退方式**：
+- 完全可逆：删除 `lib/dune` 中的 3 个 libraries 条目，删除 `dune-project` depends 中的对应条目，删除 `par_code_upgrade.ml` 中的 `tls_wrapper`/`make_client`/`http_get` helper。回到没有 upgrade 模块的状态。
+
+**已知限制**：
+- 显式 direct dep 会触发 opam solver 在 par-code 单独安装时（无 par）尝试拉 cohttp-eio，但 cohttp-eio 在 opam repo 一直存在，不会引入安装失败。
+- 如果 PAR SDK 未来 rename 或 restructure 其 Http_client 模块，par-code 的 `tls_wrapper` 需要同步调整。这是 par-code 与 PAR 的既有耦合（不是新引入的）。
+
+## [2026-07-03] Bundle libsqlite3 + libgmp next to `par` binary (R3 "do it right once")
+
+**变更前**：v0.2.0 阶段，par-code 假设用户机器上有 `libsqlite3.so.0` 和 `libgmp.so.10`（通过 opam 系统依赖声明）。
+
+**变更后**：v0.2.1 预编译二进制分发将 `libsqlite3.so.0`（Linux）/ `libsqlite3.0.dylib`（macOS）和 `libgmp.so.10` / `libgmp.10.dylib` 与 `par` 二进制放在同一目录，通过 RPATH `$ORIGIN`（Linux）/ `@loader_path`（macOS）让二进制优先找到 bundled 版本。
+
+**原因**：
+- 预编译二进制分发的基本要求是"用户机器什么都不用预装"。`libsqlite3` 和 `libgmp` 在 minimal 容器（Alpine、distroless）、企业 Server（RHEL 8 minimal）上均不存在；不 bundle = 二进制启动失败。
+- **R3 "一次做对"原则的直接应用**：v0.3.0 计划引入 FTS5 全文检索，FTS5 是 sqlite3 的**编译期**扩展（`-DSQLITE_ENABLE_FTS5`）。如果 v0.2.1 用 system sqlite，v0.3.0 必须强制用户切换到 FTS5-enabled libsqlite3——这在跨发行版场景不可行。bundle 之后，v0.3.0 只是重编 bundled sqlite3，不是分发革命。
+- 同类项（`libgmp`）：mirage-crypto-rng 间接依赖 libgmp，同理需要 bundle。
+- 业界同类预编译 CLI 项目均采用 bundle 策略，已是标准做法。
+
+**影响范围**：
+- `scripts/docker/linux-bundle.Dockerfile`（W2-T2）：构建后将 `libsqlite3.so.0` + `libgmp.so.10` 复制到 `/out/`，`patchelf --set-rpath '$ORIGIN'` 设置 RPATH。
+- `scripts/build-macos.sh`（W2-T3）：构建后将 `libsqlite3.0.dylib` + `libgmp.10.dylib` 复制到 staging 目录，`install_name_tool -add_rpath @loader_path par` + `-id @rpath/<name>` + `-change <abspath> @rpath/<name>`。
+- `scripts/install.sh`（W1-T1）：解压 tarball/zip 到 `$PREFIX/bin/`，二进制与 dylib 同目录；RPATH/$ORIGIN 让运行时自动找到 bundled libs。
+- 二进制大小：约 15-25 MB（含 libs）。可接受，瘦身是后续可选项。
+- 退役条件：永远不会退役（bundle 是终态）。如未来切换到 static linking（musl），bundle .so 阶段会被 static .a 替代。
+
+**回退方式**：
+- Linux：删除 Dockerfile 中 `cp /usr/lib64/libsqlite3.so.0 /out/` 和 `cp /usr/lib64/libgmp.so.10 /out/` 两行 + `patchelf --set-rpath` 行。回到 system-lib 链接（但二进制将在 minimal 容器上启动失败）。
+- macOS：删除 build-macos.sh 中的 `install_name_tool` 调用。
+
+**已知限制**：
+- bundle 的 .so 是 CentOS 7 构建的版本（glibc 2.17 baseline）。若用户机器 glibc < 2.17 仍会失败——但 glibc < 2.17 的 Linux 已绝迹。
+- bundled sqlite3 不带 FTS5（v0.2.1 暂不需要）。v0.3.0 重编时切到 FTS5-enabled sqlite3 amalgamation 源码。
+- macOS 上 `install_name_tool` 操作要求二进制未签名——v0.2.1 不签名（架构正确），符合。
+
+## [2026-07-03] v0.2.1 integrity model: HTTPS + SHA256 checksum (transport corruption only)
+
+**变更前**：v0.2.0 没有二进制分发，integrity 由 opam 系统保证（opam 本身有签名链路）。
+
+**变更后**：v0.2.1 预编译二进制通过 GitHub Releases 分发，integrity = HTTPS + GitHub 基础设施 + SHA256 checksum 文件。**显式声明：仅防传输损坏，不防对抗性 MITM**。checksums.txt 与二进制一同发布在 release 中——一个能替换二进制的 MITM 也能替换 checksums.txt。
+
+**原因**：
+- HTTPS + GitHub 基础设施已覆盖绝大多数真实威胁模型（用户 ISP 注入广告、CDN cache poisoning、传输 bit rot）。
+- SHA256 checksum 检测传输损坏（bit flip、truncated download）。
+- 真正的对抗性 integrity（cosign/sigstore 签名 checksums、Authenticode 签名 Windows 二进制）需代码签名基础设施，与 v0.2.2 Windows 签名一并上线。
+- 提前半步（仅签名 checksums.txt 但不签名二进制）的边际价值低——攻击者替换二进制 + 替换 checksums.txt 是单一动作。
+
+**影响范围**：
+- `scripts/install.sh`（W1-T1）：`verify_sha256` 函数下载 `<asset>.sha256` 与二进制一同校验。注释明确说明 "transport corruption detection only, NOT adversarial integrity"。
+- `lib/par_code_upgrade.ml`（W1-T3）：`perform_upgrade` 调用 `verify_sha256 ~expected:hash archive` 校验下载内容。
+- `README.md`（W4-T1）：install 章节明确措辞 "v0.2.1 integrity = HTTPS + transport-corruption check; adversarial integrity (signed checksums) lands in v0.2.2 with signing"。
+- 退役条件：v0.2.2 上线签名 checksums.txt + Authenticode 签名 Windows 二进制时，本条目退役（措辞更新为"已签名"）。
+
+**回退方式**：
+- 移除 `verify_sha256` 调用 → 回到无校验（不可取，仅作回退路径描述）。
+- 增加签名验证（cosign verify）——这是 v0.2.2 的工作，不在 v0.2.1 范围。
+
+**已知限制**：
+- 企业 / 高安全场景用户应等 v0.2.2 签名版本，或在 v0.2.1 自行 GPG-verify 下载内容。
+- checksums.txt 与二进制同 release——MITM 攻击者可同时替换。GitHub Releases 的 HTTPS 是唯一防线。
+- 没有 key rotation 机制——签名基础设施落地时（v0.2.2）再设计。
+
 
