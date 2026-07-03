@@ -33,6 +33,7 @@ RUN for f in /etc/yum.repos.d/CentOS-*.repo /etc/yum.repos.d/CentOS-SCLo-*.repo;
       [ -f "$f" ] || continue; \
       sed -i \
         -e 's|^mirrorlist=|#mirrorlist=|g' \
+        -e 's|^#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' \
         -e 's|^baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' \
         -e 's|^#baseurl=http://mirror.centos.org|#baseurl=http://vault.centos.org|g' \
         "$f"; \

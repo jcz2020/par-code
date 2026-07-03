@@ -57,6 +57,25 @@ command -v install_name_tool >/dev/null || die "install_name_tool not found (not
 command -v otool              >/dev/null || die "otool not found (not macOS?)"
 command -v zip                >/dev/null || die "zip not found"
 
+# Bundle C dylibs (libsqlite3 + libgmp). macos-15 GitHub runners do NOT
+# ship these by default — install via brew if missing. Idempotent: skip
+# if present.
+install_dylib() {
+    local pkg="$1" dylib="$2"
+    if ! find_dylib_quick "$dylib" >/dev/null; then
+        info "installing $pkg via brew (provides $dylib) ..."
+        brew install "$pkg" || die "brew install $pkg failed"
+    fi
+}
+find_dylib_quick() {
+    for p in "/opt/homebrew/lib/$1" "/usr/local/lib/$1"; do
+        [ -f "$p" ] && return 0
+    done
+    return 1
+}
+install_dylib sqlite libsqlite3.0.dylib
+install_dylib gmp    libgmp.10.dylib
+
 # --- build -------------------------------------------------------------------
 
 info "setting up opam environment ..."
