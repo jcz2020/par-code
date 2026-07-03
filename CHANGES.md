@@ -1,6 +1,6 @@
 # CHANGES
 
-## v0.2.1-dev — One-line install & self-update (UNRELEASED)
+## v0.2.1 — One-line install & self-update
 
 > Distribution release. par-code now ships pre-built binaries for Linux (x86_64,
 > glibc ≥ 2.17) and macOS (arm64). Users install with a single `curl | bash`
