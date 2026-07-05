@@ -1,5 +1,61 @@
 # Decisions
 
+## [2026-07-06] v0.2.2 deferred; v0.3.0 prioritized
+
+**变更前**：Roadmap had v0.2.2 (Windows native + code signing) as the next release after v0.2.1.
+
+**变更后**：v0.2.2 deferred. v0.3.0 (project memory) is now the active development target.
+
+**原因**：Research revealed the PAR SDK dependency stack cannot build on Windows today — `Eio.Process` (needed by PAR's MCP stdio transport and bash tool) is unimplemented on Windows (`failwith "process operations not supported on Windows yet"`). Shipping a Windows binary that crashes on first process spawn would be a scope compromise disguised as architecture (R1 violation). Code signing alone (without Windows) was too thin to justify a release.
+
+**影响范围**：README roadmap table, STRATEGY.md §8 Roadmap Posture, release pipeline (no Windows CI job added).
+
+**回退方式**：When eio upstream ships `Eio.Process` for Windows, re-scope v0.2.2 with Windows native + signing.
+
+**已知限制**：Windows users must use WSL in the meantime.
+
+## [2026-07-06] v0.3.0 memory architecture: SQLite+FTS5 over filesystem
+
+**变更前**：No memory layer existed. Public reference projects in the same category use filesystem-based memory (markdown files + LLM-as-retriever).
+
+**变更后**：SQLite-backed memory with FTS5 virtual table + BM25 ranking, per-project scoping. DB is source of truth; `MEMORY.md` is auto-generated export only.
+
+**原因**：par-code is SQLite-native (par.db already exists, sqlite3-ocaml is a hard dep, pre-built binary bundles libsqlite3). FTS5 gives transactional writes + search for free. Filesystem-based memory would require parsing markdown back to structured data and loses transactional guarantees. Diverges from public reference projects' filesystem choice, which was driven by their runtime constraints, not a principled DB aversion.
+
+**影响范围**：New module `lib/par_code_memory.ml`, new tools (`recall_memory`, `remember_memory`), new CLI subcommand group (`par memory`).
+
+**回退方式**：N/A (new feature, no prior state to revert to).
+
+**已知限制**：FTS5 unicode61 tokenizer is suboptimal for CJK (Chinese/Japanese/Korean) text — treats codepoints as individual tokens. Acceptable for v0.3.0 (most memories are English or mixed); revisit in v0.3.1+ if CJK recall quality is poor.
+
+## [2026-07-06] v0.3.0 memory storage: shared par.db via PAR SDK accessor
+
+**变更前**：PAR SDK's `Sqlite_persistence.t` was opaque — no way for downstream apps to add tables.
+
+**变更后**：PAR SDK 0.6.9 adds `val raw_sqlite3_db : t -> Sqlite3.db` (1-line accessor). par-code opens a second connection to the same `~/.par/par.db` with WAL mode for memory tables.
+
+**原因**：Per STRATEGY.md §2 dual-role mandate, when par-code finds a PAR limitation, the first response is to fix PAR. The accessor is read-only and trivially correct. Opening a separate `memory.db` was the fallback (Path C) if PAR didn't ship the accessor.
+
+**影响范围**：PAR SDK 0.6.9 (new `raw_sqlite3_db` in `sqlite_persistence.mli`); par-code `lib/par_code_memory.ml` (opens same DB file, WAL mode).
+
+**回退方式**：If the accessor causes issues, switch to separate `~/.par/memory.db` (Path C). Migration: copy memory tables to new DB, point `open_db` at the new path.
+
+**已知限制**：Two connections to the same SQLite file requires WAL mode (enabled by `open_db`). If PAR SDK later switches away from SQLite, memory tables need migration.
+
+## [2026-07-06] MEMORY.md as auto-generated export, not source of truth
+
+**变更前**：Public reference projects treat their memory file (various naming conventions) as the source of truth — agent reads and writes it directly.
+
+**变更后**：par-code's DB is the source of truth. `par memory export` generates a read-only `MEMORY.md` for human consumption / git commit. par-code never reads `MEMORY.md` back.
+
+**原因**：DB-first gives transactional writes, FTS5 search, usage tracking, and per-project scoping for free. Filesystem-first would require parsing markdown back to structured data, which is fragile and loses these guarantees.
+
+**影响范围**：`par memory export` command, README "Project Memory" section (documents the export-only contract).
+
+**回退方式**：N/A (design decision, not a regression).
+
+**已知限制**：If a user edits the exported `MEMORY.md` by hand, those edits are lost on the next export. Documented in the export command output.
+
 ## [2026-07-02] Founding: par-code as a PAR-SDK coding agent
 
 **变更前**：—（新项目）
@@ -15,7 +71,7 @@
 **关键决策**（经与用户确认）：
 1. **集成路径**：OCaml 原生 SDK（`opam pin add par`），而非 Python binding 或包装 CLI
    二进制 —— 真正继承 PAR 的 OCaml CLI 代码，验证面最广。
-2. **Agent 形态**：交互式编码助手（类 Claude Code 终端 REPL）。
+2. **Agent 形态**：交互式编码助手（类主流编码 agent 终端 REPL）。
 3. **MVP 范围**：v0.1.0 仅项目骨架 + README，不含 agent 逻辑。
 4. **许可**：Apache-2.0（含专利授权，区别于 PAR 的 MIT）。
 5. **仓库名**：`jcz2020/par-code`（公开）。

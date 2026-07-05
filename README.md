@@ -57,7 +57,7 @@ curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.
 curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.sh | bash
 ```
 
-This downloads a pre-built `par` binary with `libsqlite3` + `libgmp` bundled
+This downloads a pre-built `par` binary with `libsqlite3` (FTS5-enabled) + `libgmp` bundled
 alongside it (no system prerequisites). The binary lands at `~/.par/bin/par`.
 The installer offers to add `~/.par/bin` to your shell's PATH.
 
@@ -102,7 +102,7 @@ exists (gated by `PAR_NO_UPDATE_CHECK=1`).
 | Linux x86_64 (glibc >= 2.28) | ✅ Pre-built binary | Covers AlmaLinux 8+, Debian 11+, Ubuntu 20.04+, RHEL 8+, Fedora |
 | macOS arm64 (Apple Silicon) | ✅ Pre-built binary | Native |
 | macOS x86_64 (Intel) | ✅ Via Rosetta 2 | Same arm64 binary; ~20-40% performance penalty (acceptable for CLI) |
-| Windows x86_64 | ❌ Not in v0.2.1 | Native binary + code signing ship together in v0.2.2 |
+| Windows x86_64 | ❌ Deferred | v0.2.2 deferred (upstream `Eio.Process` Windows blocker); re-scope when eio ships Windows process support |
 | Alpine Linux (musl) | ❌ Not in v0.2.1 | Static musl binary is a v0.2.3 stretch goal |
 
 ### Integrity model
@@ -162,6 +162,37 @@ par
 par ask "What does this project do?"
 ```
 
+## Project Memory
+
+par-code remembers your project across sessions. Memories are stored per-project
+(keyed on git root) in SQLite with FTS5 full-text search.
+
+### Memory commands
+
+```sh
+par memory add --kind convention --summary "uses conventional commits" --content "..."
+par memory list
+par memory search "authentication"
+par memory show <id>
+par memory export -o MEMORY.md
+par memory forget <id>
+par memory prune --older-than 90
+```
+
+### How the agent uses memory
+
+On session start, a compact index of your project's memories is injected into
+the agent's system prompt. The agent can call `recall_memory(query)` to search
+memories via FTS5, and `remember_memory(kind, content, summary)` to save new
+facts it discovers during your session.
+
+Memory kinds: `preference`, `convention`, `insight`, `gotcha`, `task_map`.
+
+### MEMORY.md export
+
+`par memory export` generates a human-readable markdown file you can commit to
+your repo. This is a read-only export — the database is the source of truth.
+
 ## Roadmap
 
 Each release ships **one** user-facing capability — a thin, demonstrable slice.
@@ -172,8 +203,8 @@ Version numbers stay minimal (no 1.0 until core parity is earned).
 | **v0.1.0** ✅ | Project skeleton — links the PAR SDK; `par --version` works. |
 | **v0.2.0** ✅ | Interactive coding agent — REPL, provider config, read/write/edit/grep/find/bash, streaming, session persistence. *"It reads and edits my code."* |
 | **v0.2.1** ✅ | One-line install & self-update (Linux + macOS) — `curl … \| bash`, no OCaml/opam required; pre-built binaries bundle sqlite3 + libgmp for true portability (glibc ≥ 2.28); `par upgrade` keeps it current. *"Install in one line. Updates itself."* |
-| **v0.2.2** | Windows native + code signing — `irm … \| iex` installer, signed Windows binary via cloud signing service; darwin-x64 (universal binary or Rosetta-only formalized). *"It runs on Windows too."* |
-| **v0.3.0** | Project memory — `MEMORY.md` + FTS5 full-text search + memory/history tools. *"It remembers my project across sessions."* |
+| **v0.2.2** | Deferred (upstream `Eio.Process` Windows blocker — `Eio.Process` unimplemented on Windows; re-scope when eio ships Windows process support) |
+| **v0.3.0** 🔨 | Project memory — SQLite-backed memory with FTS5 full-text search + recall/remember agent tools + `par memory` CLI. *"It remembers my project across sessions."* **(In development)** |
 | **v0.4.0** | Long-session continuity — checkpoint-writer subagent, budgeted context injection, context reconstruction. *"Hours-long sessions never lose the thread."* |
 | **v0.5.0** | Plan mode — read-only plan agent, build/plan switching, plan_enter/plan_exit. *"It plans before it touches code."* |
 | **v0.6.0** | Subagent delegation — general/explore subagents, actor tool, task tree. *"It spawns helpers to explore and work in parallel."* |

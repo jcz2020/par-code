@@ -1,5 +1,47 @@
 # CHANGES
 
+## v0.3.0-dev — Project Memory (in development)
+
+> Cross-session project memory. par-code now remembers conventions, decisions,
+> gotchas, and preferences from past sessions. Memories are SQLite-backed with
+> FTS5 full-text search, auto-injected into the system prompt as a compact index,
+> and searchable via the `recall_memory` agent tool.
+
+### Added
+- **Project memory layer** (`lib/par_code_memory.ml`): SQLite-backed memory
+  entries with FTS5 virtual table + BM25 ranking, per-project scoping (git root),
+  compact index rendering (≤200 lines), and full markdown export. Same `~/.par/par.db`
+  file as sessions (PAR SDK 0.6.9+ exposes `Sqlite_persistence.raw_sqlite3_db`).
+- **Agent tools**: `recall_memory` (FTS5 search) and `remember_memory` (save new
+  memory). The remember tool includes a quality-gate prompt: "Only call this when
+  a future agent will plausibly act better."
+- **`par memory` subcommand group**: 7 leaf commands — `list`, `add`, `forget`,
+  `show`, `export`, `prune`, `search`. CLI-native memory curation without entering
+  the REPL.
+- **Test module** (`test/test_par_code_memory.ml`): 8 test cases covering schema
+  idempotency, FTS5 trigger correctness, recall limit, project isolation, usage
+  tracking, prune semantics, and index line cap.
+
+### Changed
+- **Bundled sqlite3** now compiled from official amalgamation source with
+  `-DSQLITE_ENABLE_FTS5 -DSQLITE_ENABLE_JSON1` (Linux Dockerfile + macOS build
+  script). Previously used OS-package sqlite3 which may not include FTS5.
+- **System prompt** now appends a per-project memory index on session start
+  (compact, ≤200 lines / ~1K tokens). Index is empty for projects with no memories.
+- **`lib/par_code_setup.ml`**: opens memory DB, injects index, registers memory
+  tools, closes DB on shutdown. Memory is additive — degrades gracefully if DB
+  unavailable.
+- **PAR SDK upgraded** from 0.6.7 to 0.6.9 (adds `raw_sqlite3_db` accessor +
+  `install_bash_tool ~fs` parameter). Bash tool fix: added `~fs:(Eio.Stdenv.fs env)`
+  to match the new PAR API.
+
+### Deferred
+- **v0.2.2 (Windows native + code signing)**: deferred pending upstream
+  `Eio.Process` Windows implementation. `Eio.Process` is currently
+  `failwith "process operations not supported on Windows yet"` in the eio library,
+  which blocks PAR SDK's MCP stdio transport and bash tool. Re-scope when eio
+  upstream ships Windows process support.
+
 ## v0.2.1 — One-line install & self-update
 
 > Distribution release. par-code now ships pre-built binaries for Linux (x86_64,

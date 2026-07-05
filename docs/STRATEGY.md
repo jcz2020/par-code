@@ -122,7 +122,7 @@ Revisit only with a new STRATEGY.md revision + DECISIONS.md entry:
 5. **No multi-language agent runtime.** The agent itself is OCaml. Users who
    want Python/Go/Rust agents should consume PAR directly in that language.
 6. **No proprietary vendor lock-in at the protocol layer.** Provider config
-   supports OpenAI, Anthropic, Ollama, and custom (`+name`) — no provider
+   supports major cloud providers, local inference engines, and custom (`+name`) — no provider
    gets a privileged integration.
 
 ## 7. Disclosure Rule (commit-time constraint)
@@ -152,11 +152,14 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
 **Current posture** (as of this snapshot):
 - v0.1.0 ✅ shipped (skeleton)
 - v0.2.0 ✅ shipped (interactive coding agent)
-- **v0.2.1 ✅ shipped** — one-line install + self-update (Linux + macOS);
-  Windows + signing deferred to v0.2.2
-- v0.3.0+ — project memory, long-session continuity, plan mode, subagents,
-  autonomy, reasoning, self-improvement, compose mode, ecosystem, code
-  intelligence, safety, polish → v1.0
+- **v0.2.1 ✅ shipped** — one-line install + self-update (Linux + macOS)
+- v0.2.2 — deferred (upstream `Eio.Process` Windows blocker; re-scope when eio
+  ships Windows process support)
+- **v0.3.0 🔨 in development** — project memory: FTS5 + recall/remember tools
+  + `par memory` CLI
+- v0.4.0+ — long-session continuity, plan mode, subagents, autonomy, reasoning,
+  self-improvement, compose mode, ecosystem, code intelligence, safety, polish
+  → v1.0
 
 The roadmap order follows: **usable first (v0.2 foundation) → signature
 capabilities on steepest difficulty curve (v0.3–v0.4 memory/long-context,
@@ -177,6 +180,10 @@ per global rules) lives in `docs/DECISIONS.md`. Strategic-level entries:
 | 2026-07-02 | v0.2.1 scope revised post-review: Linux + macOS only; Windows + signing → v0.2.2; bundle sqlite3/libgmp; CentOS 7 build base; Intel Mac via Rosetta; musl-static → v0.2.3 | Active (superseded by AlmaLinux 8 row) |
 | 2026-07-03 | v0.2.1 shipped (one-line install + self-update, AlmaLinux 8 base, glibc ≥ 2.28) | Active |
 | 2026-07-03 | Linux bundle base switched from CentOS 7 + devtoolset-11 to AlmaLinux 8 (CentOS 7 EOL + vault unstable) | Active |
+| 2026-07-06 | v0.2.2 deferred; v0.3.0 prioritized (upstream `Eio.Process` Windows blocker) | Active |
+| 2026-07-06 | v0.3.0 memory architecture: SQLite+FTS5 over filesystem (DB-first, MEMORY.md export-only) | Active |
+| 2026-07-06 | v0.3.0 memory storage: shared par.db via PAR SDK 0.6.9 `raw_sqlite3_db` accessor | Active |
+| 2026-07-06 | MEMORY.md as auto-generated export, not source of truth (DB is canonical) | Active |
 
 ## 10. Revision Protocol
 
