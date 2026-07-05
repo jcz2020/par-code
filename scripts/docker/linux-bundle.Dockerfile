@@ -90,5 +90,5 @@ RUN ldd /out/par | grep -E 'libsqlite3|libgmp' && \
 RUN VER="${VERSION#v}" && \
     cd /out && \
     tar czf "/tmp/par-v${VER}-linux-x64.tar.gz" par libsqlite3.so.0 libgmp.so.10 && \
-    sha256sum "/tmp/par-v${VER}-linux-x64.tar.gz" \
+    sha256sum "/tmp/par-v${VER}-linux-x64.tar.gz" | awk '{print $1}' \
       > "/tmp/par-v${VER}-linux-x64.tar.gz.sha256"

@@ -132,9 +132,9 @@ verify_sha256() {
     _expected=""
     # Try per-asset .sha256
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL -o "$_ck_file" "$_ck_url" 2>/dev/null && [ -s "$_ck_file" ] && _expected="$(tr -d ' \r\n' < "$_ck_file")"
+        curl -fsSL -o "$_ck_file" "$_ck_url" 2>/dev/null && [ -s "$_ck_file" ] && _expected="$(awk '{print $1}' "$_ck_file" | tr -d '\r\n')"
     elif command -v wget >/dev/null 2>&1; then
-        wget -q -O "$_ck_file" "$_ck_url" 2>/dev/null && [ -s "$_ck_file" ] && _expected="$(tr -d ' \r\n' < "$_ck_file")"
+        wget -q -O "$_ck_file" "$_ck_url" 2>/dev/null && [ -s "$_ck_file" ] && _expected="$(awk '{print $1}' "$_ck_file" | tr -d '\r\n')"
     fi
     # Fallback: checksums.txt
     if [ -z "$_expected" ]; then
