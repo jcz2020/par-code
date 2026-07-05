@@ -39,7 +39,8 @@ detect_platform() {
         linux)
             case "$_arch" in
                 x86_64|amd64) PLATFORM="linux-x64" ;;
-                *) error "unsupported architecture: $_arch (x86_64 only)"; exit 1 ;;
+                aarch64|arm64) PLATFORM="linux-arm64" ;;
+                *) error "unsupported architecture: $_arch (x86_64/arm64 only)"; exit 1 ;;
             esac ;;
         darwin)
             case "$_arch" in
@@ -258,8 +259,8 @@ _mirror="github.com"
 if [ "${PAR_MIRROR+_}" = "_" ] && [ -n "$PAR_MIRROR" ]; then _mirror="$PAR_MIRROR"; fi
 _base="https://$_mirror/jcz2020/par-code/releases/download/$TAG"
 case "$PLATFORM" in
-    linux-*)  _name="par-${TAG}-linux-x64.tar.gz" ;;
-    darwin-*) _name="par-${TAG}-darwin-arm64.zip" ;;
+    linux-*)  _name="par-${TAG}-${PLATFORM}.tar.gz" ;;
+    darwin-*) _name="par-${TAG}-${PLATFORM}.zip" ;;
 esac
 _url="${_base}/${_name}"
 _path="${TMPDIR_RESOLVED}/${_name}"

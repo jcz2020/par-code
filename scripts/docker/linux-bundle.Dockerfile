@@ -69,8 +69,9 @@ RUN SQLITE_VERSION=$(grep -E '^[0-9]+' /tmp/sqlite-amalgamation.version 2>/dev/n
 # Without this, conf-sqlite3 fails because it can't find sqlite3.pc.
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH}
 
-# opam binary (pinned to 2.1.5 stable).
-RUN curl -fsSL https://github.com/ocaml/opam/releases/download/2.1.5/opam-2.1.5-x86_64-linux \
+# opam binary (pinned to 2.1.5 stable). Architecture-aware for x86_64 + aarch64.
+RUN OPAM_ARCH=$(uname -m) && \
+    curl -fsSL "https://github.com/ocaml/opam/releases/download/2.1.5/opam-2.1.5-${OPAM_ARCH}-linux" \
       -o /usr/local/bin/opam && \
     chmod +x /usr/local/bin/opam
 
@@ -117,9 +118,15 @@ RUN ldd /out/par | grep -E 'libsqlite3|libgmp' && \
     echo "Shared library resolution looks correct."
 
 # Package: strip leading 'v' from VERSION (CI passes 'v0.2.1', filenames
-# want 'par-v0.2.1' not 'par-vv0.2.1').
+# want 'par-v0.2.1' not 'par-vv0.2.1'). Architecture suffix from uname -m.
 RUN VER="${VERSION#v}" && \
+    ARCH=$(uname -m) && \
+    case "$ARCH" in \
+      x86_64) SUFFIX="linux-x64" ;; \
+      aarch64) SUFFIX="linux-arm64" ;; \
+      *) echo "Unsupported arch: $ARCH"; exit 1 ;; \
+    esac && \
     cd /out && \
-    tar czf "/tmp/par-v${VER}-linux-x64.tar.gz" par libsqlite3.so.0 libgmp.so.10 && \
-    sha256sum "/tmp/par-v${VER}-linux-x64.tar.gz" | awk '{print $1}' \
-      > "/tmp/par-v${VER}-linux-x64.tar.gz.sha256"
+    tar czf "/tmp/par-v${VER}-${SUFFIX}.tar.gz" par libsqlite3.so.0 libgmp.so.10 && \
+    sha256sum "/tmp/par-v${VER}-${SUFFIX}.tar.gz" | awk '{print $1}' \
+      > "/tmp/par-v${VER}-${SUFFIX}.tar.gz.sha256"

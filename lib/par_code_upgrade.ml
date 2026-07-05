@@ -136,6 +136,7 @@ let detect_platform () =
     with _ -> "unknown" in
   match (String.lowercase_ascii uname_flag, String.lowercase_ascii arch_str) with
   | ("linux", "x86_64") -> Ok ("linux-x64", "tar.gz")
+  | ("linux", "aarch64") | ("linux", "arm64") -> Ok ("linux-arm64", "tar.gz")
   | ("darwin", "arm64") | ("darwin", "aarch64") -> Ok ("darwin-arm64", "zip")
   | (os, arch) ->
     Error (`Download_failed (Printf.sprintf "Unsupported platform: %s/%s" os arch))

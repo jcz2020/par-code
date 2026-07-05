@@ -69,7 +69,44 @@ jobs:
           retention-days: 7
 
   # =========================================================================
-  # Job 2: macOS arm64 — build on macos-15 runner, bundle dylibs
+  # Job 2: Linux arm64 — build on native ARM runner for Raspberry Pi / Graviton
+  # =========================================================================
+  build-linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Build par-code in AlmaLinux 8 ARM64 container
+        run: |
+          docker build \
+            -f scripts/docker/linux-bundle.Dockerfile \
+            --build-arg VERSION=${{ github.event.inputs.version || github.ref_name }} \
+            -t par-linux-arm64-builder \
+            .
+
+      - name: Extract release artifacts from container
+        run: |
+          id=$(docker create par-linux-arm64-builder)
+          mkdir -p /tmp/par-extract
+          docker cp "$id:/tmp/." /tmp/par-extract/
+          docker rm "$id"
+          cp /tmp/par-extract/par-v*-linux-arm64.tar.gz .
+          cp /tmp/par-extract/par-v*-linux-arm64.tar.gz.sha256 .
+          ls -lh par-v*.tar.gz*
+
+      - name: Upload Linux ARM64 artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: linux-arm64-artifact
+          path: |
+            par-v*-linux-arm64.tar.gz
+            par-v*-linux-arm64.tar.gz.sha256
+          retention-days: 7
+
+  # =========================================================================
+  # Job 3: macOS arm64 — build on macos-15 runner, bundle dylibs
   # =========================================================================
   build-macos:
     runs-on: macos-15
@@ -112,10 +149,10 @@ jobs:
           retention-days: 7
 
   # =========================================================================
-  # Job 3: Coordinate — assemble release assets + publish GitHub Release
+  # Job 4: Coordinate — assemble release assets + publish GitHub Release
   # =========================================================================
   coordinate:
-    needs: [build-linux, build-macos]
+    needs: [build-linux, build-linux-arm64, build-macos]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
@@ -153,6 +190,8 @@ jobs:
           files: |
             par-v*-linux-x64.tar.gz
             par-v*-linux-x64.tar.gz.sha256
+            par-v*-linux-arm64.tar.gz
+            par-v*-linux-arm64.tar.gz.sha256
             par-v*-darwin-arm64.zip
             par-v*-darwin-arm64.zip.sha256
             checksums.txt
