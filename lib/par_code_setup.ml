@@ -149,6 +149,13 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
     Printf.eprintf "Error creating runtime: %s\n%!" (error_to_string e);
     exit 1
   | Ok rt ->
+    (* Open the memory database for project memory (v0.3.0). *)
+    let mem_db = match Par_code_memory.open_db () with
+      | Ok t -> Some t
+      | Error (`Db_error msg) ->
+        Printf.eprintf "Warning: memory DB unavailable: %s\n%!" msg;
+        None
+    in
     let tools = Builtin_tools.builtin_tools ~switch ~net ~workspace:(Runtime.workspace rt) in
     List.iter (fun (tb : Types.tool_binding) ->
       (match Runtime.register_tool rt
@@ -166,20 +173,51 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
            tb.descriptor.Types.name (error_to_string e);
          exit 1)
     ) tools;
+    let descriptors = ref (List.map (fun (tb : Types.tool_binding) -> tb.descriptor) tools) in
+    (match mem_db with
+     | Some t ->
+       let mem_tools = Par_code_memory_tools.tools t in
+       List.iter (fun (tb : Types.tool_binding) ->
+         (match Runtime.register_tool rt
+            ~name:tb.descriptor.Types.name
+            ~description:tb.descriptor.Types.description
+            ~input_schema:tb.descriptor.Types.input_schema
+            ~handler:tb.handler
+            ?permission:(match tb.descriptor.Types.permission with Types.Allow -> None | p -> Some p)
+            ?timeout:tb.descriptor.Types.timeout
+            ?concurrency_limit:tb.descriptor.Types.concurrency_limit
+            () with
+          | Ok _ -> ()
+          | Error e ->
+            Printf.eprintf "Warning: failed to register memory tool %s: %s\n%!"
+              tb.descriptor.Types.name (error_to_string e))
+       ) mem_tools;
+       let mem_descriptors = List.map (fun (tb : Types.tool_binding) -> tb.descriptor) mem_tools in
+       descriptors := mem_descriptors @ !descriptors
+     | None -> ());
     (match Runtime.install_bash_tool
        ~process_mgr:(Eio.Stdenv.process_mgr env)
        ~clock:(Eio.Stdenv.clock env)
+       ~fs:(Eio.Stdenv.fs env)
        rt with
      | Ok _ -> ()
      | Error e ->
        Printf.eprintf "Warning: bash tool not installed: %s\n%!" (error_to_string e));
-    let descriptors = List.map (fun (tb : Types.tool_binding) -> tb.descriptor) tools in
     let model_cfg = Par_code_config.to_model_config cfg in
+    let base_prompt = cfg.Par_code_config.system_prompt in
+    let prompt_with_memory = match mem_db with
+      | Some t ->
+        let project_id = Par_code_memory.resolve_project_id () in
+        let index = Par_code_memory.render_index t ~project_id in
+        if index = "" then base_prompt
+        else base_prompt ^ "\n\n## Project Memory\n\n" ^ index
+      | None -> base_prompt
+    in
     (match Runtime.make_agent
        ~id:agent_id
-       ~system_prompt:(Types.stable_prompt cfg.Par_code_config.system_prompt)
+       ~system_prompt:(Types.stable_prompt prompt_with_memory)
        ~model:model_cfg
-       ~tools:descriptors
+       ~tools:!descriptors
        ~max_iterations:cfg.Par_code_config.max_iterations
        () with
      | Error e ->
@@ -207,4 +245,5 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
       ignore (Runtime.register_skill rt desc : (Types.skill_binding, _) result)
     ) Builtin_skills.builtin_skills;
     f rt;
+    (match mem_db with Some t -> Par_code_memory.close t | None -> ());
     ignore (Runtime.close rt)

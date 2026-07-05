@@ -111,3 +111,51 @@ let upgrade_purge_arg =
   let open Cmdliner in
   Arg.(value & flag &
     info ["purge"] ~doc:"Remove ALL of ~/.par/ including config and sessions (implies --uninstall; prompts y/N)")
+
+(* Memory subcommand args *)
+
+let memory_kind_arg =
+  let open Cmdliner in
+  Arg.(value & opt (some string) None &
+    info ["kind"] ~docv:"KIND"
+      ~doc:"Memory kind: preference|convention|insight|gotcha|task_map")
+
+let memory_summary_arg =
+  let open Cmdliner in
+  Arg.(value & opt (some string) None &
+    info ["summary"] ~docv:"TEXT"
+      ~doc:"One-line summary for the memory index")
+
+let memory_content_arg =
+  let open Cmdliner in
+  Arg.(value & opt (some string) None &
+    info ["content"] ~docv:"TEXT"
+      ~doc:"Full memory content text")
+
+let memory_limit_arg =
+  let open Cmdliner in
+  Arg.(value & opt int 50 &
+    info ["limit"; "n"] ~docv:"N"
+      ~doc:"Maximum number of results (default: 50)")
+
+let memory_id_arg =
+  let open Cmdliner in
+  Arg.(required & pos 0 (some int) None &
+    info [] ~docv:"ID" ~doc:"Memory entry ID")
+
+let memory_query_arg =
+  let open Cmdliner in
+  Arg.(required & pos 0 (some string) None &
+    info [] ~docv:"QUERY" ~doc:"Full-text search query")
+
+let memory_older_than_arg =
+  let open Cmdliner in
+  Arg.(value & opt float 90.0 &
+    info ["older-than"] ~docv:"DAYS"
+      ~doc:"Prune memories unused for more than N days (default: 90)")
+
+let memory_output_arg =
+  let open Cmdliner in
+  Arg.(value & opt string "stdout" &
+    info ["o"; "output"] ~docv:"PATH"
+      ~doc:"Output file path (default: stdout)")

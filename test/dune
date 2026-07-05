@@ -1,4 +1,3 @@
-(test
- (name test_par_code)
- (libraries par_code alcotest)
- (modules test_par_code))
+(tests
+ (names test_par_code test_par_code_memory)
+ (libraries par_code alcotest))

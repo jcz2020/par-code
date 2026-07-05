@@ -138,13 +138,218 @@ let term_upgrade =
 
 let info_upgrade = Cmd.info "upgrade" ~doc:"Check for and install the latest par version"
 
+let parse_kind = function
+  | "preference" -> Ok Par_code_memory.Preference
+  | "convention" -> Ok Par_code_memory.Convention
+  | "insight"    -> Ok Par_code_memory.Insight
+  | "gotcha"     -> Ok Par_code_memory.Gotcha
+  | "task_map"   -> Ok Par_code_memory.Task_map
+  | s -> Error (Printf.sprintf
+    "Unknown kind: %s (expected: preference|convention|insight|gotcha|task_map)" s)
+
+let with_memory_db f =
+  match Par_code_memory.open_db () with
+  | Error (`Db_error msg) ->
+    Printf.eprintf "Error opening memory database: %s\n%!" msg;
+    exit 1
+  | Ok mem_db ->
+    Fun.protect ~finally:(fun () -> Par_code_memory.close mem_db) (fun () -> f mem_db)
+
+let format_kind = function
+  | Par_code_memory.Preference -> "preference"
+  | Par_code_memory.Convention -> "convention"
+  | Par_code_memory.Insight    -> "insight"
+  | Par_code_memory.Gotcha     -> "gotcha"
+  | Par_code_memory.Task_map   -> "task_map"
+
+let format_timestamp ts =
+  let tm = Unix.localtime ts in
+  Printf.sprintf "%04d-%02d-%02d"
+    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+
+let print_memory_header () =
+  Printf.printf "%-5s %-12s %-40s %s\n" "ID" "KIND" "SUMMARY" "UPDATED";
+  Printf.printf "%s\n" (String.make 75 '-')
+
+let print_memory_row (m : Par_code_memory.memory) =
+  let summary = if String.length m.summary > 40
+    then String.sub m.summary 0 37 ^ "..."
+    else m.summary in
+  Printf.printf "%-5d %-12s %-40s %s\n"
+    m.id (format_kind m.kind) summary (format_timestamp m.updated_at)
+
+let cmd_memory_list limit =
+  with_memory_db (fun mem_db ->
+    let project_id = Par_code_memory.resolve_project_id () in
+    match Par_code_memory.list mem_db ~project_id ~limit () with
+    | Error (`Db_error msg) ->
+      Printf.eprintf "Error listing memories: %s\n%!" msg;
+      exit 1
+    | Ok [] ->
+      Printf.printf "No memories found for this project.\n%!";
+    | Ok memories ->
+      print_memory_header ();
+      List.iter print_memory_row memories)
+
+let cmd_memory_list_term =
+  let open Term in
+  const cmd_memory_list $ Cli_args.memory_limit_arg
+
+let info_memory_list = Cmd.info "list" ~doc:"List all memories for this project"
+
+let cmd_memory_add kind_str_opt summary_opt content_opt =
+  match kind_str_opt, summary_opt, content_opt with
+  | None, _, _ | _, None, _ | _, _, None ->
+    Printf.eprintf "Error: --kind, --summary, and --content are all required\n%!";
+    exit 1
+  | Some kind_str, Some summary, Some content ->
+    match parse_kind kind_str with
+    | Error msg ->
+      Printf.eprintf "Error: %s\n%!" msg;
+      exit 1
+    | Ok kind ->
+      with_memory_db (fun mem_db ->
+        let project_id = Par_code_memory.resolve_project_id () in
+        match Par_code_memory.add mem_db ~project_id ~kind ~content ~summary
+                ~citations:[] ~source:`Manual with
+        | Error (`Db_error msg) ->
+          Printf.eprintf "Error adding memory: %s\n%!" msg;
+          exit 1
+        | Ok id ->
+          Printf.printf "Added memory #%d\n%!" id)
+
+let cmd_memory_add_term =
+  let open Term in
+  const cmd_memory_add
+  $ Cli_args.memory_kind_arg $ Cli_args.memory_summary_arg
+  $ Cli_args.memory_content_arg
+
+let info_memory_add = Cmd.info "add" ~doc:"Add a new memory manually"
+
+let cmd_memory_forget id =
+  with_memory_db (fun mem_db ->
+    match Par_code_memory.forget mem_db ~id with
+    | Error (`Db_error msg) ->
+      Printf.eprintf "Error forgetting memory: %s\n%!" msg;
+      exit 1
+    | Ok () ->
+      Printf.printf "Forgot memory #%d\n%!" id)
+
+let cmd_memory_forget_term =
+  let open Term in
+  const cmd_memory_forget $ Cli_args.memory_id_arg
+
+let info_memory_forget = Cmd.info "forget" ~doc:"Delete a memory by ID"
+
+let cmd_memory_show id =
+  with_memory_db (fun mem_db ->
+    let project_id = Par_code_memory.resolve_project_id () in
+    match Par_code_memory.list mem_db ~project_id ~limit:10000 () with
+    | Error (`Db_error msg) ->
+      Printf.eprintf "Error listing memories: %s\n%!" msg;
+      exit 1
+    | Ok memories ->
+      match List.find_opt (fun (m : Par_code_memory.memory) -> m.id = id) memories with
+      | None ->
+        Printf.eprintf "Error: memory #%d not found\n%!" id;
+        exit 1
+      | Some m ->
+        Printf.printf "ID:         %d\n" m.id;
+        Printf.printf "Kind:       %s\n" (format_kind m.kind);
+        Printf.printf "Summary:    %s\n" m.summary;
+        Printf.printf "Content:    %s\n" m.content;
+        (match m.citations with
+         | [] -> ()
+         | cits -> Printf.printf "Citations:  %s\n" (String.concat ", " cits));
+        Printf.printf "Created:    %s\n" (format_timestamp m.created_at);
+        Printf.printf "Updated:    %s\n" (format_timestamp m.updated_at);
+        (match m.last_used_at with
+         | None -> ()
+         | Some ts -> Printf.printf "Last used:  %s\n" (format_timestamp ts));
+        Printf.printf "Used:       %d times\n" m.usage_count;
+        Printf.printf "Source:     %s\n%!"
+          (match m.source with `Manual -> "manual" | `Agent -> "agent" | `Import -> "import"))
+
+let cmd_memory_show_term =
+  let open Term in
+  const cmd_memory_show $ Cli_args.memory_id_arg
+
+let info_memory_show = Cmd.info "show" ~doc:"Show full details of a memory by ID"
+
+let cmd_memory_export output =
+  with_memory_db (fun mem_db ->
+    let project_id = Par_code_memory.resolve_project_id () in
+    let md = Par_code_memory.export_markdown mem_db ~project_id in
+    if md = "" then
+      Printf.printf "No memories to export.\n%!"
+    else if output = "stdout" then
+      Printf.printf "%s%!" md
+    else begin
+      let oc = open_out output in
+      output_string oc md;
+      close_out oc;
+      Printf.printf "Exported to %s\n%!" output
+    end)
+
+let cmd_memory_export_term =
+  let open Term in
+  const cmd_memory_export $ Cli_args.memory_output_arg
+
+let info_memory_export = Cmd.info "export" ~doc:"Export memories as MEMORY.md"
+
+let cmd_memory_prune older_than_days =
+  with_memory_db (fun mem_db ->
+    let project_id = Par_code_memory.resolve_project_id () in
+    match Par_code_memory.prune_stale mem_db ~project_id ~older_than_days with
+    | Error (`Db_error msg) ->
+      Printf.eprintf "Error pruning memories: %s\n%!" msg;
+      exit 1
+    | Ok count ->
+      Printf.printf "Pruned %d stale memories\n%!" count)
+
+let cmd_memory_prune_term =
+  let open Term in
+  const cmd_memory_prune $ Cli_args.memory_older_than_arg
+
+let info_memory_prune = Cmd.info "prune" ~doc:"Remove stale unused memories"
+
+let cmd_memory_search query =
+  with_memory_db (fun mem_db ->
+    let project_id = Par_code_memory.resolve_project_id () in
+    match Par_code_memory.recall mem_db ~project_id ~query ~limit:10 () with
+    | Error (`Db_error msg) ->
+      Printf.eprintf "Error searching memories: %s\n%!" msg;
+      exit 1
+    | Ok [] ->
+      Printf.printf "No memories matched your query.\n%!";
+    | Ok memories ->
+      print_memory_header ();
+      List.iter print_memory_row memories)
+
+let cmd_memory_search_term =
+  let open Term in
+  const cmd_memory_search $ Cli_args.memory_query_arg
+
+let info_memory_search = Cmd.info "search" ~doc:"Full-text search memories"
+
+let cmd_memory =
+  Cmd.group (Cmd.info "memory" ~doc:"Manage project memories")
+    [ Cmd.v info_memory_list cmd_memory_list_term;
+      Cmd.v info_memory_add cmd_memory_add_term;
+      Cmd.v info_memory_forget cmd_memory_forget_term;
+      Cmd.v info_memory_show cmd_memory_show_term;
+      Cmd.v info_memory_export cmd_memory_export_term;
+      Cmd.v info_memory_prune cmd_memory_prune_term;
+      Cmd.v info_memory_search cmd_memory_search_term; ]
+
 let cmd =
   Cmd.group ~default:term_chat
     (Cmd.info "par" ~version:Par_code_version.version_info
        ~doc:"Interactive coding agent built on the PAR SDK — run 'par' to start the REPL, 'par config' to configure, 'par ask \"question\"' for one-shot")
     [ Cmd.v info_config term_config;
       Cmd.v info_ask term_ask;
-      Cmd.v info_upgrade term_upgrade; ]
+      Cmd.v info_upgrade term_upgrade;
+      cmd_memory; ]
 
 let is_chat_mode () =
   let args = Array.to_list Sys.argv in
@@ -152,7 +357,7 @@ let is_chat_mode () =
     | [] -> true
     | "--help" :: _ | "-h" :: _ -> false
     | "--version" :: _ | "-v" :: _ -> false
-    | "config" :: _ | "ask" :: _ | "upgrade" :: _ -> false
+    | "config" :: _ | "ask" :: _ | "upgrade" :: _ | "memory" :: _ -> false
     | _ :: rest -> scan rest
   in
   match args with _ :: rest -> scan rest | [] -> true
