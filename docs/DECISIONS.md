@@ -1,5 +1,33 @@
 # Decisions
 
+## [2026-07-06] Auto-extraction at session exit (not background)
+
+**变更前**：No auto-extraction. Memories only written via explicit `remember_memory` tool or `par memory add` CLI.
+
+**变更后**：After REPL session exit, an extractor agent reads the transcript and writes salient memories.
+
+**原因**：PAR SDK cannot safely run parallel/background agents (shared mutable state `current_conversation` corrupts on reentrant `invoke`). Synchronous extraction at exit avoids all concurrency issues. Cost: one LLM call (~2-5s) at exit, acceptable.
+
+**影响范围**：lib/par_code_extractor.ml (NEW), lib/par_code_repl.ml (exit trigger), lib/par_code_setup.ml (extractor agent registration).
+
+**回退方式**：Set PAR_NO_AUTO_EXTRACT=1 or auto_extract:false. Background extraction deferred to v0.3.2+ pending PAR SDK invoke_async support.
+
+**已知限制**：Extraction runs once per session (at exit), not per-turn. No background extraction during active session.
+
+## [2026-07-06] History search via FTS5 on raw messages_json
+
+**变更前**：No way to search past session transcripts. Users had to manually resume individual sessions.
+
+**变更后**：FTS5 virtual table `conversations_fts` indexes the `messages_json` column of the existing `conversations` table. `search_history` agent tool + `par memory search-history` CLI provide FTS5 BM25 search with snippet highlighting.
+
+**原因**：FTS5 is already available (bundled sqlite3 with v0.3.0). Indexing raw JSON is pragmatic — JSON syntax noise dilutes BM25 ranking slightly, but `snippet()` extracts relevant fragments. A flattened text column would improve quality but needs a PAR SDK schema change (conversations table is created by Sqlite_persistence).
+
+**影响范围**：lib/par_code_memory.ml (conversations_fts schema + search_history), lib/par_code_memory_tools.ml (search_history tool), bin/main.ml (CLI command).
+
+**回退方式**：N/A (additive feature).
+
+**已知限制**：History search is global, not project-scoped (conversations table lacks project_id column). FTS5 over JSON has minor quality degradation vs flattened text.
+
 ## [2026-07-06] v0.2.2 deferred; v0.3.0 prioritized
 
 **变更前**：Roadmap had v0.2.2 (Windows native + code signing) as the next release after v0.2.1.

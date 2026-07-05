@@ -1,6 +1,34 @@
 # CHANGES
 
-## v0.3.0-dev — Project Memory (in development)
+## v0.3.1-dev — Auto-Extraction + History Search (in development)
+
+> Session-end memory extraction and full-text search over past conversation
+> transcripts. The agent now captures salient facts automatically when you quit,
+> and you can search old sessions with `par memory search-history`.
+
+### Added
+- **Auto-extraction at session exit**: when the user quits the REPL, an
+  extractor agent reads the session transcript and writes salient memories
+  (quality-gated: "Will a future agent plausibly act better?"). Disable
+  with PAR_NO_AUTO_EXTRACT=1 or auto_extract:false in config.
+- **`search_history` agent tool**: FTS5 full-text search over past session
+  transcripts. Returns snippets with highlighted match terms.
+- **`par memory search-history <query>` CLI**: terminal-native history search.
+- **`conversations_fts` FTS5 index**: virtual table indexing the conversations
+  table for history search, with auto-backfill on DB open.
+- **`lib/par_code_extractor.ml`**: new module — quality-gated extractor prompt,
+  transcript serialization, JSON response parsing, deduplication via FTS5 recall.
+
+### Changed
+- **`lib/par_code_config.ml`**: added `auto_extract : bool` field (default: true).
+- **`lib/par_code_setup.ml`**: registers "memory-extractor" agent (tools=[], pure
+  generation) alongside the main "par" agent.
+- **`lib/par_code_repl.ml`**: triggers extraction at both exit paths (Ctrl-D, /quit).
+- **`lib/par_code_memory.ml`**: ensure_schema now creates conversations_fts + triggers
+  + runs 'rebuild' backfill. New search_history function with snippet() highlighting.
+- **`lib/par_code_memory_tools.ml`**: added search_history tool binding (3rd tool).
+
+## v0.3.0 — Project Memory
 
 > Cross-session project memory. par-code now remembers conventions, decisions,
 > gotchas, and preferences from past sessions. Memories are SQLite-backed with

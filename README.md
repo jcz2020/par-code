@@ -173,6 +173,7 @@ par-code remembers your project across sessions. Memories are stored per-project
 par memory add --kind convention --summary "uses conventional commits" --content "..."
 par memory list
 par memory search "authentication"
+par memory search-history "why did we switch to sqlite"
 par memory show <id>
 par memory export -o MEMORY.md
 par memory forget <id>
@@ -185,6 +186,9 @@ On session start, a compact index of your project's memories is injected into
 the agent's system prompt. The agent can call `recall_memory(query)` to search
 memories via FTS5, and `remember_memory(kind, content, summary)` to save new
 facts it discovers during your session.
+
+On REPL exit, the agent automatically extracts salient facts from the session
+and saves them as memories. Disable with `PAR_NO_AUTO_EXTRACT=1`.
 
 Memory kinds: `preference`, `convention`, `insight`, `gotcha`, `task_map`.
 
@@ -204,7 +208,8 @@ Version numbers stay minimal (no 1.0 until core parity is earned).
 | **v0.2.0** ✅ | Interactive coding agent — REPL, provider config, read/write/edit/grep/find/bash, streaming, session persistence. *"It reads and edits my code."* |
 | **v0.2.1** ✅ | One-line install & self-update (Linux + macOS) — `curl … \| bash`, no OCaml/opam required; pre-built binaries bundle sqlite3 + libgmp for true portability (glibc ≥ 2.28); `par upgrade` keeps it current. *"Install in one line. Updates itself."* |
 | **v0.2.2** | Deferred (upstream `Eio.Process` Windows blocker — `Eio.Process` unimplemented on Windows; re-scope when eio ships Windows process support) |
-| **v0.3.0** 🔨 | Project memory — SQLite-backed memory with FTS5 full-text search + recall/remember agent tools + `par memory` CLI. *"It remembers my project across sessions."* **(In development)** |
+| **v0.3.0** ✅ | Project memory — SQLite-backed memory with FTS5 full-text search + recall/remember agent tools + `par memory` CLI. *"It remembers my project across sessions."* |
+| **v0.3.1** | Auto-extraction + history search — session-end memory extraction + FTS5 search over past conversations. *"It remembers without being asked, and recalls what it wrote."* **(In development)** |
 | **v0.4.0** | Long-session continuity — checkpoint-writer subagent, budgeted context injection, context reconstruction. *"Hours-long sessions never lose the thread."* |
 | **v0.5.0** | Plan mode — read-only plan agent, build/plan switching, plan_enter/plan_exit. *"It plans before it touches code."* |
 | **v0.6.0** | Subagent delegation — general/explore subagents, actor tool, task tree. *"It spawns helpers to explore and work in parallel."* |

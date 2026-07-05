@@ -155,8 +155,10 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
 - **v0.2.1 ✅ shipped** — one-line install + self-update (Linux + macOS)
 - v0.2.2 — deferred (upstream `Eio.Process` Windows blocker; re-scope when eio
   ships Windows process support)
-- **v0.3.0 🔨 in development** — project memory: FTS5 + recall/remember tools
+- **v0.3.0 ✅ shipped** — project memory: FTS5 + recall/remember tools
   + `par memory` CLI
+- **v0.3.1 🔨 in development** — auto-extraction + history search: session-end
+  memory extraction + FTS5 search over past conversations
 - v0.4.0+ — long-session continuity, plan mode, subagents, autonomy, reasoning,
   self-improvement, compose mode, ecosystem, code intelligence, safety, polish
   → v1.0
@@ -184,6 +186,8 @@ per global rules) lives in `docs/DECISIONS.md`. Strategic-level entries:
 | 2026-07-06 | v0.3.0 memory architecture: SQLite+FTS5 over filesystem (DB-first, MEMORY.md export-only) | Active |
 | 2026-07-06 | v0.3.0 memory storage: shared par.db via PAR SDK 0.6.9 `raw_sqlite3_db` accessor | Active |
 | 2026-07-06 | MEMORY.md as auto-generated export, not source of truth (DB is canonical) | Active |
+| 2026-07-06 | Auto-extraction at session exit (synchronous, not background) to avoid PAR SDK reentrant invoke corruption | Active |
+| 2026-07-06 | History search via FTS5 on raw messages_json (global, not project-scoped) | Active |
 
 ## 10. Revision Protocol
 
