@@ -1,5 +1,19 @@
 # Decisions
 
+## [2026-07-06] v0.3.2: Linux arm64 pre-built binary via native ARM runner
+
+**变更前**：Pre-built binaries only for Linux x86_64 and macOS arm64. ARM Linux users (Raspberry Pi, AWS Graviton) had to compile from source (~20-30 min on Pi).
+
+**变更后**：Added `build-linux-arm64` CI job on GitHub's `ubuntu-24.04-arm` native ARM runner. Same AlmaLinux 8 Docker build base, same FTS5 sqlite3 amalgamation. install.sh and `par upgrade` recognize `aarch64`/`arm64`.
+
+**原因**：User reported Raspberry Pi compilation pain. GitHub opened free ARM runners for public repos (2025). Same Dockerfile works for both architectures (architecture-aware opam download + tarball naming via `uname -m`). No cross-compilation complexity.
+
+**影响范围**：release.yml (new job), Dockerfile (architecture-aware), install.sh (arm64 detection), par_code_upgrade.ml (arm64 platform), README platform table.
+
+**回退方式**：Remove `build-linux-arm64` job from release.yml. ARM users fall back to source compilation.
+
+**已知限制**：Alpine Linux (musl) still unsupported — static musl binary is a separate stretch goal.
+
 ## [2026-07-06] Auto-extraction at session exit (not background)
 
 **变更前**：No auto-extraction. Memories only written via explicit `remember_memory` tool or `par memory add` CLI.

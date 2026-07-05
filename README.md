@@ -9,8 +9,8 @@ CLI conventions and drives the full PAR surface — ReAct loop, tool dispatch,
 type-safe bash, MCP client, skills, workflows, streaming — to both ship a
 useful agent and prove out the PAR SDK in anger.
 
-**Status:** `v0.2.1` — distribution release. pre-built binaries with a
-one-line installer (`curl | bash`) for Linux + macOS, plus `par upgrade`
+**Status:** `v0.3.2` — project memory + auto-extraction + Linux arm64 support. Pre-built binaries with a
+one-line installer (`curl | bash`) for Linux x86_64/arm64 + macOS arm64, plus `par upgrade`
 self-update. No OCaml or opam needed for end users.
 
 ---
@@ -46,6 +46,18 @@ self-update. No OCaml or opam needed for end users.
 ### One-line installer (Linux + macOS)
 
 **Linux** (x86_64, glibc >= 2.28 — covers AlmaLinux 8+, Debian 11+, Ubuntu 20.04+, RHEL 8+, Fedora, Arch, etc.):
+
+```sh
+curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.sh | bash
+```
+
+**Linux** (x86_64, glibc >= 2.28 — covers AlmaLinux 8+, Debian 11+, Ubuntu 20.04+, RHEL 8+, Fedora, Arch):
+
+```sh
+curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.sh | bash
+```
+
+**Linux ARM64** (Raspberry Pi 4/5, AWS Graviton, other aarch64 Linux):
 
 ```sh
 curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.sh | bash
@@ -97,13 +109,14 @@ exists (gated by `PAR_NO_UPDATE_CHECK=1`).
 
 ### Platform support
 
-| Platform | v0.2.1 status | Notes |
+| Platform | Status | Notes |
 |---|---|---|
 | Linux x86_64 (glibc >= 2.28) | ✅ Pre-built binary | Covers AlmaLinux 8+, Debian 11+, Ubuntu 20.04+, RHEL 8+, Fedora |
+| Linux arm64 (aarch64) | ✅ Pre-built binary (v0.3.2+) | Raspberry Pi 4/5, AWS Graviton, other ARM Linux |
 | macOS arm64 (Apple Silicon) | ✅ Pre-built binary | Native |
 | macOS x86_64 (Intel) | ✅ Via Rosetta 2 | Same arm64 binary; ~20-40% performance penalty (acceptable for CLI) |
 | Windows x86_64 | ❌ Deferred | v0.2.2 deferred (upstream `Eio.Process` Windows blocker); re-scope when eio ships Windows process support |
-| Alpine Linux (musl) | ❌ Not in v0.2.1 | Static musl binary is a v0.2.3 stretch goal |
+| Alpine Linux (musl) | ❌ Not yet | Static musl binary is a stretch goal |
 
 ### Integrity model
 
@@ -209,7 +222,8 @@ Version numbers stay minimal (no 1.0 until core parity is earned).
 | **v0.2.1** ✅ | One-line install & self-update (Linux + macOS) — `curl … \| bash`, no OCaml/opam required; pre-built binaries bundle sqlite3 + libgmp for true portability (glibc ≥ 2.28); `par upgrade` keeps it current. *"Install in one line. Updates itself."* |
 | **v0.2.2** | Deferred (upstream `Eio.Process` Windows blocker — `Eio.Process` unimplemented on Windows; re-scope when eio ships Windows process support) |
 | **v0.3.0** ✅ | Project memory — SQLite-backed memory with FTS5 full-text search + recall/remember agent tools + `par memory` CLI. *"It remembers my project across sessions."* |
-| **v0.3.1** | Auto-extraction + history search — session-end memory extraction + FTS5 search over past conversations. *"It remembers without being asked, and recalls what it wrote."* **(In development)** |
+| **v0.3.1** ✅ | Auto-extraction + history search — session-end memory extraction + FTS5 search over past conversations. *"It remembers without being asked, and recalls what it wrote."* |
+| **v0.3.2** ✅ | Linux arm64 pre-built binary — Raspberry Pi / AWS Graviton / other aarch64 Linux supported with one-line installer. *"Install on ARM without compiling."* |
 | **v0.4.0** | Long-session continuity — checkpoint-writer subagent, budgeted context injection, context reconstruction. *"Hours-long sessions never lose the thread."* |
 | **v0.5.0** | Plan mode — read-only plan agent, build/plan switching, plan_enter/plan_exit. *"It plans before it touches code."* |
 | **v0.6.0** | Subagent delegation — general/explore subagents, actor tool, task tree. *"It spawns helpers to explore and work in parallel."* |

@@ -1,6 +1,25 @@
 # CHANGES
 
-## v0.3.1-dev — Auto-Extraction + History Search (in development)
+## v0.3.2 — Linux arm64 pre-built binary support
+
+> Linux ARM64 devices (Raspberry Pi 4/5, AWS Graviton, other aarch64 Linux)
+> now supported with one-line installer — no more compiling from source.
+
+### Added
+- **Linux arm64 pre-built binary**: new `build-linux-arm64` CI job on
+  `ubuntu-24.04-arm` native ARM runner. Same AlmaLinux 8 Docker build base,
+  same FTS5-enabled sqlite3 amalgamation. Output: `par-v<ver>-linux-arm64.tar.gz`.
+- **install.sh arm64 detection**: `aarch64`/`arm64` → `linux-arm64` platform.
+- **`par upgrade` arm64 support**: self-update recognizes `linux-arm64`.
+
+### Changed
+- **Dockerfile architecture-aware**: opam binary download and tarball naming
+  use `uname -m` instead of hardcoded `x86_64`. Same Dockerfile builds both
+  x86_64 and arm64.
+- **release.yml**: `coordinate` job `needs` includes `build-linux-arm64`;
+  Release assets list includes arm64 tarball + sha256.
+
+## v0.3.1 — Auto-Extraction + History Search
 
 > Session-end memory extraction and full-text search over past conversation
 > transcripts. The agent now captures salient facts automatically when you quit,

@@ -152,13 +152,14 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
 **Current posture** (as of this snapshot):
 - v0.1.0 ✅ shipped (skeleton)
 - v0.2.0 ✅ shipped (interactive coding agent)
-- **v0.2.1 ✅ shipped** — one-line install + self-update (Linux + macOS)
+- **v0.2.1 ✅ shipped** — one-line install + self-update (Linux x86_64 + macOS arm64)
 - v0.2.2 — deferred (upstream `Eio.Process` Windows blocker; re-scope when eio
   ships Windows process support)
 - **v0.3.0 ✅ shipped** — project memory: FTS5 + recall/remember tools
   + `par memory` CLI
-- **v0.3.1 🔨 in development** — auto-extraction + history search: session-end
-  memory extraction + FTS5 search over past conversations
+- **v0.3.1 ✅ shipped** — auto-extraction at session exit + history search
+  (FTS5 over conversations table)
+- **v0.3.2 ✅ shipped** — Linux arm64 pre-built binary (Raspberry Pi / Graviton)
 - v0.4.0+ — long-session continuity, plan mode, subagents, autonomy, reasoning,
   self-improvement, compose mode, ecosystem, code intelligence, safety, polish
   → v1.0
