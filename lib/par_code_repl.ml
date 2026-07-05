@@ -63,6 +63,34 @@ let load_initial_conv (rt : Runtime.runtime) (target : resume_target) : Types.co
      | Ok None -> Printf.eprintf "Session not found: %s\n%!" sid; None
      | Error e -> Printf.eprintf "Failed to load session %s: %s\n%!" sid (Par_code_setup.error_to_string e); None)
 
+let maybe_extract (rt : Runtime.runtime) (conv : Types.conversation option) =
+  let enabled =
+    match Sys.getenv_opt "PAR_NO_AUTO_EXTRACT" with
+    | Some "1" | Some "true" -> false
+    | _ ->
+      (match Par_code_config.load () with
+       | Some cfg -> cfg.Par_code_config.auto_extract
+       | None -> true)
+  in
+  if enabled then begin
+    match conv with
+    | None -> ()
+    | Some c ->
+      if List.length c.Types.messages <= 1 then ()
+      else begin
+        (try
+           let project_id = Par_code_memory.resolve_project_id () in
+           (match Par_code_memory.open_db () with
+            | Error (`Db_error msg) ->
+              Printf.eprintf "[extraction skipped: %s]\n%!" msg
+            | Ok mem_db ->
+              Par_code_extractor.run_extraction rt mem_db ~project_id c;
+              Par_code_memory.close mem_db)
+         with ex ->
+           Printf.eprintf "[extraction failed: %s]\n%!" (Printexc.to_string ex))
+      end
+  end
+
 let run (rt : Runtime.runtime) ~resume =
   Printf.printf "par %s — type a message (or /help for commands, Ctrl-D to quit)\n%!" Par_code_version.version;
   let conv : Types.conversation option ref = ref (load_initial_conv rt resume) in
@@ -72,6 +100,7 @@ let run (rt : Runtime.runtime) ~resume =
     match input_line stdin with
     | exception End_of_file ->
       let _ = Runtime.save_conversation rt in
+      maybe_extract rt !conv;
       Printf.printf "\nBye!\n%!"
     | line ->
       let trimmed = String.trim line in
@@ -89,6 +118,7 @@ let run (rt : Runtime.runtime) ~resume =
          | "/reset" -> conv := None; Printf.printf "[conversation reset]\n%!"
          | "/quit" | "/exit" ->
            let _ = Runtime.save_conversation rt in
+           maybe_extract rt !conv;
            Printf.printf "Bye!\n%!"; exit 0
          | _ -> Printf.eprintf "Unknown command: %s (try /help)\n%!" cmd);
         loop ()

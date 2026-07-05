@@ -228,6 +228,20 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
         | Error e ->
           Printf.eprintf "Error registering agent: %s\n%!" (error_to_string e);
           exit 1
+         | Ok () -> ()));
+    (* Register the memory-extractor agent (v0.3.1). Tools=[] — pure generation. *)
+    (match Runtime.make_agent
+       ~id:Par_code_extractor.extractor_agent_id
+       ~system_prompt:(Types.stable_prompt Par_code_extractor.extractor_system_prompt)
+       ~model:model_cfg
+       ~tools:[]
+       ~max_iterations:1
+       () with
+     | Error e ->
+       Printf.eprintf "Warning: extractor agent not registered: %s\n%!" (error_to_string e)
+     | Ok extractor ->
+       (match Runtime.register_agent rt extractor with
+        | Error e -> Printf.eprintf "Warning: extractor agent registration failed: %s\n%!" (error_to_string e)
         | Ok () -> ()));
     Runtime.register_tool_call_hook rt
       (Bash_confirm.make_hook ?confirm_fn:(Some (fun cmd ->

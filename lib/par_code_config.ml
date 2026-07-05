@@ -23,6 +23,7 @@ type config = {
   top_p : float option;
   parallel_tool_execution : bool;
   event_retention_days : float;
+  auto_extract : bool;
 }
 
 let default_system_prompt =
@@ -46,6 +47,7 @@ let default = {
   top_p = None;
   parallel_tool_execution = true;
   event_retention_days = 7.0;
+  auto_extract = true;
 }
 
 let config_dir () =
@@ -76,6 +78,7 @@ let to_json (cfg : config) : Yojson.Safe.t =
     ("top_p", opt_float cfg.top_p);
     ("parallel_tool_execution", `Bool cfg.parallel_tool_execution);
     ("event_retention_days", `Float cfg.event_retention_days);
+    ("auto_extract", `Bool cfg.auto_extract);
   ]
 
 let of_json (json : Yojson.Safe.t) : (config, string) result =
@@ -102,6 +105,7 @@ let of_json (json : Yojson.Safe.t) : (config, string) result =
       top_p = get_of "top_p";
       parallel_tool_execution = get_b "parallel_tool_execution" default.parallel_tool_execution;
       event_retention_days = get_f "event_retention_days" default.event_retention_days;
+      auto_extract = get_b "auto_extract" default.auto_extract;
     }
   with exn -> Error (Printexc.to_string exn)
 
@@ -157,7 +161,7 @@ let merge
     ?(model = None) ?(persistence = None) ?(db_uri = None)
     ?(temperature = None) ?(system_prompt = None) ?(max_iterations = None)
     ?(max_tokens = None) ?(top_p = None) ?(parallel_tool_execution = None)
-    ?(event_retention_days = None) () =
+    ?(event_retention_days = None) ?(auto_extract = None) () =
   {
     provider = Option.value provider ~default:cfg.provider;
     api_key = Option.value api_key ~default:cfg.api_key;
@@ -172,6 +176,7 @@ let merge
     top_p = (match top_p with Some _ as v -> v | None -> cfg.top_p);
     parallel_tool_execution = Option.value parallel_tool_execution ~default:cfg.parallel_tool_execution;
     event_retention_days = Option.value event_retention_days ~default:cfg.event_retention_days;
+    auto_extract = Option.value auto_extract ~default:cfg.auto_extract;
   }
 
 let require_config () =
@@ -253,6 +258,7 @@ let run_wizard () =
     max_tokens = None; top_p = None;
     parallel_tool_execution = true;
     event_retention_days = 7.0;
+    auto_extract = true;
   } in
   save cfg;
   Printf.printf "\nSaved config to %s\n%!" (config_path ())
