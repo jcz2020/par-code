@@ -45,7 +45,7 @@ RUN dnf config-manager --set-enabled powertools || true && \
 # The OS-package sqlite3 (sqlite-devel) may or may not include FTS5
 # depending on the distro; building from amalgamation guarantees it.
 COPY scripts/sqlite-amalgamation.version /tmp/sqlite-amalgamation.version
-RUN SQLITE_VERSION=$(cat /tmp/sqlite-amalgamation.version 2>/dev/null | tr -d '[:space:]' || echo "3460000") && \
+RUN SQLITE_VERSION=$(grep -E '^[0-9]+' /tmp/sqlite-amalgamation.version 2>/dev/null | head -1 | tr -d '[:space:]' || echo "3460000") && \
     curl -fsSL "https://www.sqlite.org/2024/sqlite-amalgamation-${SQLITE_VERSION}.zip" -o /tmp/sqlite3.zip && \
     unzip -q /tmp/sqlite3.zip -d /tmp/sqlite3-src && \
     cd /tmp/sqlite3-src/sqlite-amalgamation-* && \
