@@ -31,15 +31,38 @@ FROM almalinux:8 AS builder
 
 # All deps in one layer. AlmaLinux 8's stock gcc 8.5 already supports
 # C11 atomics (>= gcc 4.9) so no SCL/devtoolset dance is required.
-# - `dnf config-manager --set-enabled powertools`: libsqlite3-devel lives in PowerTools.
 # - `epel-release`: required for patchelf and bubblewrap (not in base RHEL 8 repos).
+# - sqlite3 is NOT installed from OS packages; we build from amalgamation below.
 RUN dnf config-manager --set-enabled powertools || true && \
     dnf install -y epel-release && \
     dnf install -y \
       gcc gcc-c++ make patch m4 perl git curl tar gzip unzip bzip2 diffutils \
-      sqlite-devel gmp-devel \
+      gmp-devel \
       patchelf bubblewrap \
     && dnf clean all
+
+# Build sqlite3 from amalgamation with FTS5 + JSON1 enabled.
+# The OS-package sqlite3 (sqlite-devel) may or may not include FTS5
+# depending on the distro; building from amalgamation guarantees it.
+COPY scripts/sqlite-amalgamation.version /tmp/sqlite-amalgamation.version
+RUN SQLITE_VERSION=$(cat /tmp/sqlite-amalgamation.version 2>/dev/null | tr -d '[:space:]' || echo "3460000") && \
+    curl -fsSL "https://www.sqlite.org/2024/sqlite-amalgamation-${SQLITE_VERSION}.zip" -o /tmp/sqlite3.zip && \
+    unzip -q /tmp/sqlite3.zip -d /tmp/sqlite3-src && \
+    cd /tmp/sqlite3-src/sqlite-amalgamation-* && \
+    gcc -O2 -fPIC -shared \
+      -DSQLITE_ENABLE_FTS5 \
+      -DSQLITE_ENABLE_JSON1 \
+      -DSQLITE_THREADSAFE=1 \
+      -DSQLITE_DEFAULT_MEMSTATUS=0 \
+      -DSQLITE_USE_ALLOCA \
+      sqlite3.c -o /usr/local/lib/libsqlite3.so.0 -lpthread -ldl && \
+    ln -sf /usr/local/lib/libsqlite3.so.0 /usr/local/lib/libsqlite3.so && \
+    cp sqlite3.h sqlite3ext.h /usr/local/include/ && \
+    mkdir -p /usr/local/lib/pkgconfig && \
+    printf 'prefix=/usr/local\nexec_prefix=${prefix}\nlibdir=${exec_prefix}/lib\nincludedir=${prefix}/include\n\nName: SQLite\nDescription: SQL database engine library\nVersion: 3.46.0\nLibs: -L${libdir} -lsqlite3\nCflags: -I${includedir}\n' \
+      > /usr/local/lib/pkgconfig/sqlite3.pc && \
+    ldconfig && \
+    rm -rf /tmp/sqlite3.zip /tmp/sqlite3-src /tmp/sqlite-amalgamation.version
 
 # opam binary (pinned to 2.1.5 stable).
 RUN curl -fsSL https://github.com/ocaml/opam/releases/download/2.1.5/opam-2.1.5-x86_64-linux \
@@ -62,7 +85,10 @@ COPY . /src/par-code
 WORKDIR /src/par-code
 
 # Install par-code deps and build.
+# PKG_CONFIG_PATH ensures conf-sqlite3 and sqlite3-ocaml's discover.ml
+# find the amalgamation-built libsqlite3 at /usr/local/lib/pkgconfig/sqlite3.pc.
 RUN eval $(opam env --switch=default) && \
+    export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}" && \
     opam install . --deps-only --with-test -y && \
     dune build
 
@@ -73,7 +99,7 @@ ARG VERSION=dev
 
 RUN mkdir -p /out && \
     cp _build/default/bin/main.exe /out/par && \
-    cp /usr/lib64/libsqlite3.so.0 /out/ && \
+    cp /usr/local/lib/libsqlite3.so.0 /out/ && \
     cp /usr/lib64/libgmp.so.10 /out/ && \
     chmod +x /out/par
 

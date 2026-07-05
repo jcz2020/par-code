@@ -40,6 +40,52 @@ error()   { printf '\033[31m[error]\033[0m %s\n' "$*" >&2; }
 success() { printf '\033[32m[success]\033[0m %s\n' "$*" >&2; }
 die()     { error "$*"; exit 1; }
 
+# --- sqlite3 amalgamation build ----------------------------------------------
+build_sqlite3_amalgamation() {
+    local ver_file="scripts/sqlite-amalgamation.version"
+    local sqlite_ver
+    if [ -f "$ver_file" ]; then
+        sqlite_ver=$(grep -vE '^\s*(#|$)' "$ver_file" | head -1 | tr -d '[:space:]')
+    fi
+    sqlite_ver="${sqlite_ver:-3460000}"
+    info "sqlite3 amalgamation version: $sqlite_ver"
+
+    # sqlite download URLs use the release year (e.g. 2024 for 3.46.x).
+    local year=2024
+
+    local out_dir="/tmp/sqlite3-amalgamation"
+    rm -rf "$out_dir"
+    mkdir -p "$out_dir"
+
+    local zip_name="sqlite-amalgamation-${sqlite_ver}.zip"
+    local url="https://www.sqlite.org/${year}/${zip_name}"
+    info "downloading $url ..."
+    curl -fsSL "$url" -o "$out_dir/$zip_name"
+
+    info "extracting amalgamation ..."
+    unzip -q "$out_dir/$zip_name" -d "$out_dir"
+
+    local src_dir="$out_dir/sqlite-amalgamation-${sqlite_ver}"
+    [ -f "$src_dir/sqlite3.c" ] || die "sqlite3.c not found in amalgamation zip"
+
+    info "compiling sqlite3 amalgamation → libsqlite3.0.dylib (arm64, FTS5+JSON1) ..."
+    clang -O2 -fPIC -dynamiclib \
+        -arch arm64 \
+        -install_name @rpath/libsqlite3.0.dylib \
+        -DSQLITE_ENABLE_FTS5 \
+        -DSQLITE_ENABLE_JSON1 \
+        -DSQLITE_THREADSAFE=1 \
+        -DSQLITE_DEFAULT_MEMSTATUS=0 \
+        -I"$src_dir" \
+        "$src_dir/sqlite3.c" \
+        -o "$out_dir/libsqlite3.0.dylib" \
+        -lpthread -ldl
+
+    [ -f "$out_dir/libsqlite3.0.dylib" ] || die "failed to build libsqlite3.0.dylib"
+    info "sqlite3 amalgamation dylib built: $out_dir/libsqlite3.0.dylib"
+    printf '%s\n' "$out_dir/libsqlite3.0.dylib"
+}
+
 # --- version -----------------------------------------------------------------
 
 if [ $# -ge 1 ]; then
@@ -59,12 +105,9 @@ command -v install_name_tool >/dev/null || die "install_name_tool not found (not
 command -v otool              >/dev/null || die "otool not found (not macOS?)"
 command -v zip                >/dev/null || die "zip not found"
 
-# Bundle C dylibs (libsqlite3 + libgmp). macos-15 GitHub runners do NOT
-# ship these by default — install via brew if missing. Idempotent: skip
-# if present. Accept both naming styles:
-#   - Apple system layout: libsqlite3.0.dylib (with .0 version suffix)
-#   - Homebrew layout:     libsqlite3.dylib   (no version suffix, dylib symlink)
-# We probe both in find_dylib below.
+# Bundle C dylib (libgmp). macos-15 GitHub runners do NOT ship it by
+# default — install via brew if missing. Idempotent: skip if present.
+# (libsqlite3 is built from amalgamation source — see build_sqlite3_amalgamation.)
 install_dylib() {
     local pkg="$1" name_no_ver="$2" name_with_ver="$3"
     if find_dylib "$name_with_ver" 2>/dev/null | head -1 | grep -q . \
@@ -75,7 +118,6 @@ install_dylib() {
         brew install "$pkg" || die "brew install $pkg failed"
     fi
 }
-install_dylib sqlite libsqlite3.dylib libsqlite3.0.dylib
 install_dylib gmp    libgmp.dylib    libgmp.10.dylib
 
 # --- build -------------------------------------------------------------------
@@ -100,9 +142,8 @@ BIN=_build/default/bin/main.exe
 [ -f "$BIN" ] || die "built binary not found at $BIN"
 
 # --- locate dylibs -----------------------------------------------------------
-# Lookup chain: Homebrew arm64 path first (default on macos-15 runner),
-# then a filesystem sweep. Both libs are needed because par-code links
-# sqlite3-ocaml and mirage-crypto-rng (which pulls libgmp).
+# libsqlite3 is built from amalgamation (build_sqlite3_amalgamation above).
+# libgmp is looked up from Homebrew via find_dylib.
 find_dylib() {
     local name="$1"
     for p in \
@@ -116,14 +157,10 @@ find_dylib() {
     find /usr/lib /usr/local/lib /opt/homebrew/lib /Library/Apple/usr/lib -name "$name" 2>/dev/null | head -1 || true
 }
 
-SQLITE_DYLIB=$(find_dylib libsqlite3.0.dylib)
+SQLITE_DYLIB=$(build_sqlite3_amalgamation)
 GMP_DYLIB=$(find_dylib libgmp.10.dylib)
-[ -n "$SQLITE_DYLIB" ] || SQLITE_DYLIB=$(find_dylib libsqlite3.dylib)
-[ -n "$GMP_DYLIB" ]    || GMP_DYLIB=$(find_dylib libgmp.dylib)
-# Last-resort: brew --prefix sqlite (Homebrew's install dir for sqlite keg).
-[ -n "$SQLITE_DYLIB" ] || SQLITE_DYLIB=$(find "$(brew --prefix sqlite 2>/dev/null)/lib" -name 'libsqlite3*.dylib' 2>/dev/null | head -1 || true)
-[ -n "$SQLITE_DYLIB" ] || die "libsqlite3*.dylib not found on the build host — install sqlite via 'brew install sqlite'"
-[ -n "$GMP_DYLIB" ]    || die "libgmp*.dylib not found on the build host — install gmp via 'brew install gmp'"
+[ -n "$GMP_DYLIB" ] || GMP_DYLIB=$(find_dylib libgmp.dylib)
+[ -n "$GMP_DYLIB" ] || die "libgmp*.dylib not found on the build host — install gmp via 'brew install gmp'"
 info "sqlite3 dylib: $SQLITE_DYLIB"
 info "gmp dylib:     $GMP_DYLIB"
 

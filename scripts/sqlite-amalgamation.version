@@ -1,0 +1,9 @@
+# sqlite-amalgamation.version — pinned sqlite3 amalgamation build number.
+#
+# Shared by build-macos.sh (darwin-arm64) and linux-bundle.Dockerfile.
+# Format: sqlite3 version as a single integer (e.g. 3460000 = 3.46.0).
+# See https://www.sqlite.org/download.html for current versions.
+#
+# To update: change this number, update the download URL year if needed,
+# and test both macOS and Linux builds.
+3460000
