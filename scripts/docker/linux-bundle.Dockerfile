@@ -64,6 +64,11 @@ RUN SQLITE_VERSION=$(grep -E '^[0-9]+' /tmp/sqlite-amalgamation.version 2>/dev/n
     ldconfig && \
     rm -rf /tmp/sqlite3.zip /tmp/sqlite3-src /tmp/sqlite-amalgamation.version
 
+# Make the amalgamation-built sqlite3 discoverable by pkg-config for ALL
+# subsequent RUN commands (opam pin, opam install, dune build).
+# Without this, conf-sqlite3 fails because it can't find sqlite3.pc.
+ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH}
+
 # opam binary (pinned to 2.1.5 stable).
 RUN curl -fsSL https://github.com/ocaml/opam/releases/download/2.1.5/opam-2.1.5-x86_64-linux \
       -o /usr/local/bin/opam && \
