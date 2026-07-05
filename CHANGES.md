@@ -59,7 +59,7 @@
 - `.gitignore`: added `lib/par_code_version.ml` (generated file, never
   committed).
 
-## v0.2.0-dev — Interactive coding agent (UNRELEASED)
+## v0.2.0-dev — Interactive coding agent (shipped as part of v0.2.1)
 
 > First working release. par-code is now a functional terminal coding agent
 > with REPL, single-shot ask, provider configuration, PAR builtin tools,

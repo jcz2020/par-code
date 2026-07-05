@@ -1,6 +1,6 @@
 # par-code Strategy
 
-> **Last updated**: 2026-07-02
+> **Last updated**: 2026-07-03
 > **Status**: Active
 > **Owner**: PAR-Code Contributors
 >
@@ -152,7 +152,7 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
 **Current posture** (as of this snapshot):
 - v0.1.0 ✅ shipped (skeleton)
 - v0.2.0 ✅ shipped (interactive coding agent)
-- **v0.2.1 in planning** — one-line install + self-update (Linux + macOS);
+- **v0.2.1 ✅ shipped** — one-line install + self-update (Linux + macOS);
   Windows + signing deferred to v0.2.2
 - v0.3.0+ — project memory, long-session continuity, plan mode, subagents,
   autonomy, reasoning, self-improvement, compose mode, ecosystem, code
@@ -174,7 +174,9 @@ per global rules) lives in `docs/DECISIONS.md`. Strategic-level entries:
 | 2026-07-02 | Founding: par-code as a PAR-SDK coding agent (integration path = OCaml native SDK; agent form = interactive coding REPL; MVP scope = v0.1.0 skeleton only; license = Apache-2.0; repo = `jcz2020/par-code` public) | Active |
 | 2026-07-02 | Roadmap v0.2.0 → v1.0.0 defined (one user-perceivable capability per release; core parity before 1.0) | Active |
 | 2026-07-02 | v0.2.1 scope inserted between v0.2.0 and v0.3.0 (distribution release) | Active (superseded in part by next row) |
-| 2026-07-02 | v0.2.1 scope revised post-review: Linux + macOS only; Windows + signing → v0.2.2; bundle sqlite3/libgmp; CentOS 7 build base; Intel Mac via Rosetta; musl-static → v0.2.3 | Active |
+| 2026-07-02 | v0.2.1 scope revised post-review: Linux + macOS only; Windows + signing → v0.2.2; bundle sqlite3/libgmp; CentOS 7 build base; Intel Mac via Rosetta; musl-static → v0.2.3 | Active (superseded by AlmaLinux 8 row) |
+| 2026-07-03 | v0.2.1 shipped (one-line install + self-update, AlmaLinux 8 base, glibc ≥ 2.28) | Active |
+| 2026-07-03 | Linux bundle base switched from CentOS 7 + devtoolset-11 to AlmaLinux 8 (CentOS 7 EOL + vault unstable) | Active |
 
 ## 10. Revision Protocol
 
