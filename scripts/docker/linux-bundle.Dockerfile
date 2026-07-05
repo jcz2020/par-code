@@ -70,7 +70,7 @@ RUN SQLITE_VERSION=$(grep -E '^[0-9]+' /tmp/sqlite-amalgamation.version 2>/dev/n
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH}
 
 # opam binary (pinned to 2.1.5 stable). Architecture-aware for x86_64 + aarch64.
-RUN OPAM_ARCH=$(uname -m) && \
+RUN OPAM_ARCH=$(uname -m | sed 's/aarch64/arm64/') && \
     curl -fsSL "https://github.com/ocaml/opam/releases/download/2.1.5/opam-2.1.5-${OPAM_ARCH}-linux" \
       -o /usr/local/bin/opam && \
     chmod +x /usr/local/bin/opam
