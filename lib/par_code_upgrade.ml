@@ -49,7 +49,7 @@ let github_host () =
 let download_host () =
   Option.value ~default:"github.com" (Sys.getenv_opt "PAR_MIRROR")
 
-let user_agent = "par-code/" ^ "0.2.0-dev"
+let user_agent = "par-code/" ^ Par_code_version.version
 
 let tls_wrapper uri raw_flow =
   let cfg = Lazy.force Par.Http_client.tls_config in

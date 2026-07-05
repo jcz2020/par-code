@@ -64,7 +64,7 @@ let load_initial_conv (rt : Runtime.runtime) (target : resume_target) : Types.co
      | Error e -> Printf.eprintf "Failed to load session %s: %s\n%!" sid (Par_code_setup.error_to_string e); None)
 
 let run (rt : Runtime.runtime) ~resume =
-  Printf.printf "par v0.2.0-dev — type a message (or /help for commands, Ctrl-D to quit)\n%!";
+  Printf.printf "par %s — type a message (or /help for commands, Ctrl-D to quit)\n%!" Par_code_version.version;
   let conv : Types.conversation option ref = ref (load_initial_conv rt resume) in
   let on_tool_event = make_tool_event_callback () in
   let rec loop () =
