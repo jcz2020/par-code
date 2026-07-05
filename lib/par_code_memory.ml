@@ -16,6 +16,13 @@ type memory = {
   source : [`Manual | `Agent | `Import];
 }
 
+type history_hit = {
+  session_id : string;
+  snippet : string;
+  updated_at : float;
+  turn_count : int;
+}
+
 let ( let* ) = Result.bind
 
 let kind_to_string = function
@@ -93,6 +100,22 @@ let ensure_schema t =
           INSERT INTO memory_entries_fts(rowid, content, summary, kind)
           VALUES (new.id, new.content, new.summary, new.kind);
       END|};
+      "CREATE VIRTUAL TABLE IF NOT EXISTS conversations_fts USING fts5(messages_json, content='conversations')";
+      {|CREATE TRIGGER IF NOT EXISTS conv_ai AFTER INSERT ON conversations BEGIN
+          INSERT INTO conversations_fts(rowid, messages_json)
+          VALUES (new.rowid, new.messages_json);
+      END|};
+      {|CREATE TRIGGER IF NOT EXISTS conv_ad AFTER DELETE ON conversations BEGIN
+          INSERT INTO conversations_fts(conversations_fts, rowid, messages_json)
+          VALUES ('delete', old.rowid, old.messages_json);
+      END|};
+      {|CREATE TRIGGER IF NOT EXISTS conv_au AFTER UPDATE ON conversations BEGIN
+          INSERT INTO conversations_fts(conversations_fts, rowid, messages_json)
+          VALUES ('delete', old.rowid, old.messages_json);
+          INSERT INTO conversations_fts(rowid, messages_json)
+          VALUES (new.rowid, new.messages_json);
+      END|};
+      "INSERT INTO conversations_fts(conversations_fts) VALUES('rebuild')";
     ] in
     List.iter (fun s -> ignore (Sqlite3.exec t.db s)) stmts;
     ())
@@ -382,3 +405,35 @@ let prune_stale t ~project_id ~older_than_days =
     match rc with
     | Sqlite3.Rc.DONE -> Sqlite3.changes t.db
     | _ -> raise (Sqlite3.Error (Sqlite3.Rc.to_string rc)))
+
+let search_history t ~query ?(limit = 10) () =
+  let fts_query = sanitize_fts_query query in
+  let sql =
+    "SELECT c.session_id, \
+     snippet(conversations_fts, 0, '<<', '>>', '...', 20), \
+     c.updated_at, c.turn_count \
+     FROM conversations_fts \
+     JOIN conversations c ON c.rowid = conversations_fts.rowid \
+     WHERE conversations_fts MATCH ? \
+     ORDER BY rank LIMIT ?" in
+  wrap_sqlite_error (fun () ->
+    let stmt = Sqlite3.prepare t.db sql in
+    let _ = Sqlite3.bind_text stmt 1 fts_query in
+    let _ = Sqlite3.bind_int stmt 2 limit in
+    let results = ref [] in
+    let rec collect () =
+      match Sqlite3.step stmt with
+      | Sqlite3.Rc.ROW ->
+        let hit = {
+          session_id = Sqlite3.column_text stmt 0;
+          snippet = Sqlite3.column_text stmt 1;
+          updated_at = Sqlite3.column_double stmt 2;
+          turn_count = Sqlite3.column_int stmt 3;
+        } in
+        results := hit :: !results;
+        collect ()
+      | _ -> ()
+    in
+    collect ();
+    ignore (Sqlite3.finalize stmt);
+    List.rev !results)

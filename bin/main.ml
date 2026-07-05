@@ -332,6 +332,32 @@ let cmd_memory_search_term =
 
 let info_memory_search = Cmd.info "search" ~doc:"Full-text search memories"
 
+let cmd_memory_search_history query =
+  with_memory_db (fun mem_db ->
+    match Par_code_memory.search_history mem_db ~query ~limit:10 () with
+    | Error (`Db_error msg) ->
+      Printf.eprintf "Error searching history: %s\n%!" msg;
+      exit 1
+    | Ok [] ->
+      Printf.printf "No history matched your query.\n%!";
+    | Ok hits ->
+      Printf.printf "%-24s %-40s %-10s %s\n" "SESSION_ID" "SNIPPET" "UPDATED" "TURNS";
+      Printf.printf "%s\n" (String.make 90 '-');
+      List.iter (fun (h : Par_code_memory.history_hit) ->
+        let snippet = if String.length h.snippet > 40
+          then String.sub h.snippet 0 37 ^ "..."
+          else h.snippet in
+        Printf.printf "%-24s %-40s %-10s %d\n"
+          h.session_id snippet (format_timestamp h.updated_at) h.turn_count
+      ) hits)
+
+let cmd_memory_search_history_term =
+  let open Term in
+  const cmd_memory_search_history $ Cli_args.memory_query_arg
+
+let info_memory_search_history =
+  Cmd.info "search-history" ~doc:"Full-text search past session transcripts"
+
 let cmd_memory =
   Cmd.group (Cmd.info "memory" ~doc:"Manage project memories")
     [ Cmd.v info_memory_list cmd_memory_list_term;
@@ -340,7 +366,8 @@ let cmd_memory =
       Cmd.v info_memory_show cmd_memory_show_term;
       Cmd.v info_memory_export cmd_memory_export_term;
       Cmd.v info_memory_prune cmd_memory_prune_term;
-      Cmd.v info_memory_search cmd_memory_search_term; ]
+      Cmd.v info_memory_search cmd_memory_search_term;
+      Cmd.v info_memory_search_history cmd_memory_search_history_term; ]
 
 let cmd =
   Cmd.group ~default:term_chat

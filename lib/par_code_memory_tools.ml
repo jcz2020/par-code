@@ -1,8 +1,9 @@
 (* par_code_memory_tools.ml — LLM-facing memory tools for par-code v0.3.0.
  *
- * Two tool bindings that expose the project memory layer to the agent:
+ * Three tool bindings that expose the project memory layer to the agent:
  * - recall_memory: FTS5 full-text search over project memories
  * - remember_memory: Save a new memory entry during a coding session
+ * - search_history: FTS5 search over past session transcripts
  *
  * Each tool is a [Types.tool_binding] with descriptor + handler, compatible
  * with [Runtime.register_tool]. *)
@@ -98,6 +99,23 @@ let remember_input_schema : Yojson.Safe.t =
             ])
         ])
     ; ("required", `List [`String "kind"; `String "content"; `String "summary"])
+    ]
+
+let search_history_input_schema : Yojson.Safe.t =
+  `Assoc
+    [ ("type", `String "object")
+    ; ("properties", `Assoc
+        [ ("query", `Assoc
+            [ ("type", `String "string")
+            ; ("description", `String "What to search for in past sessions")
+            ])
+        ; ("limit", `Assoc
+            [ ("type", `String "integer")
+            ; ("description", `String "Max results (default 10)")
+            ; ("default", `Int 10)
+            ])
+        ])
+    ; ("required", `List [`String "query"])
     ]
 
 (* -- Tool bindings -------------------------------------------------------- *)
@@ -213,4 +231,52 @@ let tools (mem_db : Par_code_memory.t) : Types.tool_binding list =
     in
     { descriptor; handler }
   in
-  [ recall_memory; remember_memory ]
+  let search_history =
+    let descriptor =
+      { name = "search_history"
+      ; description =
+          "Search past session transcripts by full-text search. Returns \
+           snippets from conversations that match the query. Use this when \
+           the user asks 'what did we discuss about X last time?' or similar \
+           history questions."
+      ; input_schema = search_history_input_schema
+      ; output_schema = None
+      ; permission = Allow
+      ; timeout = Some 10.0
+      ; concurrency_limit = None
+      ; on_update = None
+      ; cache_control = None
+      }
+    in
+    let handler = fun input _tok ->
+      let open Yojson.Safe.Util in
+      let query_opt = input |> member "query" |> to_string_option in
+      match query_opt with
+      | None ->
+        tool_error ~category:(Invalid_input "Missing required field: query")
+          ~message:"The 'query' field is required." ()
+      | Some query ->
+        let limit =
+          match input |> member "limit" with
+          | `Null -> 10
+          | j -> (try to_int j with _ -> 10)
+        in
+        (match Par_code_memory.search_history mem_db ~query ~limit () with
+         | Ok hits ->
+           let json_hits =
+             `List (List.map (fun (h : Par_code_memory.history_hit) ->
+               `Assoc
+                 [ ("session_id", `String h.session_id)
+                 ; ("snippet",    `String h.snippet)
+                 ; ("updated_at", `String (iso8601_of_float h.updated_at))
+                 ; ("turn_count", `Int h.turn_count)
+                 ]) hits)
+           in
+           Success (`Assoc [("results", json_hits)])
+         | Error (`Db_error msg) ->
+           tool_error ~category:(Internal "Database error")
+             ~message:(Printf.sprintf "History search failed: %s" msg) ())
+    in
+    { descriptor; handler }
+  in
+  [ recall_memory; remember_memory; search_history ]

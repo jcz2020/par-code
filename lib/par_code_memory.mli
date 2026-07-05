@@ -30,6 +30,14 @@ type memory = {
   source : [`Manual | `Agent | `Import];
 }
 
+(** A conversation history search result with highlighted snippet. *)
+type history_hit = {
+  session_id : string;
+  snippet : string;
+  updated_at : float;
+  turn_count : int;
+}
+
 (** {2 Lifecycle} *)
 
 val open_db : unit -> (t, [> `Db_error of string]) result
@@ -95,3 +103,10 @@ val prune_stale : t -> project_id:string -> older_than_days:float ->
                   (int, [> `Db_error of string]) result
 (** Delete memories with [usage_count = 0] and [updated_at] older than the
     given threshold. Returns the count of deleted rows. *)
+
+val search_history : t -> query:string -> ?limit:int -> unit ->
+                     (history_hit list, [> `Db_error of string]) result
+(** Full-text search of conversation history via FTS5 MATCH on the
+    [conversations_fts] virtual table. Returns session snippets with
+    highlighted matches, ranked by BM25 relevance.
+    @param limit defaults to 10. *)
