@@ -12,17 +12,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, macos-15]
+        os: [ubuntu-22.04, ubuntu-24.04-arm, macos-15]
     steps:
       - uses: actions/checkout@v4
       - uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: 5.4.0
           dune-cache: true
-          cache-prefix: v2-par067
+          cache-prefix: v3-par069
       # PAR SDK is not yet on the public opam repo — pin it from source.
       - name: Pin PAR SDK
-        run: opam pin add par https://github.com/jcz2020/par.git -y || true
+        run: opam pin add par https://github.com/jcz2020/par.git -y
       - name: Install dependencies
         run: opam install . --deps-only --with-test
       - name: Build
