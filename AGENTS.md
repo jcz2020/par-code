@@ -1,7 +1,83 @@
 # par-code 项目规则
 
-> 项目级规则。优先级高于全局 `~/.config/opencode/AGENTS.md`。
-> 仅记录与本项目强相关的硬约束；通用规范看全局。
+> 项目级规则 + 项目地图。优先级高于全局 `~/.config/opencode/AGENTS.md`。
+> 新会话读完此文件即可干活。
+
+---
+
+## 0. 项目地图
+
+### 这是什么
+
+par-code 是一个基于 PAR SDK 的 OCaml 终端编码 agent。用户通过 `par` 命令启动 REPL，agent 能读写编辑代码、跑 bash、跨会话记忆项目知识。同时是 PAR SDK 的验证项目——每个功能都反哺 PAR 的能力缺口。
+
+### 当前状态
+
+- **版本**：v0.3.2（见 `dune-project`）
+- **PAR SDK 依赖**：0.6.9+（opam pin from `github.com/jcz2020/par.git`）
+- **opam switch**：`/root/dev/PAR`（OCaml 5.4.1）
+- **已发布**：v0.2.1（安装器）、v0.3.0（项目记忆）、v0.3.1（自动提取）、v0.3.2（arm64）
+
+### 架构概览
+
+```
+用户
+ │
+ ▼
+bin/main.ml ── Cmdliner CLI 入口
+ │  ├── par (默认) → par_code_repl.ml (REPL 循环)
+ │  ├── par ask    → par_code_repl.ml (单次问答)
+ │  ├── par config → par_code_config.ml (配置向导)
+ │  ├── par upgrade→ par_code_upgrade.ml (自更新)
+ │  └── par memory → par_code_memory.ml (记忆管理 CLI)
+ │
+ ▼
+lib/par_code_setup.ml ── Runtime 引导层
+ │  ├── 创建 PAR Runtime (persistence + LLM + embeddings)
+ │  ├── 注册 builtin tools + bash tool + memory tools
+ │  ├── 注册 "par" agent (编码) + "memory-extractor" agent (提取)
+ │  └── 注入记忆索引到 system prompt
+ │
+ ▼
+PAR SDK (Runtime.invoke → ReAct loop → tool dispatch → LLM)
+ │
+ ▼
+~/.par/par.db ── SQLite (WAL mode)
+ ├── conversations (PAR 管控) → conversations_fts (par-code 加的 FTS5 索引)
+ ├── events / task_states / workflow_states (PAR 管控)
+ └── memory_entries + memory_entries_fts (par-code 管控)
+```
+
+### 文件索引
+
+| 文件 | 职责 | 读它当你需要 |
+|---|---|---|
+| `lib/par_code_config.ml` | 配置类型 + JSON 序列化 + 向导 | 加配置项、改默认值 |
+| `lib/par_code_setup.ml` | Runtime 引导：创建 runtime、注册 tools/agents | 集成新功能到 runtime |
+| `lib/par_code_repl.ml` | REPL 循环 + 单次问答 | 改交互行为、加 slash 命令 |
+| `lib/par_code_memory.ml` | 记忆层：schema + CRUD + FTS5 + 索引渲染 | 改记忆 schema、加搜索功能 |
+| `lib/par_code_memory_tools.ml` | 3 个 agent 工具 (recall/remember/search_history) | 加新工具给 LLM 用 |
+| `lib/par_code_extractor.ml` | 会话结束时自动提取记忆 | 改提取逻辑、prompt |
+| `lib/par_code_upgrade.ml` | 自更新：下载、校验、原子替换 | 加平台支持、改升级逻辑 |
+| `bin/cli_args.ml` | Cmdliner 参数定义 | 加 CLI 参数 |
+| `bin/main.ml` | 命令分发 + 子命令组 | 加子命令 |
+| `scripts/install.sh` | POSIX sh 一键安装器 | 加平台、改安装逻辑 |
+| `scripts/docker/linux-bundle.Dockerfile` | Linux 构建容器 (AlmaLinux 8 + FTS5) | 改构建依赖、加编译选项 |
+| `scripts/build-macos.sh` | macOS 构建脚本 | 同上 |
+| `scripts/sqlite-amalgamation.version` | sqlite3 版本锁 (单一整数) | 升级 sqlite3 |
+| `docs/STRATEGY.md` | 战略快照：定位、用户、路线图姿态 | 理解"为什么" |
+| `docs/DECISIONS.md` | 决策记录 (6 字段格式) | 理解"为什么做了 X" |
+| `.github/workflows/release.yml` | Tag 触发的多平台发布流水线 | 改 CI、加平台 |
+| `.github/workflows/ci.yml` | push/PR 触发的测试流水线 | 改 CI matrix |
+| `.sisyphus/plans/v*.md` | 版本实现计划 (gitignored, 本地) | 理解架构决策的完整推理 |
+
+### 关键约束速查
+
+- PAR SDK 不可改（§1）
+- 版本号不可自动 bump（§2）
+- FTS5 必须从 amalgamation 编译（§3）
+- 并行 agent 禁止 git 写操作（§4）
+- 披露规则：committed 产物不得出现外部项目/公司名（见全局 AGENTS.md §2）
 
 ---
 
