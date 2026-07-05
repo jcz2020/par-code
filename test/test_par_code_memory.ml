@@ -1,5 +1,15 @@
 let failf fmt = Printf.ksprintf (fun s -> Alcotest.fail s) fmt
 
+let string_contains s sub =
+  let len_s = String.length s in
+  let len_sub = String.length sub in
+  let rec search i =
+    if i + len_sub > len_s then false
+    else if String.sub s i len_sub = sub then true
+    else search (i + 1)
+  in
+  len_sub = 0 || search 0
+
 let with_temp_db f =
   let tmpdir = Filename.temp_file "par_test_" "" in
   Sys.remove tmpdir;
@@ -25,6 +35,56 @@ let with_temp_db f =
         result
       | Error (`Db_error msg) ->
         failf "open_db failed: %s" msg)
+
+let with_history_db f =
+  let tmpdir = Filename.temp_file "par_test_" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o755;
+  let old_home = (try Sys.getenv "HOME" with Not_found -> "") in
+  Unix.putenv "HOME" tmpdir;
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "HOME" old_home;
+      let rec rm_rf p =
+        if Sys.file_exists p then
+          if Sys.is_directory p then begin
+            Array.iter (fun e -> rm_rf (Filename.concat p e)) (Sys.readdir p);
+            Unix.rmdir p
+          end else Sys.remove p
+      in
+      rm_rf tmpdir)
+    (fun () ->
+      let par_dir = Filename.concat tmpdir ".par" in
+      Unix.mkdir par_dir 0o755;
+      let db_path = Filename.concat par_dir "par.db" in
+      let raw = Sqlite3.db_open db_path in
+      ignore (Sqlite3.exec raw
+        "CREATE TABLE IF NOT EXISTS conversations (\
+           session_id TEXT, messages_json TEXT, metadata_json TEXT, \
+           updated_at REAL, turn_count INTEGER)");
+      ignore (Sqlite3.db_close raw);
+      match Par_code_memory.open_db () with
+      | Ok db ->
+        let result = f ~tmpdir db in
+        Par_code_memory.close db;
+        result
+      | Error (`Db_error msg) ->
+        failf "open_db failed: %s" msg)
+
+let open_raw_db tmpdir =
+  Sqlite3.db_open
+    (Filename.concat (Filename.concat tmpdir ".par") "par.db")
+
+let insert_raw_conversation raw ~session_id ~messages_json ~updated_at ~turn_count =
+  let stmt = Sqlite3.prepare raw
+    "INSERT INTO conversations (session_id, messages_json, metadata_json, updated_at, turn_count) \
+     VALUES (?, ?, '{}', ?, ?)" in
+  ignore (Sqlite3.bind_text stmt 1 session_id);
+  ignore (Sqlite3.bind_text stmt 2 messages_json);
+  ignore (Sqlite3.bind_double stmt 3 updated_at);
+  ignore (Sqlite3.bind_int stmt 4 turn_count);
+  ignore (Sqlite3.step stmt);
+  ignore (Sqlite3.finalize stmt)
 
 let add_mem db ~project_id ~kind ~content ~summary =
   match Par_code_memory.add db ~project_id ~kind ~content ~summary
@@ -158,6 +218,110 @@ let render_index_line_cap () =
     let non_empty = List.filter (fun s -> s <> "") lines in
     Alcotest.(check bool) "line cap ≤ 201" true (List.length non_empty <= 201))
 
+let conversations_fts_insert_and_search () =
+  with_history_db (fun ~tmpdir db ->
+    let raw = open_raw_db tmpdir in
+    insert_raw_conversation raw
+      ~session_id:"test-1"
+      ~messages_json:{|{"role":"user","content":"authentication bug in auth module"}|}
+      ~updated_at:1000.0
+      ~turn_count:1;
+    ignore (Sqlite3.db_close raw);
+    match Par_code_memory.search_history db ~query:"authentication" () with
+    | Ok [h] ->
+      Alcotest.(check string) "session_id" "test-1" h.Par_code_memory.session_id
+    | Ok [] -> Alcotest.fail "search_history returned empty"
+    | Ok _  -> Alcotest.fail "search_history returned too many results"
+    | Error (`Db_error msg) -> failf "search_history: %s" msg)
+
+let search_history_snippet_highlighting () =
+  with_history_db (fun ~tmpdir db ->
+    let raw = open_raw_db tmpdir in
+    insert_raw_conversation raw
+      ~session_id:"test-snippet"
+      ~messages_json:{|{"role":"user","content":"The auth module has a race condition"}|}
+      ~updated_at:2000.0
+      ~turn_count:1;
+    ignore (Sqlite3.db_close raw);
+    match Par_code_memory.search_history db ~query:"auth" () with
+    | Ok [h] ->
+      Alcotest.(check bool) "snippet contains <<auth" true
+        (string_contains h.Par_code_memory.snippet "<<auth")
+    | Ok [] -> Alcotest.fail "search_history returned empty"
+    | Ok _  -> Alcotest.fail "search_history returned too many results"
+    | Error (`Db_error msg) -> failf "search_history: %s" msg)
+
+let search_history_respects_limit () =
+  with_history_db (fun ~tmpdir db ->
+    let raw = open_raw_db tmpdir in
+    for i = 1 to 10 do
+      insert_raw_conversation raw
+        ~session_id:(Printf.sprintf "test-limit-%d" i)
+        ~messages_json:(Printf.sprintf
+                          {|{"role":"user","content":"test conversation number %d"}|} i)
+        ~updated_at:(float_of_int (1000 + i))
+        ~turn_count:i
+    done;
+    ignore (Sqlite3.db_close raw);
+    match Par_code_memory.search_history db ~query:"test" ~limit:3 () with
+    | Ok hits ->
+      Alcotest.(check int) "search_history limit" 3 (List.length hits)
+    | Error (`Db_error msg) -> failf "search_history: %s" msg)
+
+let conversations_fts_backfill () =
+  let tmpdir = Filename.temp_file "par_test_" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o755;
+  let old_home = (try Sys.getenv "HOME" with Not_found -> "") in
+  Unix.putenv "HOME" tmpdir;
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "HOME" old_home;
+      let rec rm_rf p =
+        if Sys.file_exists p then
+          if Sys.is_directory p then begin
+            Array.iter (fun e -> rm_rf (Filename.concat p e)) (Sys.readdir p);
+            Unix.rmdir p
+          end else Sys.remove p
+      in
+      rm_rf tmpdir)
+    (fun () ->
+      let par_dir = Filename.concat tmpdir ".par" in
+      Unix.mkdir par_dir 0o755;
+      let db_path = Filename.concat par_dir "par.db" in
+      let raw = Sqlite3.db_open db_path in
+      ignore (Sqlite3.exec raw
+        "CREATE TABLE IF NOT EXISTS conversations (\
+           session_id TEXT, messages_json TEXT, metadata_json TEXT, \
+           updated_at REAL, turn_count INTEGER)");
+      for i = 1 to 3 do
+        insert_raw_conversation raw
+          ~session_id:(Printf.sprintf "backfill-%d" i)
+          ~messages_json:(Printf.sprintf
+                            {|{"role":"user","content":"test backfill conversation %d"}|} i)
+          ~updated_at:(float_of_int (1000 + i))
+          ~turn_count:1
+      done;
+      ignore (Sqlite3.db_close raw);
+      match Par_code_memory.open_db () with
+      | Ok db ->
+        (match Par_code_memory.search_history db ~query:"backfill" () with
+         | Ok hits ->
+           Alcotest.(check int) "backfill count" 3 (List.length hits);
+           Par_code_memory.close db
+         | Error (`Db_error msg) ->
+           Par_code_memory.close db;
+           failf "search_history: %s" msg)
+      | Error (`Db_error msg) ->
+        failf "open_db failed: %s" msg)
+
+let search_history_empty_db () =
+  with_history_db (fun ~tmpdir:_ db ->
+    match Par_code_memory.search_history db ~query:"anything" () with
+    | Ok [] -> ()
+    | Ok _  -> Alcotest.fail "search_history returned results on empty db"
+    | Error (`Db_error msg) -> failf "search_history: %s" msg)
+
 let () =
   Alcotest.run "par_memory"
     [ "schema", [ Alcotest.test_case "idempotent" `Quick schema_idempotent ];
@@ -170,4 +334,11 @@ let () =
       "usage",     [ Alcotest.test_case "bump"    `Quick bump_usage_increments ];
       "prune",     [ Alcotest.test_case "stale_semantics" `Quick prune_stale_semantics ];
       "render",    [ Alcotest.test_case "line_cap" `Quick render_index_line_cap ];
+      "history", [
+        Alcotest.test_case "fts_insert_and_search"  `Quick conversations_fts_insert_and_search;
+        Alcotest.test_case "snippet_highlighting"    `Quick search_history_snippet_highlighting;
+        Alcotest.test_case "respects_limit"          `Quick search_history_respects_limit;
+        Alcotest.test_case "fts_backfill"            `Quick conversations_fts_backfill;
+        Alcotest.test_case "empty_db"                `Quick search_history_empty_db;
+      ];
     ]
