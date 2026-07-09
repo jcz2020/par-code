@@ -1,5 +1,47 @@
 # Decisions
 
+## [2026-07-09] Auto-trigger skills downgraded to Manual (system_prompt_override fix)
+
+**变更前**：par-code registered all PAR SDK builtin skills as-is. The `summarizer` and `rag-assistant` skills have `trigger=Auto` + `system_prompt_override=Some(Stable_prompt ...)`, causing them to activate on every turn and replace the agent's system prompt entirely via `apply_skill_effect_to_config` (PAR SDK `runtime.ml:406`).
+
+**变更后**：Skills with `trigger=Auto` are downgraded to `trigger=Manual` before registration. The skills remain available for explicit activation but no longer auto-activate and clobber the system prompt.
+
+**原因**：A user test session with a third-party LLM provider revealed the model responding as "expert summarizer" instead of the coding agent identity. Root cause: the summarizer skill's `Stable_prompt` override completely replaced par-code's `"You are par, an interactive coding assistant..."` system prompt on every turn. The model literally received the skill's override text as its system prompt.
+
+**影响范围**：`lib/par_code_setup.ml` (skill registration — `List.map` downgrade before `register_skill`).
+
+**回退方式**：Remove the `List.map` filter; register `Builtin_skills.builtin_skills` directly.
+
+**已知限制**：`summarizer` and `rag-assistant` now require explicit user activation (Manual trigger). PAR SDK should fix the root cause: `trigger=Auto` skills should not carry `system_prompt_override`. Tracked as PAR SDK feedback item.
+
+## [2026-07-09] SIGINT handler saves conversation before exit
+
+**变更前**：Ctrl-C (SIGINT) killed the process immediately with no cleanup. Conversations from interrupted sessions were never persisted, making them invisible to `search_history`.
+
+**变更后**：A `Sys.set_signal Sys.sigint` handler in the REPL calls `save_conversation` + `maybe_extract` before `exit 130`.
+
+**原因**：User test session showed `search_history` returning 0 results after the previous session was terminated with Ctrl-C. The REPL had handlers for Ctrl-D (EOF) and `/quit` but none for SIGINT — the process died before `save_conversation` could run.
+
+**影响范围**：`lib/par_code_repl.ml` (signal handler in `run`).
+
+**回退方式**：Remove the `Sys.set_signal` call.
+
+**已知限制**：If SIGINT arrives mid-stream during an LLM response, the conversation is saved in a potentially incomplete state. Acceptable — partial history is better than no history.
+
+## [2026-07-09] system_prompt falls back to default when missing from config
+
+**变更前**：`of_json`'s `get_s` returned `""` for missing string fields with no fallback. If `system_prompt` was absent from `config.json`, it silently became empty — unlike `temperature`/`max_iterations` which had explicit defaults.
+
+**变更后**：`system_prompt` falls back to `default.system_prompt` when the field is empty or absent.
+
+**原因**：Inconsistency with other config fields that had defaults. An empty `system_prompt` would cause `Runtime.make_agent` validation failure (`runtime.ml:115`) with a confusing error message.
+
+**影响范围**：`lib/par_code_config.ml` (`of_json` function).
+
+**回退方式**：Revert to `get_s "system_prompt"` without fallback.
+
+**已知限制**：Only `system_prompt` has the fallback. Other string fields (`provider`, `api_key`, `model`, `persistence`) still return `""` for missing fields — correct behavior, as these must be explicitly set.
+
 ## [2026-07-06] v0.3.2: Linux arm64 pre-built binary via native ARM runner
 
 **变更前**：Pre-built binaries only for Linux x86_64 and macOS arm64. ARM Linux users (Raspberry Pi, AWS Graviton) had to compile from source (~20-30 min on Pi).

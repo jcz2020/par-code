@@ -1,5 +1,26 @@
 # CHANGES
 
+## Unreleased — bugfixes from user test session
+
+> Three bugs found from a real user test session. The most critical:
+> the agent's coding identity was silently replaced by a built-in skill's
+> summarizer persona on every turn.
+
+### Fixed
+- **Agent identity clobbered by Auto-trigger skill** (critical): the PAR SDK's
+  built-in `summarizer` skill (`trigger=Auto` + `system_prompt_override`)
+  activated on every turn and replaced the agent's system prompt entirely.
+  The model received "You are an expert summarizer..." instead of "You are
+  par, an interactive coding assistant...". Fix: downgrade `trigger=Auto`
+  skills to `trigger=Manual` before registration.
+- **Ctrl-C lost session data** (critical): Ctrl-C exited without saving the
+  conversation or running memory extraction. Interrupted sessions were
+  invisible to `search_history`. Fix: SIGINT handler now saves + extracts
+  before `exit(130)`.
+- **Missing `system_prompt` in config.json silently became empty** (minor):
+  `of_json` returned `""` for absent string fields with no fallback to the
+  default. Fix: fall back to `default.system_prompt` when the field is empty.
+
 ## v0.3.2 — Linux arm64 pre-built binary support
 
 > Linux ARM64 devices (Raspberry Pi 4/5, AWS Graviton, other aarch64 Linux)

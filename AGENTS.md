@@ -36,6 +36,7 @@ lib/par_code_setup.ml ── Runtime 引导层
  │  ├── 创建 PAR Runtime (persistence + LLM + embeddings)
  │  ├── 注册 builtin tools + bash tool + memory tools
  │  ├── 注册 "par" agent (编码) + "memory-extractor" agent (提取)
+ │  ├── 注册 skills（Auto-trigger 降级为 Manual，防止覆盖 system prompt）
  │  └── 注入记忆索引到 system prompt
  │
  ▼
@@ -77,6 +78,7 @@ PAR SDK (Runtime.invoke → ReAct loop → tool dispatch → LLM)
 - 版本号不可自动 bump（§2）
 - FTS5 必须从 amalgamation 编译（§3）
 - 并行 agent 禁止 git 写操作（§4）
+- Auto-trigger skill 必须降级为 Manual（否则 system_prompt_override 会覆盖 agent 身份）
 - 披露规则：committed 产物不得出现外部项目/公司名（见全局 AGENTS.md §2）
 
 ---
