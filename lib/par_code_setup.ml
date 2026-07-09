@@ -255,9 +255,21 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
       (fun (ctx : Hook.tool_call_context) ->
         Printf.eprintf "  [%s]\n%!" ctx.Hook.tool_name;
         Hook.Allow);
+    (* Downgrade Auto-trigger skills to Manual before registering.
+       The PAR SDK's builtin "summarizer" and "rag-assistant" skills use
+       trigger=Auto with system_prompt_override, which would replace par-code's
+       coding-agent system prompt on every turn. Keeping them Manual preserves
+       availability for explicit activation without clobbering identity. *)
+    let safe_skills =
+      List.map (fun (desc : Types.skill_descriptor) ->
+        match desc.Types.trigger with
+        | Types.Auto -> { desc with Types.trigger = Types.Manual }
+        | _ -> desc
+      ) Builtin_skills.builtin_skills
+    in
     List.iter (fun (desc : Types.skill_descriptor) ->
       ignore (Runtime.register_skill rt desc : (Types.skill_binding, _) result)
-    ) Builtin_skills.builtin_skills;
+    ) safe_skills;
     f rt;
     (match mem_db with Some t -> Par_code_memory.close t | None -> ());
     ignore (Runtime.close rt)

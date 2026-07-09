@@ -95,6 +95,11 @@ let run (rt : Runtime.runtime) ~resume =
   Printf.printf "par %s — type a message (or /help for commands, Ctrl-D to quit)\n%!" Par_code_version.version;
   let conv : Types.conversation option ref = ref (load_initial_conv rt resume) in
   let on_tool_event = make_tool_event_callback () in
+  Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ ->
+    let _ = Runtime.save_conversation rt in
+    maybe_extract rt !conv;
+    Printf.eprintf "\n[Interrupted — session saved]\n%!";
+    exit 130));
   let rec loop () =
     Printf.printf "par> %!";
     match input_line stdin with
