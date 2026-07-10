@@ -1,18 +1,30 @@
 # CHANGES
 
-## Unreleased — bugfixes from user test session
+## Unreleased — consume PAR SDK 0.7.3 + bugfixes from user test session
 
-> Three bugs found from a real user test session. The most critical:
-> the agent's coding identity was silently replaced by a built-in skill's
-> summarizer persona on every turn.
+> PAR SDK 0.7.3 shipped fixes for all four needs par-code raised. This release
+> consumes the two highest-value improvements: the Auto-skill system prompt fix
+> and per-turn memory index injection.
+
+### Changed
+- **PAR SDK dependency bumped to >= 0.7.3** (from >= 0.6.5). Required for
+  Auto-skill fix and `system_prompt_appendix` support.
+- **Memory index now injected per-turn** via `?system_prompt_appendix` on
+  `Runtime.invoke`. Previously baked statically into the system prompt at agent
+  registration time — mid-session memory additions (via `remember_memory`)
+  were invisible until next session. Now the index is fresh on every turn.
+- **Auto-skill workaround removed**. PAR SDK 0.7.3 now strips
+  `system_prompt_override` for Auto-trigger skills in `compute_active_skill_effects`.
+  Builtin skills (summarizer, rag-assistant) register as-is without clobbering
+  the agent identity.
 
 ### Fixed
 - **Agent identity clobbered by Auto-trigger skill** (critical): the PAR SDK's
   built-in `summarizer` skill (`trigger=Auto` + `system_prompt_override`)
   activated on every turn and replaced the agent's system prompt entirely.
   The model received "You are an expert summarizer..." instead of "You are
-  par, an interactive coding assistant...". Fix: downgrade `trigger=Auto`
-  skills to `trigger=Manual` before registration.
+  par, an interactive coding assistant...". Fix: PAR SDK 0.7.3 strips
+  `system_prompt_override` for Auto skills; par-code workaround removed.
 - **Ctrl-C lost session data** (critical): Ctrl-C exited without saving the
   conversation or running memory extraction. Interrupted sessions were
   invisible to `search_history`. Fix: SIGINT handler now saves + extracts

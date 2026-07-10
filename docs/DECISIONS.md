@@ -1,6 +1,22 @@
 # Decisions
 
+## [2026-07-11] Consume PAR SDK 0.7.3: remove skill workaround + adopt per-turn memory injection
+
+**变更前**：PAR SDK 0.6.9 had two gaps: (1) Auto-trigger skills silently replaced the agent system prompt via `system_prompt_override`; par-code worked around this by downgrading Auto→Manual before registration. (2) `Runtime.make_agent` took `system_prompt` once at registration; par-code baked the memory index into the system prompt at session start (static for the entire session).
+
+**变更后**：(1) Workaround removed — PAR SDK 0.7.3 strips `system_prompt_override = None` for Auto-trigger skills in `compute_active_skill_effects` (commit 344bef7). Builtin skills now register as-is. (2) Memory index is injected per-turn via `?system_prompt_appendix` parameter on `Runtime.invoke` — fresh on every turn, reflecting mid-session memory additions immediately.
+
+**原因**：PAR SDK 0.7.3 shipped all four needs par-code raised (#1 Auto-skill fix, #2 per-turn system prompt, #3 fork_invoke, #4 Par.Memory). This change consumes #1 and #2 — the highest-value, lowest-risk improvements. #3 (background extraction) and #4 (Sqlite_memory migration) deferred to future versions.
+
+**影响范围**：`dune-project` (par >= 0.7.3), `lib/par_code_setup.ml` (remove workaround + simplify system_prompt + pass mem_db to callback), `lib/par_code_repl.ml` (build_memory_appendix + ?system_prompt_appendix on invoke), `bin/main.ml` (pass mem_db through callback), `lib/par_code_setup.ml` make_persistence_service (forward ?scope parameter added in 0.7.3).
+
+**回退方式**：Revert to PAR SDK 0.6.9 constraint, restore Auto→Manual workaround, restore static memory baking. But this loses per-turn memory freshness and requires maintaining the workaround.
+
+**已知限制**：Memory index rendering runs once per turn (fast indexed query, <1ms). `fork_invoke` (#3) and `Sqlite_memory` migration (#4) not yet consumed — tracked for v0.4.0+.
+
 ## [2026-07-09] Auto-trigger skills downgraded to Manual (system_prompt_override fix)
+
+> **Superseded [2026-07-11]**: PAR SDK 0.7.3 strips system_prompt_override for Auto skills. Workaround removed. See [2026-07-11] decision above.
 
 **变更前**：par-code registered all PAR SDK builtin skills as-is. The `summarizer` and `rag-assistant` skills have `trigger=Auto` + `system_prompt_override=Some(Stable_prompt ...)`, causing them to activate on every turn and replace the agent's system prompt entirely via `apply_skill_effect_to_config` (PAR SDK `runtime.ml:406`).
 

@@ -14,7 +14,7 @@ par-code 是一个基于 PAR SDK 的 OCaml 终端编码 agent。用户通过 `pa
 ### 当前状态
 
 - **版本**：v0.3.2（见 `dune-project`）
-- **PAR SDK 依赖**：0.6.9+（opam pin from `github.com/jcz2020/par.git`）
+- **PAR SDK 依赖**：0.7.3+（opam pin from `github.com/jcz2020/par.git`）
 - **opam switch**：`/root/dev/PAR`（OCaml 5.4.1）
 - **已发布**：v0.2.1（安装器）、v0.3.0（项目记忆）、v0.3.1（自动提取）、v0.3.2（arm64）
 
@@ -36,8 +36,8 @@ lib/par_code_setup.ml ── Runtime 引导层
  │  ├── 创建 PAR Runtime (persistence + LLM + embeddings)
  │  ├── 注册 builtin tools + bash tool + memory tools
  │  ├── 注册 "par" agent (编码) + "memory-extractor" agent (提取)
- │  ├── 注册 skills（Auto-trigger 降级为 Manual，防止覆盖 system prompt）
- │  └── 注入记忆索引到 system prompt
+ │  ├── 注册 skills（PAR SDK 0.7.3 已修复 Auto-trigger 不再覆盖 system prompt）
+ │  └── 传 mem_db 给 REPL（用于 per-turn 记忆索引注入）
  │
  ▼
 PAR SDK (Runtime.invoke → ReAct loop → tool dispatch → LLM)
@@ -78,7 +78,7 @@ PAR SDK (Runtime.invoke → ReAct loop → tool dispatch → LLM)
 - 版本号不可自动 bump（§2）
 - FTS5 必须从 amalgamation 编译（§3）
 - 并行 agent 禁止 git 写操作（§4）
-- Auto-trigger skill 必须降级为 Manual（否则 system_prompt_override 会覆盖 agent 身份）
+- 记忆索引通过 `?system_prompt_appendix` per-turn 注入（不再 bake 到注册时 system prompt）
 - 披露规则：committed 产物不得出现外部项目/公司名（见全局 AGENTS.md §2）
 
 ---

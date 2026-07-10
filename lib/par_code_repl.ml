@@ -91,7 +91,15 @@ let maybe_extract (rt : Runtime.runtime) (conv : Types.conversation option) =
       end
   end
 
-let run (rt : Runtime.runtime) ~resume =
+let build_memory_appendix (mem_db : Par_code_memory.t option) =
+  match mem_db with
+  | Some t ->
+    let project_id = Par_code_memory.resolve_project_id () in
+    let index = Par_code_memory.render_index t ~project_id in
+    if index = "" then None else Some ("\n\n## Project Memory\n\n" ^ index)
+  | None -> None
+
+let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
   Printf.printf "par %s — type a message (or /help for commands, Ctrl-D to quit)\n%!" Par_code_version.version;
   let conv : Types.conversation option ref = ref (load_initial_conv rt resume) in
   let on_tool_event = make_tool_event_callback () in
@@ -127,15 +135,18 @@ let run (rt : Runtime.runtime) ~resume =
            Printf.printf "Bye!\n%!"; exit 0
          | _ -> Printf.eprintf "Unknown command: %s (try /help)\n%!" cmd);
         loop ()
-      end else begin
-        (try
-           (match Runtime.invoke rt
-              ~agent_id:Par_code_setup.agent_id
-              ~message:trimmed
-              ?conversation:!conv
-              ~on_tool_event
-              ~on_chunk:(Some stream_print_chunk)
-              ~enable_handoff:true () with
+       end else begin
+         (try
+            let memory_appendix = build_memory_appendix mem_db in
+            (match Runtime.invoke rt
+               ~agent_id:Par_code_setup.agent_id
+               ~message:trimmed
+               ?conversation:!conv
+               ~on_tool_event
+               ~on_chunk:(Some stream_print_chunk)
+               ~enable_handoff:true
+               ?system_prompt_appendix:memory_appendix
+               () with
             | Error (e, recovered_conv) ->
               conv := Some recovered_conv;
               Printf.eprintf "Error: %s\n%!" (Par_code_setup.error_to_string e);
@@ -151,16 +162,19 @@ let run (rt : Runtime.runtime) ~resume =
   in
   loop ()
 
-let run_single_shot (rt : Runtime.runtime) ~message =
-  match Runtime.invoke rt
-    ~agent_id:Par_code_setup.agent_id
-    ~message
-    ~on_tool_event:(make_tool_event_callback ())
-    ~on_chunk:(Some stream_print_chunk)
-    ~enable_handoff:true () with
+let run_single_shot (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~message =
+  let memory_appendix = build_memory_appendix mem_db in
+  (match Runtime.invoke rt
+     ~agent_id:Par_code_setup.agent_id
+     ~message
+     ~on_tool_event:(make_tool_event_callback ())
+     ~on_chunk:(Some stream_print_chunk)
+     ~enable_handoff:true
+     ?system_prompt_appendix:memory_appendix
+     () with
   | Error (e, _) ->
     Printf.eprintf "Error: %s\n%!" (Par_code_setup.error_to_string e);
     exit 1
   | Ok { Types.response = _; conversation = _ } ->
     Printf.printf "\n%!";
-    let _ = Runtime.save_conversation rt in ()
+    let _ = Runtime.save_conversation rt in ())

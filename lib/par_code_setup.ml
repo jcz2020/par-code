@@ -30,10 +30,10 @@ let make_persistence_service (cfg : Par_code_config.config) =
     exit 1
   | Ok t ->
     { Types.
-      save_events_fn = (fun events -> Sqlite_persistence.save_events t events);
+      save_events_fn = (fun ?scope events -> Sqlite_persistence.save_events ?scope t events);
       load_events_fn = (fun task_id -> Sqlite_persistence.load_events t task_id);
-      load_events_by_session_fn = (fun sid -> Sqlite_persistence.load_events_by_session t sid);
-      load_sessions_fn = (fun limit -> Sqlite_persistence.load_sessions t limit);
+      load_events_by_session_fn = (fun ?scope sid -> Sqlite_persistence.load_events_by_session ?scope t sid);
+      load_sessions_fn = (fun ?scope limit -> Sqlite_persistence.load_sessions ?scope t limit);
       save_task_state_fn = (fun ts -> Sqlite_persistence.save_task_state t ts);
       load_task_state_fn = (fun task_id -> Sqlite_persistence.load_task_state t task_id);
       save_workflow_state_fn = (fun id status ckpt -> Sqlite_persistence.save_workflow_state t id status ckpt);
@@ -41,9 +41,9 @@ let make_persistence_service (cfg : Par_code_config.config) =
       load_all_suspended_workflows_fn = (fun () -> Sqlite_persistence.load_all_suspended_workflows t);
       save_workflow_def_fn = (fun id def -> Sqlite_persistence.save_workflow_def t id def);
       load_all_workflow_defs_fn = (fun () -> Sqlite_persistence.load_all_workflow_defs t);
-      save_conversation_fn = (fun sid conv -> Sqlite_persistence.save_conversation t sid conv);
+      save_conversation_fn = (fun ?scope sid conv -> Sqlite_persistence.save_conversation ?scope t sid conv);
       load_conversation_fn = (fun sid -> Sqlite_persistence.load_conversation t sid);
-      load_most_recent_conversation_fn = (fun () -> Sqlite_persistence.load_most_recent_conversation t);
+      load_most_recent_conversation_fn = (fun ?scope () -> Sqlite_persistence.load_most_recent_conversation ?scope t);
       close_fn = (fun () -> Sqlite_persistence.close t);
     }
 
@@ -205,17 +205,9 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
        Printf.eprintf "Warning: bash tool not installed: %s\n%!" (error_to_string e));
     let model_cfg = Par_code_config.to_model_config cfg in
     let base_prompt = cfg.Par_code_config.system_prompt in
-    let prompt_with_memory = match mem_db with
-      | Some t ->
-        let project_id = Par_code_memory.resolve_project_id () in
-        let index = Par_code_memory.render_index t ~project_id in
-        if index = "" then base_prompt
-        else base_prompt ^ "\n\n## Project Memory\n\n" ^ index
-      | None -> base_prompt
-    in
     (match Runtime.make_agent
        ~id:agent_id
-       ~system_prompt:(Types.stable_prompt prompt_with_memory)
+       ~system_prompt:(Types.stable_prompt base_prompt)
        ~model:model_cfg
        ~tools:!descriptors
        ~max_iterations:cfg.Par_code_config.max_iterations
@@ -255,21 +247,9 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
       (fun (ctx : Hook.tool_call_context) ->
         Printf.eprintf "  [%s]\n%!" ctx.Hook.tool_name;
         Hook.Allow);
-    (* Downgrade Auto-trigger skills to Manual before registering.
-       The PAR SDK's builtin "summarizer" and "rag-assistant" skills use
-       trigger=Auto with system_prompt_override, which would replace par-code's
-       coding-agent system prompt on every turn. Keeping them Manual preserves
-       availability for explicit activation without clobbering identity. *)
-    let safe_skills =
-      List.map (fun (desc : Types.skill_descriptor) ->
-        match desc.Types.trigger with
-        | Types.Auto -> { desc with Types.trigger = Types.Manual }
-        | _ -> desc
-      ) Builtin_skills.builtin_skills
-    in
     List.iter (fun (desc : Types.skill_descriptor) ->
       ignore (Runtime.register_skill rt desc : (Types.skill_binding, _) result)
-    ) safe_skills;
-    f rt;
+    ) Builtin_skills.builtin_skills;
+    f rt mem_db;
     (match mem_db with Some t -> Par_code_memory.close t | None -> ());
     ignore (Runtime.close rt)
