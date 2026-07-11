@@ -37,16 +37,18 @@ lib/par_code_setup.ml ── Runtime 引导层
  │  ├── 注册 builtin tools + bash tool + memory tools
  │  ├── 注册 "par" agent (编码) + "memory-extractor" agent (提取)
  │  ├── 注册 skills（PAR SDK 0.7.3 已修复 Auto-trigger 不再覆盖 system prompt）
- │  └── 传 mem_db 给 REPL（用于 per-turn 记忆索引注入）
+ │  ├── 传 mem_db 给 REPL（用于 per-turn 记忆索引注入）
+ │  └── embedding 服务接入 Sqlite_memory（支持 RRF 混合搜索）
  │
  ▼
 PAR SDK (Runtime.invoke → ReAct loop → tool dispatch → LLM)
  │
  ▼
 ~/.par/par.db ── SQLite (WAL mode)
+ ├── memory_entries + memory_entries_fts + memory_entries_vec (PAR SDK Sqlite_memory 管控)
  ├── conversations (PAR 管控) → conversations_fts (par-code 加的 FTS5 索引)
  ├── events / task_states / workflow_states (PAR 管控)
- └── memory_entries + memory_entries_fts (par-code 管控)
+ └── (par-code v0.3.3: 存储 delegated to Sqlite_memory，schema 自动迁移)
 ```
 
 ### 文件索引
@@ -56,7 +58,7 @@ PAR SDK (Runtime.invoke → ReAct loop → tool dispatch → LLM)
 | `lib/par_code_config.ml` | 配置类型 + JSON 序列化 + 向导 | 加配置项、改默认值 |
 | `lib/par_code_setup.ml` | Runtime 引导：创建 runtime、注册 tools/agents | 集成新功能到 runtime |
 | `lib/par_code_repl.ml` | REPL 循环 + 单次问答 | 改交互行为、加 slash 命令 |
-| `lib/par_code_memory.ml` | 记忆层：schema + CRUD + FTS5 + 索引渲染 | 改记忆 schema、加搜索功能 |
+| `lib/par_code_memory.ml` | 记忆层：Sqlite_memory 代理 + FTS5/vec0 搜索 + 迁移 + 索引渲染 | 改记忆 schema、加搜索功能 |
 | `lib/par_code_memory_tools.ml` | 3 个 agent 工具 (recall/remember/search_history) | 加新工具给 LLM 用 |
 | `lib/par_code_extractor.ml` | 会话结束时自动提取记忆 | 改提取逻辑、prompt |
 | `lib/par_code_upgrade.ml` | 自更新：下载、校验、原子替换 | 加平台支持、改升级逻辑 |

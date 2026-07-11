@@ -29,12 +29,18 @@
 - **Config fallback**: missing `system_prompt` in config.json falls back to
   default instead of silently becoming empty.
 
+### Added
+- **Embedding API configuration**: `par config` now supports separate embedding
+  settings (`embedding_base_url`, `embedding_model`, `embedding_dimension`).
+  Users can use a different provider for embeddings than for chat (e.g.,
+  chat via MiniMax, embeddings via OpenAI). Defaults to chat provider config.
+- **Hybrid search infrastructure**: `Sqlite_memory` with vec0 + RRF is wired
+  via embedding service. When embeddings are available, `recall` uses hybrid
+  search (FTS5 + vector). Falls back to FTS5-only when unsupported.
+
 ### Known Limitations
-- Embedding/vector search not yet wired (no `embedding_fn`); search defaults
-  to FTS5 keyword mode. Wiring requires passing the embedding service to
-  `Sqlite_memory.create` — tracked as a follow-up.
-- `par.memory` library requires vec0 extension; if unavailable, vector search
-  degrades gracefully to FTS5-only.
+- vec0 extension may not be available on all platforms; degrades gracefully
+  to FTS5-only when absent.
 
 ## v0.3.2 — Linux arm64 pre-built binary support
 

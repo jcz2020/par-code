@@ -12,7 +12,7 @@
 
 **回退方式**：Revert to old `Par_code_memory` module. The migration drops old tables after reading, so old data is lost without backup. Users upgrading to v0.3.3 should export memories first (`par memory export > backup.md`) if they want a safety net.
 
-**已知限制**：Embedding/vector search not yet wired (no `embedding_fn` passed to `Sqlite_memory.create`); search defaults to FTS5 keyword mode. Wiring embeddings requires passing the embedding service to `Sqlite_memory.create` — tracked as a follow-up. The 250-item render test was reduced to 10 to avoid a vec0 extension segfault under bulk operations.
+**已知限制**：vec0 扩展在极少数环境下可能不可用（自动降级为 FTS5 关键词搜索）。Embedding API 可通过 `par config` 单独配置（`embedding_base_url`、`embedding_model`、`embedding_dimension`），支持聊天和 embedding 使用不同 provider。
 
 ## [2026-07-11] Deferred: fork_invoke for background extraction (target v0.4.0)
 
