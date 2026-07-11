@@ -95,6 +95,7 @@ let make_llm_service (tag : Par_code_config.provider_tag) api_key api_base
          cache_control_fn = None; })
 
 let make_embedding_service (tag : Par_code_config.provider_tag) api_key api_base
+    ?embedding_base_url ?embedding_model
     (net : [< `Generic | `Unix > `Generic ] Eio.Net.ty Eio.Resource.t) =
   let open Types in
   let net_gen = (net :> [ `Generic ] Eio.Net.ty Eio.Net.t) in
@@ -106,8 +107,13 @@ let make_embedding_service (tag : Par_code_config.provider_tag) api_key api_base
     Printf.eprintf "Error: custom provider embeddings not supported\n%!";
     exit 1
   | (`Openai | `Ollama) as t ->
-    let base_url = match t with `Ollama -> Some "http://localhost:11434/v1" | _ -> api_base in
-    let cfg = Openai { api_key; base_url; organization = None; embedding_model = None; prompt_cache_key = None } in
+    let base_url =
+      match embedding_base_url with
+      | Some u -> Some u
+      | None -> match t with `Ollama -> Some "http://localhost:11434/v1" | _ -> api_base
+    in
+    let cfg = Openai { api_key; base_url; organization = None;
+                       embedding_model; prompt_cache_key = None } in
     (match Openai_provider.create cfg with
      | Error e ->
        Printf.eprintf "Error creating embedding provider: %s\n%!" (error_to_string e);
@@ -143,7 +149,10 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
   Eio.Switch.run @@ fun switch ->
   let net = Eio.Stdenv.net env in
   let llm = make_llm_service provider_tag cfg.Par_code_config.api_key cfg.Par_code_config.api_base net in
-  let embeddings = make_embedding_service provider_tag cfg.Par_code_config.api_key cfg.Par_code_config.api_base net in
+  let embeddings = make_embedding_service provider_tag cfg.Par_code_config.api_key cfg.Par_code_config.api_base
+      ?embedding_base_url:cfg.Par_code_config.embedding_base_url
+      ?embedding_model:cfg.Par_code_config.embedding_model
+      net in
   match Runtime.create ~persistence:pers ~llm ~embeddings ~config:runtime_config switch with
   | Error e ->
     Printf.eprintf "Error creating runtime: %s\n%!" (error_to_string e);
@@ -159,7 +168,7 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
           | Ok vecs -> Ok vecs
           | Error e -> Error (error_to_string e))
     in
-    let mem_db = match Par_code_memory.open_db ?embedding_fn:memory_embedding_fn () with
+    let mem_db = match Par_code_memory.open_db ?embedding_fn:memory_embedding_fn ~dimension:cfg.Par_code_config.embedding_dimension () with
       | Ok t -> Some t
       | Error (`Db_error msg) ->
         Printf.eprintf "Warning: memory DB unavailable: %s\n%!" msg;

@@ -26,6 +26,7 @@ type history_hit = {
 }
 
 val open_db : ?embedding_fn:Par_memory.Memory_service.embedding_fn ->
+  ?dimension:int ->
   unit -> (t, [> `Db_error of string]) result
 
 val close : t -> unit

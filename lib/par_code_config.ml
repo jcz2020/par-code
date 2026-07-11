@@ -24,6 +24,9 @@ type config = {
   parallel_tool_execution : bool;
   event_retention_days : float;
   auto_extract : bool;
+  embedding_base_url : string option;
+  embedding_model : string option;
+  embedding_dimension : int;
 }
 
 let default_system_prompt =
@@ -48,6 +51,9 @@ let default = {
   parallel_tool_execution = true;
   event_retention_days = 7.0;
   auto_extract = true;
+  embedding_base_url = None;
+  embedding_model = None;
+  embedding_dimension = 1536;
 }
 
 let config_dir () =
@@ -79,6 +85,9 @@ let to_json (cfg : config) : Yojson.Safe.t =
     ("parallel_tool_execution", `Bool cfg.parallel_tool_execution);
     ("event_retention_days", `Float cfg.event_retention_days);
     ("auto_extract", `Bool cfg.auto_extract);
+    ("embedding_base_url", opt_str cfg.embedding_base_url);
+    ("embedding_model", opt_str cfg.embedding_model);
+    ("embedding_dimension", `Int cfg.embedding_dimension);
   ]
 
 let of_json (json : Yojson.Safe.t) : (config, string) result =
@@ -108,6 +117,9 @@ let of_json (json : Yojson.Safe.t) : (config, string) result =
       parallel_tool_execution = get_b "parallel_tool_execution" default.parallel_tool_execution;
       event_retention_days = get_f "event_retention_days" default.event_retention_days;
       auto_extract = get_b "auto_extract" default.auto_extract;
+      embedding_base_url = get_os "embedding_base_url";
+      embedding_model = get_os "embedding_model";
+      embedding_dimension = get_i "embedding_dimension" default.embedding_dimension;
     }
   with exn -> Error (Printexc.to_string exn)
 
@@ -163,7 +175,9 @@ let merge
     ?(model = None) ?(persistence = None) ?(db_uri = None)
     ?(temperature = None) ?(system_prompt = None) ?(max_iterations = None)
     ?(max_tokens = None) ?(top_p = None) ?(parallel_tool_execution = None)
-    ?(event_retention_days = None) ?(auto_extract = None) () =
+    ?(event_retention_days = None) ?(auto_extract = None)
+    ?(embedding_base_url = None) ?(embedding_model = None)
+    ?(embedding_dimension = None) () =
   {
     provider = Option.value provider ~default:cfg.provider;
     api_key = Option.value api_key ~default:cfg.api_key;
@@ -179,6 +193,9 @@ let merge
     parallel_tool_execution = Option.value parallel_tool_execution ~default:cfg.parallel_tool_execution;
     event_retention_days = Option.value event_retention_days ~default:cfg.event_retention_days;
     auto_extract = Option.value auto_extract ~default:cfg.auto_extract;
+    embedding_base_url = (match embedding_base_url with Some _ as v -> v | None -> cfg.embedding_base_url);
+    embedding_model = (match embedding_model with Some _ as v -> v | None -> cfg.embedding_model);
+    embedding_dimension = Option.value embedding_dimension ~default:cfg.embedding_dimension;
   }
 
 let require_config () =
@@ -253,6 +270,47 @@ let run_wizard () =
   let max_iter_str = prompt_line "Max ReAct iterations" max_iter_default in
   let max_iterations = match int_of_string_opt max_iter_str with Some n when n > 0 -> n | _ -> 50 in
 
+  Printf.printf "\nEmbedding API (for semantic memory search).\n%!";
+  Printf.printf "  Uses your chat provider by default. Configure separately if your\n%!";
+  Printf.printf "  provider doesn't support /embeddings or uses a different dimension.\n%!";
+  let sep_embed =
+    Printf.printf "Configure separate embedding API? [y/N]: %!";
+    match input_line stdin with
+    | line when String.lowercase_ascii (String.trim line) = "y" -> true
+    | exception End_of_file -> false
+    | _ -> false
+  in
+  let embedding_base_url, embedding_model, embedding_dimension =
+    if sep_embed then begin
+      let emb_base =
+        let hint = "https://api.openai.com/v1" in
+        Printf.printf "Embedding API Base URL (default: %s): %!" hint;
+        match input_line stdin with
+        | line when String.trim line <> "" -> Some (String.trim line)
+        | exception End_of_file -> Some hint
+        | _ -> Some hint
+      in
+      let emb_model =
+        Printf.printf "Embedding model name (default: text-embedding-3-small): %!";
+        match input_line stdin with
+        | line when String.trim line <> "" -> Some (String.trim line)
+        | exception End_of_file -> None
+        | _ -> None
+      in
+      let emb_dim =
+        Printf.printf "Embedding dimension [1536]: %!";
+        match input_line stdin with
+        | line when String.trim line <> "" ->
+          (match int_of_string_opt (String.trim line) with
+           Some n -> n | None -> 1536)
+        | exception End_of_file -> 1536
+        | _ -> 1536
+      in
+      (emb_base, emb_model, emb_dim)
+    end else
+      (None, None, default.embedding_dimension)
+  in
+
   let cfg = {
     provider; api_key; api_base; model;
     persistence = "sqlite"; db_uri = None;
@@ -261,6 +319,7 @@ let run_wizard () =
     parallel_tool_execution = true;
     event_retention_days = 7.0;
     auto_extract = true;
+    embedding_base_url; embedding_model; embedding_dimension;
   } in
   save cfg;
   Printf.printf "\nSaved config to %s\n%!" (config_path ())
