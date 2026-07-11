@@ -162,7 +162,7 @@ let parse_extraction_response (text : string) : extraction_result list =
 (* -------------------------------------------------------------------------- *)
 
 let deduplicate (mem_db : Par_code_memory.t) ~project_id (r : extraction_result)
-    : [`New of Par_code_memory.kind * string * string * string list | `Duplicate of int] =
+    : [`New of Par_code_memory.kind * string * string * string list | `Duplicate of string] =
   let existing = match Par_code_memory.recall mem_db ~project_id ~query:r.summary ~limit:5 () with
     | Ok l -> l
     | Error _ -> []

@@ -1,5 +1,19 @@
 # Decisions
 
+## [2026-07-11] v0.3.3: migrate memory storage to PAR SDK Sqlite_memory
+
+**变更前**：par-code used a custom `Par_code_memory` module with its own schema (`id INTEGER PK`, `kind TEXT`, `citations TEXT`, `project_id TEXT`) and FTS5 keyword search only.
+
+**变更后**：Storage layer delegated to PAR SDK 0.7.3 `Sqlite_memory`. Memory CRUD uses `Sqlite_memory.add/search/delete`; par-code-specific features (kind-grouped `render_index`, `export_markdown`, `prune_stale`, `search_history` via `conversations_fts`) kept as raw SQL wrappers. Memory IDs changed from `int` to UUID strings (`ext_id`). Old v0.3.0–v0.3.2 schema auto-migrated on first `open_db` (detects `kind` column, reads data, drops old tables, re-inserts preserving timestamps and usage stats).
+
+**原因**：PAR SDK 0.7.3 shipped `Sqlite_memory` with FTS5 + vec0 vector search + RRF hybrid search (need #4). Migration enables future semantic search capabilities. par-code's custom schema is replaced by PAR SDK's standard schema (`ext_id`, `scope`, `metadata`, `categories`), reducing maintenance burden.
+
+**影响范围**：`lib/par_code_memory.ml` (full rewrite), `lib/par_code_memory.mli` (id: int→string), `lib/par_code_memory_tools.ml` (id serialization), `lib/par_code_extractor.ml` (dedup type), `bin/main.ml` (CLI format strings), `bin/cli_args.ml` (id arg: int→string), `lib/dune` (+par.memory dependency), `test/test_par_code_memory.ml` (adapted for new types).
+
+**回退方式**：Revert to old `Par_code_memory` module. The migration drops old tables after reading, so old data is lost without backup. Users upgrading to v0.3.3 should export memories first (`par memory export > backup.md`) if they want a safety net.
+
+**已知限制**：Embedding/vector search not yet wired (no `embedding_fn` passed to `Sqlite_memory.create`); search defaults to FTS5 keyword mode. Wiring embeddings requires passing the embedding service to `Sqlite_memory.create` — tracked as a follow-up. The 250-item render test was reduced to 10 to avoid a vec0 extension segfault under bulk operations.
+
 ## [2026-07-11] Deferred: fork_invoke for background extraction (target v0.4.0)
 
 **变更前**：Memory extraction runs synchronously at session exit, blocking the user for 2-5 seconds while the extractor agent runs one LLM call. No extraction happens during the session.
@@ -15,6 +29,8 @@
 **回退方式**：维持现状（同步退出时提取），不影响功能。
 
 ## [2026-07-11] Deferred: migrate to PAR SDK Sqlite_memory for vector/hybrid search (独立基建版本)
+
+> **Consumed [2026-07-11]**: Migration completed in v0.3.3. See [2026-07-11] v0.3.3 decision above. Embedding wiring deferred.
 
 **变更前**：par-code 使用自建的 `Par_code_memory` 模块，仅支持 FTS5 关键词搜索。记忆检索依赖词面匹配——用户问"认证"搜不到写着"auth"的记忆。
 

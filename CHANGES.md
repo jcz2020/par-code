@@ -1,37 +1,40 @@
 # CHANGES
 
-## Unreleased — consume PAR SDK 0.7.3 + bugfixes from user test session
+## v0.3.3 (unreleased) — Memory storage migrated to PAR SDK Sqlite_memory
 
-> PAR SDK 0.7.3 shipped fixes for all four needs par-code raised. This release
-> consumes the two highest-value improvements: the Auto-skill system prompt fix
-> and per-turn memory index injection.
+> Memory storage layer delegated to PAR SDK 0.7.3's `Sqlite_memory` module.
+> Schema upgraded with auto-migration from v0.3.0–v0.3.2. Memory IDs are now
+> UUID strings instead of integers.
 
 ### Changed
-- **PAR SDK dependency bumped to >= 0.7.3** (from >= 0.6.5). Required for
-  Auto-skill fix and `system_prompt_appendix` support.
-- **Memory index now injected per-turn** via `?system_prompt_appendix` on
-  `Runtime.invoke`. Previously baked statically into the system prompt at agent
-  registration time — mid-session memory additions (via `remember_memory`)
-  were invisible until next session. Now the index is fresh on every turn.
-- **Auto-skill workaround removed**. PAR SDK 0.7.3 now strips
-  `system_prompt_override` for Auto-trigger skills in `compute_active_skill_effects`.
-  Builtin skills (summarizer, rag-assistant) register as-is without clobbering
-  the agent identity.
+- **Memory storage migrated to PAR SDK `Sqlite_memory`**: `Par_code_memory` now
+  delegates CRUD to `Sqlite_memory.add/search/delete`, gaining FTS5 + vec0 +
+  RRF hybrid search infrastructure (from PAR SDK 0.7.3). par-code-specific
+  features (`render_index` kind-grouping, `export_markdown`, `prune_stale`,
+  `search_history` via `conversations_fts`) are kept as raw SQL wrappers.
+- **Memory IDs changed from `int` to UUID strings**: `par memory show`,
+  `par memory forget`, and the `remember_memory` tool now use UUID-based IDs
+  (e.g. `b7dfb79f-...`) instead of sequential integers.
+- **Auto-migration from v0.3.0–v0.3.2 schema**: on first `open_db`, if old
+  schema is detected (`kind` column exists), data is read, old tables dropped,
+  new schema created via `Sqlite_memory`, and data re-inserted preserving
+  timestamps and usage stats.
+- **PAR SDK dependency constraint**: added `par.memory` library dependency.
 
-### Fixed
-- **Agent identity clobbered by Auto-trigger skill** (critical): the PAR SDK's
-  built-in `summarizer` skill (`trigger=Auto` + `system_prompt_override`)
-  activated on every turn and replaced the agent's system prompt entirely.
-  The model received "You are an expert summarizer..." instead of "You are
-  par, an interactive coding assistant...". Fix: PAR SDK 0.7.3 strips
-  `system_prompt_override` for Auto skills; par-code workaround removed.
-- **Ctrl-C lost session data** (critical): Ctrl-C exited without saving the
-  conversation or running memory extraction. Interrupted sessions were
-  invisible to `search_history`. Fix: SIGINT handler now saves + extracts
-  before `exit(130)`.
-- **Missing `system_prompt` in config.json silently became empty** (minor):
-  `of_json` returned `""` for absent string fields with no fallback to the
-  default. Fix: fall back to `default.system_prompt` when the field is empty.
+### Added (from earlier unreleased commits)
+- **PAR SDK 0.7.3 consumption**: removed Auto-skill workaround; memory index
+  now injected per-turn via `?system_prompt_appendix`.
+- **Ctrl-C saves session**: SIGINT handler saves conversation + runs memory
+  extraction before exiting.
+- **Config fallback**: missing `system_prompt` in config.json falls back to
+  default instead of silently becoming empty.
+
+### Known Limitations
+- Embedding/vector search not yet wired (no `embedding_fn`); search defaults
+  to FTS5 keyword mode. Wiring requires passing the embedding service to
+  `Sqlite_memory.create` — tracked as a follow-up.
+- `par.memory` library requires vec0 extension; if unavailable, vector search
+  degrades gracefully to FTS5-only.
 
 ## v0.3.2 — Linux arm64 pre-built binary support
 

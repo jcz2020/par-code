@@ -39,7 +39,7 @@ let kind_of_string_opt = function
 (** Serialize a [Par_code_memory.memory] record to JSON. *)
 let memory_to_json (m : Par_code_memory.memory) : Yojson.Safe.t =
   `Assoc
-    [ ("id",          `Int m.id)
+      [ ("id",          `String m.id)
     ; ("kind",        `String (kind_to_string m.kind))
     ; ("content",     `String m.content)
     ; ("summary",     `String m.summary)
@@ -224,7 +224,7 @@ let tools (mem_db : Par_code_memory.t) : Types.tool_binding list =
                    ~project_id ~kind ~content ~summary ~citations ~source:`Agent
             with
             | Ok id ->
-              Success (`Assoc [("id", `Int id); ("status", `String "saved")])
+              Success (`Assoc [("id", `String id); ("status", `String "saved")])
             | Error (`Db_error msg) ->
               tool_error ~category:(Internal "Database error")
                 ~message:(Printf.sprintf "Failed to save memory: %s" msg) ()))

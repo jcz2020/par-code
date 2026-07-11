@@ -140,7 +140,7 @@ let memory_limit_arg =
 
 let memory_id_arg =
   let open Cmdliner in
-  Arg.(required & pos 0 (some int) None &
+  Arg.(required & pos 0 (some string) None &
     info [] ~docv:"ID" ~doc:"Memory entry ID")
 
 let memory_query_arg =

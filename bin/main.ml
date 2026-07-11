@@ -168,15 +168,16 @@ let format_timestamp ts =
     (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
 
 let print_memory_header () =
-  Printf.printf "%-5s %-12s %-40s %s\n" "ID" "KIND" "SUMMARY" "UPDATED";
+  Printf.printf "%-12s %-12s %-40s %s\n" "ID" "KIND" "SUMMARY" "UPDATED";
   Printf.printf "%s\n" (String.make 75 '-')
 
 let print_memory_row (m : Par_code_memory.memory) =
+  let short_id = String.sub m.id 0 (min 8 (String.length m.id)) in
   let summary = if String.length m.summary > 40
     then String.sub m.summary 0 37 ^ "..."
     else m.summary in
-  Printf.printf "%-5d %-12s %-40s %s\n"
-    m.id (format_kind m.kind) summary (format_timestamp m.updated_at)
+  Printf.printf "%-12s %-12s %-40s %s\n"
+    short_id (format_kind m.kind) summary (format_timestamp m.updated_at)
 
 let cmd_memory_list limit =
   with_memory_db (fun mem_db ->
@@ -216,7 +217,7 @@ let cmd_memory_add kind_str_opt summary_opt content_opt =
           Printf.eprintf "Error adding memory: %s\n%!" msg;
           exit 1
         | Ok id ->
-          Printf.printf "Added memory #%d\n%!" id)
+          Printf.printf "Added memory #%s\n%!" id)
 
 let cmd_memory_add_term =
   let open Term in
@@ -233,7 +234,7 @@ let cmd_memory_forget id =
       Printf.eprintf "Error forgetting memory: %s\n%!" msg;
       exit 1
     | Ok () ->
-      Printf.printf "Forgot memory #%d\n%!" id)
+      Printf.printf "Forgot memory #%s\n%!" id)
 
 let cmd_memory_forget_term =
   let open Term in
@@ -251,10 +252,10 @@ let cmd_memory_show id =
     | Ok memories ->
       match List.find_opt (fun (m : Par_code_memory.memory) -> m.id = id) memories with
       | None ->
-        Printf.eprintf "Error: memory #%d not found\n%!" id;
+        Printf.eprintf "Error: memory #%s not found\n%!" id;
         exit 1
       | Some m ->
-        Printf.printf "ID:         %d\n" m.id;
+        Printf.printf "ID:         %s\n" m.id;
         Printf.printf "Kind:       %s\n" (format_kind m.kind);
         Printf.printf "Summary:    %s\n" m.summary;
         Printf.printf "Content:    %s\n" m.content;
