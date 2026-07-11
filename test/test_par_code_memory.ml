@@ -210,7 +210,7 @@ let prune_stale_semantics () =
 let render_index_line_cap () =
   with_temp_db (fun ~tmpdir:_ db ->
     let project_id = "test-project" in
-    for i = 1 to 10 do
+    for i = 1 to 250 do
       ignore (add_mem db ~project_id ~kind:Insight
                 ~content:(Printf.sprintf "content %d" i)
                 ~summary:(Printf.sprintf "summary %d" i))
@@ -218,7 +218,7 @@ let render_index_line_cap () =
     let output = Par_code_memory.render_index db ~project_id in
     let lines = String.split_on_char '\n' output in
     let non_empty = List.filter (fun s -> s <> "") lines in
-    Alcotest.(check bool) "render produced output" true (List.length non_empty > 0))
+    Alcotest.(check bool) "line cap ≤ 201" true (List.length non_empty <= 201))
 
 let conversations_fts_insert_and_search () =
   with_history_db (fun ~tmpdir db ->

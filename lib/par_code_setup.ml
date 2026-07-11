@@ -150,7 +150,16 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
     exit 1
   | Ok rt ->
     (* Open the memory database for project memory (v0.3.0). *)
-    let mem_db = match Par_code_memory.open_db () with
+    let memory_embedding_fn : Par_memory.Memory_service.embedding_fn option =
+      match provider_tag with
+      | `Anthropic -> None
+      | _ ->
+        Some (fun texts ->
+          match embeddings.Types.embed_fn texts with
+          | Ok vecs -> Ok vecs
+          | Error e -> Error (error_to_string e))
+    in
+    let mem_db = match Par_code_memory.open_db ?embedding_fn:memory_embedding_fn () with
       | Ok t -> Some t
       | Error (`Db_error msg) ->
         Printf.eprintf "Warning: memory DB unavailable: %s\n%!" msg;

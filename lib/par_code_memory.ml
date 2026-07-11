@@ -230,7 +230,7 @@ let create_conversations_fts db =
 
 (* -- open/close ---------------------------------------------------------- *)
 
-let open_db () =
+let open_db ?embedding_fn () =
   let path = Par_code_config.db_path () in
   let migration_db = Sqlite3.db_open path in
   let old_memories = read_old_memories migration_db in
@@ -241,7 +241,12 @@ let open_db () =
       (List.length old_memories)
   end;
   let _ = Sqlite3.db_close migration_db in
-  match Sqlite_memory.create path with
+  let create_result =
+    match embedding_fn with
+    | Some fn -> Sqlite_memory.create ~embedding_fn:fn path
+    | None -> Sqlite_memory.create path
+  in
+  match create_result with
   | Error e -> Error (`Db_error (Memory_error.to_string e))
   | Ok mem ->
     let db = mem.Sqlite_memory.db in

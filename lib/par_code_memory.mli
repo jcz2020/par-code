@@ -25,7 +25,8 @@ type history_hit = {
   turn_count : int;
 }
 
-val open_db : unit -> (t, [> `Db_error of string]) result
+val open_db : ?embedding_fn:Par_memory.Memory_service.embedding_fn ->
+  unit -> (t, [> `Db_error of string]) result
 
 val close : t -> unit
 
