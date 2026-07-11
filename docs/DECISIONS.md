@@ -1,5 +1,38 @@
 # Decisions
 
+## [2026-07-11] Deferred: fork_invoke for background extraction (target v0.4.0)
+
+**变更前**：Memory extraction runs synchronously at session exit, blocking the user for 2-5 seconds while the extractor agent runs one LLM call. No extraction happens during the session.
+
+**变更后**（计划）：Use PAR SDK 0.7.3 `fork_invoke` to run extraction in a background fiber. User exits immediately; extraction completes asynchronously. Additionally, periodic mid-session extraction (every N turns) becomes possible.
+
+**原因**：PAR SDK 0.7.3 shipped `fork_invoke` + `invoke_async` + fiber-local `invoke_context` (need #3). par-code's current synchronous-at-exit approach was a workaround for PAR SDK's lack of safe concurrent invoke.
+
+**归属**：v0.4.0（长会话连续性）。fork_invoke 是 v0.4.0 checkpoint-writer subagent 的实现基础——后台提取只是顺手做的事，主线是"长时间会话不掉链子"。不单独版本化。
+
+**已知限制**：PAR SDK `rt.current_conversation` 仍是共享可变状态，两个并发 invoke 会 race。使用时必须显式传 `?conversation`，且只在用户侧 invoke 上调 `save_conversation`，后台 invoke 不碰 `current_conversation`。
+
+**回退方式**：维持现状（同步退出时提取），不影响功能。
+
+## [2026-07-11] Deferred: migrate to PAR SDK Sqlite_memory for vector/hybrid search (独立基建版本)
+
+**变更前**：par-code 使用自建的 `Par_code_memory` 模块，仅支持 FTS5 关键词搜索。记忆检索依赖词面匹配——用户问"认证"搜不到写着"auth"的记忆。
+
+**变更后**（计划）：迁移存储层到 PAR SDK 0.7.3 的 `Sqlite_memory`，获得 vec0 向量搜索 + RRF 混合搜索能力。记忆检索从关键词匹配升级为语义搜索。
+
+**原因**：PAR SDK 0.7.3 shipped `Par.Memory` module (`Sqlite_memory`) with FTS5 + vec0 + RRF (need #4)。par-code 的 `Par_code_memory` 已验证模式可行，上游化是 STRATEGY.md §2 双角色职责。
+
+**归属**：独立基建版本（v0.3.3 或 v0.4.0 与 v0.5.0 之间）。不绑定特定功能版本——它是存储层升级，用户面感知是"搜记忆更准了"。
+
+**迁移要点**：
+- `kind` (Preference/Convention/...) → `categories: ["preference"]`
+- `project_id` → `scope: project_id`
+- `citations` → `metadata: [("citations", `List [...])]`
+- 保留 par-code 专有功能作为 wrapper：`render_index`（kind-grouped）、`export_markdown`、`prune_stale`、`search_history`（conversations_fts，PAR SDK 的 builtin 版本更弱）
+- 需写 `Memory_service.memory_service` → `Types.memory_service` 类型适配器
+
+**回退方式**：维持现状（FTS5 关键词搜索），不影响功能。
+
 ## [2026-07-11] Consume PAR SDK 0.7.3: remove skill workaround + adopt per-turn memory injection
 
 **变更前**：PAR SDK 0.6.9 had two gaps: (1) Auto-trigger skills silently replaced the agent system prompt via `system_prompt_override`; par-code worked around this by downgrading Auto→Manual before registration. (2) `Runtime.make_agent` took `system_prompt` once at registration; par-code baked the memory index into the system prompt at session start (static for the entire session).
