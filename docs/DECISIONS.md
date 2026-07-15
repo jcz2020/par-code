@@ -1,5 +1,19 @@
 # Decisions
 
+## [2026-07-15] v0.3.3 shipped — PAR SDK 0.7.3 + hybrid memory search
+
+**变更前**：v0.3.2 shipped (Linux arm64). v0.3.3 unreleased with 6 commits on main: PAR SDK 0.7.3 consumption (per-turn memory injection, skill-workaround removed), `Sqlite_memory` storage migration (memory IDs int → UUID, schema auto-migrated from v0.3.0–v0.3.2), embedding API configuration (independent embedding provider), hybrid search infrastructure (FTS5 + vec0 + RRF), UX fixes (Ctrl-C saves session, config fallback), and doc sync.
+
+**变更后**：v0.3.3 shipped. Version bumped to 0.3.3 in `dune-project`, `par_code.opam`, and `test/test_par_code.ml`. Tag `v0.3.3` pushed; Release workflow built Linux x64 + Linux arm64 + macOS arm64 binaries successfully (all 4 jobs green); GitHub Release published. README/CHANGES/STRATEGY synced to shipped state.
+
+**原因**：The 6 unreleased commits formed a closed architectural-cleanup loop (consume PAR SDK 0.7.3 + standardize memory storage on PAR SDK `Sqlite_memory`). Holding them unshipped would defer the hybrid-search infrastructure value and inflate v0.4.0 into a large release. Shipping now clears the deck for v0.4.0 (long-session continuity: checkpoint-writer + `fork_invoke` background extraction).
+
+**影响范围**：Release commit (`dune-project`, `par_code.opam`, `test/test_par_code.ml`) + doc-sync commit (`README.md`, `CHANGES.md`, `docs/STRATEGY.md`, `docs/DECISIONS.md`). No code changes in either commit. Users: `curl install.sh | bash` now installs v0.3.3; existing users get offered the upgrade via the startup version check.
+
+**回退方式**：Git tag and GitHub Release are permanent (users may have already installed v0.3.3). Code state can be reverted via `git revert <release-sha>`. **Memory schema migration is NOT reversible** — v0.3.3's `Sqlite_memory` migration drops old tables after reading; users upgrading from v0.3.0–v0.3.2 should have exported memories first (`par memory export > backup.md`). See [2026-07-11] migration decision for details.
+
+**已知限制**：(1) CI workflow's `ubuntu-24.04-arm` job failed during release due to a transient GitHub ARM-runner network issue (`ports.ubuntu.com` unreachable — IPv6 "Network is unreachable", IPv4 timeout); re-run separately. The Release workflow (Docker-based, AlmaLinux 8) was unaffected and produced correct arm64 artifacts. (2) vec0 extension availability varies by platform; degrades gracefully to FTS5-only when absent.
+
 ## [2026-07-11] v0.3.3: migrate memory storage to PAR SDK Sqlite_memory
 
 **变更前**：par-code used a custom `Par_code_memory` module with its own schema (`id INTEGER PK`, `kind TEXT`, `citations TEXT`, `project_id TEXT`) and FTS5 keyword search only.

@@ -160,6 +160,9 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
 - **v0.3.1 ✅ shipped** — auto-extraction at session exit + history search
   (FTS5 over conversations table)
 - **v0.3.2 ✅ shipped** — Linux arm64 pre-built binary (Raspberry Pi / Graviton)
+- **v0.3.3 ✅ shipped** — PAR SDK 0.7.3 consumption + memory storage migrated to
+  `Sqlite_memory` (FTS5 + vec0 + RRF hybrid search) + configurable embedding
+  service + per-turn memory injection
 - v0.4.0+ — long-session continuity, plan mode, subagents, autonomy, reasoning,
   self-improvement, compose mode, ecosystem, code intelligence, safety, polish
   → v1.0
@@ -189,6 +192,9 @@ per global rules) lives in `docs/DECISIONS.md`. Strategic-level entries:
 | 2026-07-06 | MEMORY.md as auto-generated export, not source of truth (DB is canonical) | Active |
 | 2026-07-06 | Auto-extraction at session exit (synchronous, not background) to avoid PAR SDK reentrant invoke corruption | Active |
 | 2026-07-06 | History search via FTS5 on raw messages_json (global, not project-scoped) | Active |
+| 2026-07-11 | v0.3.3: memory storage migrated to PAR SDK 0.7.3 `Sqlite_memory` (FTS5 + vec0 + RRF); memory IDs int → UUID; auto-migration from v0.3.0–v0.3.2 schema | Active |
+| 2026-07-11 | Deferred: `fork_invoke` for background extraction → v0.4.0 (long-session continuity) | Active |
+| 2026-07-15 | v0.3.3 shipped — PAR SDK 0.7.3 + hybrid memory search (6 commits, closed architectural-cleanup loop) | Active |
 
 ## 10. Revision Protocol
 

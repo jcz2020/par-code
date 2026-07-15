@@ -1,6 +1,6 @@
 # CHANGES
 
-## v0.3.3 (unreleased) — Memory storage migrated to PAR SDK Sqlite_memory
+## v0.3.3 — PAR SDK 0.7.3 + hybrid memory search
 
 > Memory storage layer delegated to PAR SDK 0.7.3's `Sqlite_memory` module.
 > Schema upgraded with auto-migration from v0.3.0–v0.3.2. Memory IDs are now
@@ -33,7 +33,7 @@
 - **Embedding API configuration**: `par config` now supports separate embedding
   settings (`embedding_base_url`, `embedding_model`, `embedding_dimension`).
   Users can use a different provider for embeddings than for chat (e.g.,
-  chat via MiniMax, embeddings via OpenAI). Defaults to chat provider config.
+  chat via one provider, embeddings via another). Defaults to chat provider config.
 - **Hybrid search infrastructure**: `Sqlite_memory` with vec0 + RRF is wired
   via embedding service. When embeddings are available, `recall` uses hybrid
   search (FTS5 + vector). Falls back to FTS5-only when unsupported.
