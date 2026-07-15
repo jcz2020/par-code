@@ -1,5 +1,5 @@
 let test_version () =
-  Alcotest.(check string) "version is 0.3.1" "0.3.2" Par_code_version.version
+  Alcotest.(check string) "version is 0.3.3" "0.3.3" Par_code_version.version
 
 let test_version_info_prefix () =
   Alcotest.(check bool) "version_info starts with 'par '"
