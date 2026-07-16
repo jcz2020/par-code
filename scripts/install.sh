@@ -189,14 +189,11 @@ maybe_update_path() {
     _rc_dir="$(dirname "$_rc")"
     [ -d "$_rc_dir" ] || mkdir -p "$_rc_dir" 2>/dev/null || {
         warn "cannot create $_rc_dir"; info "export PATH=\"$PREFIX/bin:\$PATH\""; return 0; }
-    [ -f "$_rc" ] && grep -q '# >>> par >>>' "$_rc" 2>/dev/null && { info "PATH block in $_rc"; return 0; }
+    [ -f "$_rc" ] && grep -q '# >>> par >>>' "$_rc" 2>/dev/null && { info "PATH block already in $_rc"; return 0; }
     if [ -t 0 ]; then
-        printf "Add %s/bin to PATH in %s? [y/N] " "$PREFIX" "$_rc"
-        _ans=""; read -r _ans 2>/dev/null || _ans="n"
-        case "$_ans" in y|Y|yes|YES) ;; *) info "skipped. Run: export PATH=\"$PREFIX/bin:\$PATH\""; return 0 ;; esac
-    else
-        info "non-interactive; add to PATH: export PATH=\"$PREFIX/bin:\$PATH\""
-        return 0
+        printf "Add %s/bin to PATH in %s? [Y/n] " "$PREFIX" "$_rc"
+        _ans=""; read -r _ans 2>/dev/null || _ans="y"
+        case "$_ans" in n|N|no|NO) info "skipped. Run: export PATH=\"$PREFIX/bin:\$PATH\""; return 0 ;; esac
     fi
     _line="export PATH=\"\$HOME/.par/bin:\$PATH\""
     if [ "$_shell" = "fish" ]; then
@@ -206,6 +203,7 @@ maybe_update_path() {
     printf '\n# >>> par >>>\n%s\n# <<< par <<<\n' "$_line" >> "$_rc" || {
         warn "write failed"; info "export PATH=\"$PREFIX/bin:\$PATH\""; return 0; }
     success "added to PATH in $_rc"
+    [ -t 0 ] || info "restart your shell or run: source $_rc"
 }
 
 show_help() {
