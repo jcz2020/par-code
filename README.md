@@ -9,7 +9,7 @@ CLI conventions and drives the full PAR surface — ReAct loop, tool dispatch,
 type-safe bash, MCP client, skills, workflows, streaming — to both ship a
 useful agent and prove out the PAR SDK in anger.
 
-**Status:** `v0.3.3` — PAR SDK 0.7.3 + hybrid memory search (FTS5 + semantic via embeddings). Pre-built binaries with a
+**Status:** `v0.4.0` — long-session continuity (checkpoint-writer subagent + budgeted context injection + context reconstruction). Pre-built binaries with a
 one-line installer (`curl | bash`) for Linux x86_64/arm64 + macOS arm64, plus `par upgrade`
 self-update. No OCaml or opam needed for end users.
 
@@ -210,6 +210,57 @@ Memory kinds: `preference`, `convention`, `insight`, `gotcha`, `task_map`.
 `par memory export` generates a human-readable markdown file you can commit to
 your repo. This is a read-only export — the database is the source of truth.
 
+## Long-session Continuity
+
+par-code v0.4.0 introduces long-session continuity features that keep hour-long
+coding sessions productive without losing context.
+
+### Session checkpoints
+
+Every N turns (default 10, configurable), a checkpoint-writer subagent snapshots
+the session state into a structured entry:
+
+- **What you're working on** (task description)
+- **Key decisions made** (architectural choices, approach)
+- **Files touched** (read, written, or edited paths)
+- **Interfaces added/modified** (function/type signatures)
+- **Open threads** (TODOs, unresolved questions)
+
+Checkpoints run on a **separate isolated Runtime** — checkpoint LLM calls never
+interfere with your main conversation's state.
+
+```sh
+/checkpoint      # Force an immediate checkpoint
+/checkpoints     # List checkpoints for the current session
+```
+
+Disable with `PAR_NO_CHECKPOINT=1` or `checkpoint_enabled: false` in config.
+
+### Context reconstruction on resume
+
+When resuming a session (`par --resume` or `par --continue <id>`), the most
+recent checkpoints are rendered into a compact session brief and injected into
+the agent's context. The agent picks up exactly where it left off — knowing
+what was done, what was decided, and what remains open.
+
+### Budgeted context injection
+
+When the conversation approaches the model's context window limit, older
+messages are automatically replaced with a checkpoint summary while the most
+recent messages are kept verbatim. A notice is printed:
+
+```
+[context compacted at turn 42 — ~130k → ~45k tokens]
+```
+
+Configure the budget via `context_budget_tokens` in config (default: 100000).
+
+### Periodic memory extraction
+
+In addition to the session-end extraction (v0.3.1), memories are now extracted
+mid-session at each checkpoint cycle. Facts discovered during a long session
+appear in the memory index without waiting for the session to end.
+
 ## Roadmap
 
 Each release ships **one** user-facing capability — a thin, demonstrable slice.
@@ -225,7 +276,7 @@ Version numbers stay minimal (no 1.0 until core parity is earned).
 | **v0.3.1** ✅ | Auto-extraction + history search — session-end memory extraction + FTS5 search over past conversations. *"It remembers without being asked, and recalls what it wrote."* |
 | **v0.3.2** ✅ | Linux arm64 pre-built binary — Raspberry Pi / AWS Graviton / other aarch64 Linux supported with one-line installer. *"Install on ARM without compiling."* |
 | **v0.3.3** ✅ | PAR SDK 0.7.3 + hybrid memory search — memory storage migrated to PAR SDK `Sqlite_memory`; FTS5 + vector + RRF hybrid search via configurable embedding service; per-turn memory injection. *"Memory search understands meaning, not just keywords."* |
-| **v0.4.0** | Long-session continuity — checkpoint-writer subagent, budgeted context injection, context reconstruction. *"Hours-long sessions never lose the thread."* |
+| **v0.4.0** ✅ | Long-session continuity — checkpoint-writer subagent on a separate isolated Runtime, budgeted context injection, context reconstruction on resume, periodic mid-session memory extraction. *"Hours-long sessions never lose the thread."* |
 | **v0.5.0** | Plan mode — read-only plan agent, build/plan switching, plan_enter/plan_exit. *"It plans before it touches code."* |
 | **v0.6.0** | Subagent delegation — general/explore subagents, actor tool, task tree. *"It spawns helpers to explore and work in parallel."* |
 | **v0.7.0** | Goal-driven autonomy — `/goal` + independent judge model + doom-loop detection. *"It won't declare done until the goal is truly met."* |

@@ -1,5 +1,61 @@
 # Decisions
 
+## [2026-07-16] v0.4.0: separate checkpoint Runtime for isolation
+
+**变更前**：par-code used a single `Runtime` instance for all LLM calls (main agent + memory extractor). The extractor ran synchronously at session exit, so no concurrency issue existed.
+
+**变更后**：v0.4.0 adds a checkpoint-writer subagent that runs `invoke_generate` during the session (not just at exit). PAR SDK's `invoke_generate` clobbers `rt.current_conversation` (line 917) and auto-saves (line 918), which would corrupt the user's saved session if run on the shared Runtime. A **separate `Runtime` instance** (`ckpt_rt`) with no-op persistence is created at setup time. Checkpoint calls only affect `ckpt_rt`'s state. The user's `rt` is never touched.
+
+**原因**：PAR SDK's `Runtime` has unprotected shared mutable state (`current_conversation`, `session_id`). Concurrent `invoke_generate` on the same runtime races — the last writer wins, potentially saving the checkpoint's conversation as the user's session. The separate Runtime eliminates this race class structurally rather than relying on cooperative-scheduling reasoning. Oracle confirmed this is the architecturally-correct choice (R1/R3).
+
+**影响范围**：`lib/par_code_setup.ml` (creates `ckpt_rt`), `lib/par_code_repl.ml` (accepts `~ckpt_rt`), `bin/main.ml` (threads `ckpt_rt`). No PAR SDK changes.
+
+**回退方式**：Remove `ckpt_rt`, pass `None` as the `~ckpt_rt` parameter. Checkpointing is disabled but all other functionality continues. The separate Runtime is a pure addition — no existing behavior changes when `ckpt_rt = None`.
+
+**已知限制**：Creates a second LLM provider connection (minor resource overhead). The long-term clean fix is a PAR SDK `?persist:bool` parameter on `invoke_generate` (tracked as PAR feedback #1). When PAR ships that, the separate Runtime can be collapsed back to one with the flag.
+
+## [2026-07-16] v0.4.0: Context Ledger pattern for checkpoint storage
+
+**变更前**：No checkpoint mechanism existed. Long sessions relied on the full conversation being passed to each `invoke`, eventually exceeding the model's context window.
+
+**变更后**：Checkpoint entries are structured JSON records (task, decisions, files_changed, interfaces, open_threads) stored in a `checkpoints` SQLite table with FTS5 index. Each entry is ~300 tokens. On resume, the most recent entries are rendered into a compact session brief injected as `system_prompt_appendix`.
+
+**原因**：Research into production coding-agent continuity patterns identified "Context Ledger" (structured entries at semantic boundaries + retrievable pointers) as the highest-leverage approach. Unlike prose summarization (lossy, compounds errors across cycles), structured entries are compact and lossless — each entry captures what matters without degrading through repeated summarization.
+
+**影响范围**：`lib/par_code_checkpoint.ml` (new, 328 lines), `test/test_par_code_checkpoint.ml` (new, 15 tests), `lib/par_code_memory.ml` (+raw_db accessor).
+
+**回退方式**：Delete the `checkpoints` table and checkpoint module. The `checkpoints_fts` virtual table and triggers are safe to drop. No data dependency exists on checkpoint entries — they are pure additions to the session state.
+
+**已知限制**：Each checkpoint is a full snapshot (no delta/incremental). FTS5 search is keyword-based (no semantic search yet). Delta checkpoints and embedding-based retrieval are deferred to v0.5.0+.
+
+## [2026-07-16] v0.4.0: Budgeted context injection (chars/4 heuristic)
+
+**变更前**：The full conversation was passed to every `invoke` call. No token budget checking. Long sessions would eventually hit the model's context window limit, causing truncated or failed calls.
+
+**变更后**：Before each `invoke`, `Par_code_context.token_estimate` computes a rough token count (total chars / 4). If over `context_budget_tokens` (default 100000), older messages are replaced with a single summary message (from the most recent checkpoint) while the last 8 messages are kept verbatim. A notice is printed to stderr.
+
+**原因**：A real tokenizer (per-model token tables, BPE-style) would add an external dependency and per-model tables. The chars/4 heuristic is deliberately conservative (over-estimates → compacts early) and sufficient for a v0.4.0 MVP. The PAR SDK's internal `context_strategy = Summarize` handles within-turn trimming; this par-code-level budgeting controls what reaches PAR in the first place.
+
+**影响范围**：`lib/par_code_context.ml` (new, 99 lines), `lib/par_code_repl.ml` (budget check before invoke).
+
+**回退方式**：Set `context_budget_tokens` to a very large value (e.g., 999999) in config. Compaction never triggers.
+
+**已知限制**：±20% accuracy (chars/4 heuristic). A real tokenizer can replace this in v0.5.0+ without API changes — the `token_estimate` function signature stays the same.
+
+## [2026-07-16] v0.4.0: Periodic mid-session memory extraction
+
+**变更前**：Memory extraction ran only at session exit (synchronous, blocking the user for 2-5 seconds). Facts discovered during a long session weren't available as memories until the session ended.
+
+**变更后**：The checkpoint cycle (every N turns) also triggers memory extraction via the checkpoint Runtime (`ckpt_rt`). Facts appear in the memory index mid-session. Exit-time extraction remains as a safety net (synchronous, unchanged from v0.3.1).
+
+**原因**：The `fork_invoke` deferred item from v0.3.3 (DECISIONS.md [2026-07-11]) is consumed: the separate checkpoint Runtime provides the isolation that `fork_invoke` was meant to enable. Mid-session extraction makes long sessions more productive — the agent can recall facts it discovered earlier in the same session.
+
+**影响范围**：`lib/par_code_checkpoint.ml` (calls `run_extraction` after storing checkpoint), `lib/par_code_repl.ml` (checkpoint cycle triggers both checkpoint + extraction).
+
+**回退方式**：Disable checkpointing via `PAR_NO_CHECKPOINT=1`. Exit-time extraction still runs (v0.3.1 behavior).
+
+**已知限制**：Extraction runs synchronously on `ckpt_rt` (~2-5s every N turns). True background fiber execution is a future enhancement. The `ckpt_rt`'s `invoke_generate` auto-save is a no-op (by design), so extracted conversations don't pollute the DB.
+
 ## [2026-07-15] v0.3.3 shipped — PAR SDK 0.7.3 + hybrid memory search
 
 **变更前**：v0.3.2 shipped (Linux arm64). v0.3.3 unreleased with 6 commits on main: PAR SDK 0.7.3 consumption (per-turn memory injection, skill-workaround removed), `Sqlite_memory` storage migration (memory IDs int → UUID, schema auto-migrated from v0.3.0–v0.3.2), embedding API configuration (independent embedding provider), hybrid search infrastructure (FTS5 + vec0 + RRF), UX fixes (Ctrl-C saves session, config fallback), and doc sync.

@@ -1,5 +1,72 @@
 # CHANGES
 
+## v0.4.0 — Long-session continuity
+
+> Checkpoint-writer subagent on a separate isolated Runtime, budgeted context
+> injection, context reconstruction on resume, periodic mid-session memory
+> extraction. Hour-long sessions never lose the thread.
+
+### Added
+- **Checkpoint-writer subagent**: a background LLM agent on a **separate,
+  isolated Runtime** that snapshots session state every N turns (default 10)
+  into structured entries (task, decisions, files, interfaces, open threads).
+  The separate Runtime ensures checkpoint calls never clobber the user's
+  conversation state.
+- **`checkpoints` table**: new SQLite table for storing checkpoint entries,
+  linked by session_id and project_id. FTS5 index created for future search
+  capabilities.
+- **`/checkpoint` command**: force an immediate checkpoint regardless of turn count.
+- **`/checkpoints` command**: list checkpoints for the current session.
+- **Context reconstruction on resume**: when `--resume`/`--continue`, the most
+  recent checkpoints are rendered into a compact session brief and injected
+  as `system_prompt_appendix` on the first turn.
+- **Budgeted context injection**: before each `invoke`, if the conversation
+  exceeds `context_budget_tokens` (default 100000), older messages are replaced
+  with a checkpoint summary while the last 8 messages are kept verbatim.
+- **Periodic mid-session memory extraction**: the checkpoint cycle also triggers
+  memory extraction via the isolated Runtime, so facts appear during long
+  sessions without waiting for exit.
+- **Config fields**: `checkpoint_enabled` (default true), `checkpoint_interval`
+  (default 10), `context_budget_tokens` (default 100000).
+- **Env overrides**: `PAR_NO_CHECKPOINT=1` disables checkpointing entirely.
+
+### Changed
+- **`par_code_repl.ml`**: `run` and `run_single_shot` gain `~ckpt_rt` parameter;
+  turn counter, session_id capture, checkpoint hooks, and budget logic wired in.
+- **`par_code_setup.ml`**: creates a second Runtime (`ckpt_rt`) with no-op
+  persistence (prevents checkpoint saves from polluting the conversations table)
+  and registers the checkpoint-writer agent on it.
+- **`par_code_memory.ml`**: exposes `raw_db` accessor for checkpoint schema creation.
+- **`par_code_config.ml`**: 3 new config fields across type/default/to_json/of_json/merge.
+
+### New modules
+- **`par_code_checkpoint.ml/mli`** (328/60 lines): checkpoint storage, serialization,
+  JSON parsing, session brief rendering, `run_checkpoint`/`maybe_checkpoint`.
+- **`par_code_context.ml/mli`** (99/23 lines): `token_estimate` (chars/4 heuristic),
+  `compact` (replace old messages with summary, keep recent verbatim).
+
+### Architecture
+- **Separate Runtime isolation**: the checkpoint writer runs on its own
+  `Runtime.create` instance with no-op persistence. This is architecturally
+  correct (not a scope compromise): PAR SDK's `invoke_generate` clobbers
+  `rt.current_conversation` and auto-saves, which would corrupt the user's
+  session if run on the shared Runtime. The separate Runtime makes this race
+  structurally impossible.
+
+### PAR SDK Feedback (filed, not applied)
+1. `invoke_generate`'s auto-save is inconsistent with `invoke` (which doesn't
+   auto-save). Recommend `?persist:bool` parameter.
+2. `rt.current_conversation` is unprotected shared mutable state — unsafe for
+   concurrent invoke on the same Runtime.
+3. `save_conversation` cannot target a specific conversation — recommend
+   `?conv` parameter or exposing `rt.services.persistence`.
+
+### Known Limitations
+- Token estimation uses chars/4 heuristic (±20% accuracy, compacts conservatively).
+- Checkpoint calls are synchronous (~2-5s every N turns). True background fiber
+  execution is a future enhancement.
+- No incremental/delta checkpoints — each checkpoint is a full snapshot.
+
 ## v0.3.3 — PAR SDK 0.7.3 + hybrid memory search
 
 > Memory storage layer delegated to PAR SDK 0.7.3's `Sqlite_memory` module.
