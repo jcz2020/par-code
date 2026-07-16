@@ -1,5 +1,19 @@
 # Decisions
 
+## [2026-07-16] v0.4.0 shipped — Long-session continuity
+
+**变更前**：v0.3.3 shipped (hybrid memory search). v0.4.0 was unimplemented. Long sessions relied on the full conversation being passed to each invoke, eventually exceeding the model's context window with no recovery mechanism.
+
+**变更后**：v0.4.0 shipped. Version bumped to 0.4.0 in dune-project + par_code.opam + test assertion. Tag v0.4.0 pushed; Release workflow built Linux x64/arm64 + macOS arm64 binaries successfully (all 4 jobs green); GitHub Release published. README/CHANGES/STRATEGY synced.
+
+**原因**：v0.4.0 delivers the signature capability "hours-long sessions never lose the thread" via four pillars: (1) checkpoint-writer subagent on a separate isolated Runtime, (2) budgeted context injection (chars/4 heuristic compaction), (3) context reconstruction on resume, (4) periodic mid-session memory extraction. The separate Runtime architecture was Oracle-reviewed and confirmed as architecturally correct (R1/R3). Live testing verified all features end-to-end with real LLM calls, finding and fixing 7 bugs (think-tag JSON parsing, infinite loop, exception guard gaps, missing extractor registration on ckpt_rt, false compaction notices).
+
+**影响范围**：2 commits — feat(v0.4.0) (14 files, +1120 lines) + release bump (7 files). New modules: par_code_checkpoint.ml/mli (351/60 lines), par_code_context.ml/mli (99/23 lines). New tests: 20 checkpoint tests. Users: `curl install.sh | bash` now installs v0.4.0; existing users get offered the upgrade.
+
+**回退方式**：Git tag and GitHub Release are permanent. Code state can be reverted via `git revert`. Memory schema is backward-compatible (checkpoints table is additive).
+
+**已知限制**：(1) Token estimation uses chars/4 heuristic (±20% accuracy). (2) Checkpoint calls are synchronous (~2-5s every N turns). (3) Checkpoint content quality depends on model capability (weaker models may return trivial/empty checkpoints). (4) PAR SDK feedback filed (3 items: invoke_generate auto-save inconsistency, current_conversation shared mutable, save_conversation lacks ?conv parameter).
+
 ## [2026-07-16] v0.4.0: separate checkpoint Runtime for isolation
 
 **变更前**：par-code used a single `Runtime` instance for all LLM calls (main agent + memory extractor). The extractor ran synchronously at session exit, so no concurrency issue existed.

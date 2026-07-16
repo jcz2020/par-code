@@ -163,7 +163,7 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
 - **v0.3.3 ✅ shipped** — PAR SDK 0.7.3 consumption + memory storage migrated to
   `Sqlite_memory` (FTS5 + vec0 + RRF hybrid search) + configurable embedding
   service + per-turn memory injection
-- **v0.4.0 (in development)** — long-session continuity: checkpoint-writer
+- **v0.4.0 ✅ shipped** — long-session continuity: checkpoint-writer
   subagent on separate isolated Runtime + Context Ledger storage + budgeted
   context injection + context reconstruction on resume + periodic mid-session
   extraction
@@ -202,7 +202,7 @@ per global rules) lives in `docs/DECISIONS.md`. Strategic-level entries:
 | 2026-07-16 | v0.4.0: separate checkpoint Runtime for isolation (prevents `invoke_generate` clobber races) | Active |
 | 2026-07-16 | v0.4.0: Context Ledger pattern for checkpoint storage (structured entries, not prose) | Active |
 | 2026-07-16 | v0.4.0: budgeted context injection via chars/4 heuristic (conservative compaction) | Active |
-| 2026-07-16 | v0.4.0: periodic mid-session extraction via checkpoint Runtime | Active |
+| 2026-07-16 | v0.4.0 shipped — Long-session continuity (checkpoint-writer + context budget + mid-session extraction) | Active |
 
 ## 10. Revision Protocol
 
