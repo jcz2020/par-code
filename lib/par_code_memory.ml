@@ -16,6 +16,9 @@ type t = {
   db : Sqlite3.db;
 }
 
+(* Expose raw db handle for checkpoint schema (v0.4.0) *)
+let raw_db t = t.db
+
 type kind = Preference | Convention | Insight | Gotcha | Task_map
 
 type memory = {

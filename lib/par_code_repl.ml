@@ -33,8 +33,10 @@ let print_help () =
   Printf.printf "  /help     Show this help\n";
   Printf.printf "  /session  Show session info\n";
   Printf.printf "  /health   Show runtime health\n";
-  Printf.printf "  /reset    Reset conversation (clear history)\n";
-  Printf.printf "  /quit     Exit\n%!"
+  Printf.printf "  /reset       Reset conversation (clear history)\n";
+  Printf.printf "  /checkpoint  Force a session checkpoint\n";
+  Printf.printf "  /checkpoints List session checkpoints\n";
+  Printf.printf "  /quit        Exit\n%!"
 
 let format_health (h : Types.health_status) =
   let runtime_label = if h.Types.runtime_alive then "alive" else "DEAD" in
@@ -99,9 +101,31 @@ let build_memory_appendix (mem_db : Par_code_memory.t option) =
     if index = "" then None else Some ("\n\n## Project Memory\n\n" ^ index)
   | None -> None
 
-let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
+let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~(ckpt_rt : Runtime.runtime option) ~resume =
   Printf.printf "par %s — type a message (or /help for commands, Ctrl-D to quit)\n%!" Par_code_version.version;
   let conv : Types.conversation option ref = ref (load_initial_conv rt resume) in
+  let turn_count = ref 0 in
+  let session_id = ref None in
+  let is_first_turn = ref true in
+  let first_turn_appendix = ref None in
+  let loaded_cfg = Par_code_config.load () in
+  let ckpt_enabled = match loaded_cfg with Some c -> c.Par_code_config.checkpoint_enabled | None -> true in
+  let ckpt_interval = match loaded_cfg with Some c -> c.Par_code_config.checkpoint_interval | None -> 10 in
+  let ctx_budget = match loaded_cfg with Some c -> c.Par_code_config.context_budget_tokens | None -> 100000 in
+  let env_no_ckpt = match Sys.getenv_opt "PAR_NO_CHECKPOINT" with Some "1" | Some "true" -> true | _ -> false in
+  (* Session brief on resume *)
+  (match !conv with
+   | Some _ ->
+     (try
+        let sid = Runtime.get_session_id rt in
+        session_id := Some sid;
+        (match mem_db with
+         | Some t ->
+           let brief = Par_code_checkpoint.render_session_brief t ~session_id:sid in
+           if brief <> "" then first_turn_appendix := Some brief
+         | None -> ())
+      with _ -> ())
+   | None -> ());
   let on_tool_event = make_tool_event_callback () in
   Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ ->
     let _ = Runtime.save_conversation rt in
@@ -129,6 +153,31 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
              (match !conv with None -> "none" | Some c -> Printf.sprintf "%d messages" (List.length c.Types.messages))
          | "/health" -> format_health (Runtime.health rt)
          | "/reset" -> conv := None; Printf.printf "[conversation reset]\n%!"
+          | "/checkpoint" ->
+            (match ckpt_rt, mem_db, !conv, !session_id with
+             | Some crt, Some t, Some c, Some sid ->
+               let pid = Par_code_memory.resolve_project_id () in
+               (try
+                  Par_code_checkpoint.run_checkpoint ~ckpt_rt:crt t
+                    ~session_id:sid ~project_id:pid c ~turn_number:!turn_count
+                with exn ->
+                  Printf.eprintf "[checkpoint failed: %s]\n%!" (Printexc.to_string exn))
+             | _ ->
+               Printf.eprintf "[checkpoint unavailable — need checkpoint runtime + active session]\n%!");
+           loop ()
+         | "/checkpoints" ->
+           (match mem_db, !session_id with
+            | Some t, Some sid ->
+              (match Par_code_checkpoint.load_checkpoints t ~session_id:sid with
+               | Ok [] -> Printf.printf "No checkpoints for this session.\n%!"
+               | Ok entries ->
+                 List.iteri (fun i (e : Par_code_checkpoint.checkpoint_entry) ->
+                   Printf.printf "  [%d] Turn %d: %s\n" (i+1) e.Par_code_checkpoint.turn_number
+                     (if e.Par_code_checkpoint.task = "" then "(no task)" else e.Par_code_checkpoint.task)
+                 ) entries
+               | Error (`Db_error msg) -> Printf.eprintf "Error: %s\n%!" msg)
+            | _ -> Printf.eprintf "[checkpoints unavailable]\n%!");
+           loop ()
          | "/quit" | "/exit" ->
            let _ = Runtime.save_conversation rt in
            maybe_extract rt !conv;
@@ -136,9 +185,36 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
          | _ -> Printf.eprintf "Unknown command: %s (try /help)\n%!" cmd);
         loop ()
        end else begin
-         (try
-            let memory_appendix = build_memory_appendix mem_db in
-            (match Runtime.invoke rt
+          (try
+             (match !conv with
+              | Some c ->
+                let estimated = Par_code_context.token_estimate c in
+                if estimated > ctx_budget then begin
+                  let summary = match !session_id, mem_db with
+                    | Some sid, Some t ->
+                      (match Par_code_checkpoint.most_recent_checkpoint t ~session_id:sid with
+                       | Ok (Some entry) -> entry.Par_code_checkpoint.task
+                       | _ -> "Session in progress")
+                    | _ -> "Session in progress"
+                  in
+                  let compacted = Par_code_context.compact c ~budget_tokens:ctx_budget ~summary () in
+                  let after = Par_code_context.token_estimate compacted in
+                  if after < estimated then begin
+                    Par_code_context.compaction_notice ~turn:!turn_count
+                      ~before_tokens:estimated ~after_tokens:after;
+                    conv := Some compacted
+                  end
+                end
+              | None -> ());
+             let memory_appendix =
+               let mem_app = build_memory_appendix mem_db in
+               match !is_first_turn, !first_turn_appendix with
+               | true, Some brief ->
+                 is_first_turn := false;
+                 (match mem_app with Some ma -> Some (brief ^ ma) | None -> Some brief)
+               | _ -> mem_app
+             in
+             (match Runtime.invoke rt
                ~agent_id:Par_code_setup.agent_id
                ~message:trimmed
                ?conversation:!conv
@@ -151,10 +227,23 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
               conv := Some recovered_conv;
               Printf.eprintf "Error: %s\n%!" (Par_code_setup.error_to_string e);
               let _ = Runtime.save_conversation rt in ()
-            | Ok { Types.response = _; conversation = returned_conv } ->
-              conv := Some returned_conv;
-              Printf.printf "\n%!";
-              let _ = Runtime.save_conversation rt in ())
+             | Ok { Types.response = _; conversation = returned_conv } ->
+               conv := Some returned_conv;
+               Printf.printf "\n%!";
+               let _ = Runtime.save_conversation rt in ();
+               incr turn_count;
+               if !session_id = None then begin
+                 (try session_id := Some (Runtime.get_session_id rt) with _ -> ())
+               end;
+               if not env_no_ckpt && ckpt_enabled then begin
+                 (match ckpt_rt, mem_db, !conv, !session_id with
+                  | Some crt, Some t, Some c, Some sid ->
+                    let pid = Par_code_memory.resolve_project_id () in
+                    Par_code_checkpoint.maybe_checkpoint ~ckpt_rt:crt t
+                      ~session_id:sid ~project_id:pid c
+                      ~turn_number:!turn_count ~enabled:ckpt_enabled ~interval:ckpt_interval
+                  | _ -> ())
+               end)
          with ex ->
            Printf.eprintf "\n[error] %s\n%!" (Printexc.to_string ex));
         loop ()
@@ -162,7 +251,8 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
   in
   loop ()
 
-let run_single_shot (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~message =
+let run_single_shot (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~(ckpt_rt : Runtime.runtime option) ~message =
+  ignore ckpt_rt;
   let memory_appendix = build_memory_appendix mem_db in
   (match Runtime.invoke rt
      ~agent_id:Par_code_setup.agent_id

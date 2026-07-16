@@ -27,6 +27,9 @@ type config = {
   embedding_base_url : string option;
   embedding_model : string option;
   embedding_dimension : int;
+  checkpoint_enabled : bool;
+  checkpoint_interval : int;
+  context_budget_tokens : int;
 }
 
 let default_system_prompt =
@@ -54,6 +57,9 @@ let default = {
   embedding_base_url = None;
   embedding_model = None;
   embedding_dimension = 1536;
+  checkpoint_enabled = true;
+  checkpoint_interval = 10;
+  context_budget_tokens = 100000;
 }
 
 let config_dir () =
@@ -88,6 +94,9 @@ let to_json (cfg : config) : Yojson.Safe.t =
     ("embedding_base_url", opt_str cfg.embedding_base_url);
     ("embedding_model", opt_str cfg.embedding_model);
     ("embedding_dimension", `Int cfg.embedding_dimension);
+    ("checkpoint_enabled", `Bool cfg.checkpoint_enabled);
+    ("checkpoint_interval", `Int cfg.checkpoint_interval);
+    ("context_budget_tokens", `Int cfg.context_budget_tokens);
   ]
 
 let of_json (json : Yojson.Safe.t) : (config, string) result =
@@ -120,6 +129,9 @@ let of_json (json : Yojson.Safe.t) : (config, string) result =
       embedding_base_url = get_os "embedding_base_url";
       embedding_model = get_os "embedding_model";
       embedding_dimension = get_i "embedding_dimension" default.embedding_dimension;
+      checkpoint_enabled = get_b "checkpoint_enabled" default.checkpoint_enabled;
+      checkpoint_interval = get_i "checkpoint_interval" default.checkpoint_interval;
+      context_budget_tokens = get_i "context_budget_tokens" default.context_budget_tokens;
     }
   with exn -> Error (Printexc.to_string exn)
 
@@ -177,7 +189,9 @@ let merge
     ?(max_tokens = None) ?(top_p = None) ?(parallel_tool_execution = None)
     ?(event_retention_days = None) ?(auto_extract = None)
     ?(embedding_base_url = None) ?(embedding_model = None)
-    ?(embedding_dimension = None) () =
+    ?(embedding_dimension = None)
+    ?(checkpoint_enabled = None) ?(checkpoint_interval = None)
+    ?(context_budget_tokens = None) () =
   {
     provider = Option.value provider ~default:cfg.provider;
     api_key = Option.value api_key ~default:cfg.api_key;
@@ -196,6 +210,9 @@ let merge
     embedding_base_url = (match embedding_base_url with Some _ as v -> v | None -> cfg.embedding_base_url);
     embedding_model = (match embedding_model with Some _ as v -> v | None -> cfg.embedding_model);
     embedding_dimension = Option.value embedding_dimension ~default:cfg.embedding_dimension;
+    checkpoint_enabled = Option.value checkpoint_enabled ~default:cfg.checkpoint_enabled;
+    checkpoint_interval = Option.value checkpoint_interval ~default:cfg.checkpoint_interval;
+    context_budget_tokens = Option.value context_budget_tokens ~default:cfg.context_budget_tokens;
   }
 
 let require_config () =
@@ -320,6 +337,7 @@ let run_wizard () =
     event_retention_days = 7.0;
     auto_extract = true;
     embedding_base_url; embedding_model; embedding_dimension;
+    checkpoint_enabled = true; checkpoint_interval = 10; context_budget_tokens = 100000;
   } in
   save cfg;
   Printf.printf "\nSaved config to %s\n%!" (config_path ())

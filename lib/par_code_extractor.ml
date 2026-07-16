@@ -144,10 +144,37 @@ let parse_extraction_result (json : Yojson.Safe.t) : extraction_result option =
     end
   | _ -> None
 
+let extract_json_array (text : string) : string option =
+  let len = String.length text in
+  let first_bracket = ref (-1) in
+  let last_bracket = ref (-1) in
+  let first_brace = ref (-1) in
+  let last_brace = ref (-1) in
+  let depth = ref 0 in
+  let i = ref 0 in
+  while !i < len do
+    (match text.[!i] with
+     | '[' -> if !first_bracket = -1 then first_bracket := !i; incr depth
+     | '{' -> if !first_bracket = -1 && !first_brace = -1 then first_brace := !i; incr depth
+     | ']' -> decr depth; if !depth = 0 && !first_bracket >= 0 then last_bracket := !i
+     | '}' -> decr depth; if !depth = 0 && !first_brace >= 0 && !first_bracket < 0 then last_brace := !i
+     | _ -> ());
+    incr i
+  done;
+  if !first_bracket >= 0 && !last_bracket >= 0 && !last_bracket > !first_bracket then
+    Some (String.sub text !first_bracket (!last_bracket - !first_bracket + 1))
+  else if !first_brace >= 0 && !last_brace >= 0 && !last_brace > !first_brace then
+    Some ("[" ^ String.sub text !first_brace (!last_brace - !first_brace + 1) ^ "]")
+  else None
+
 let parse_extraction_response (text : string) : extraction_result list =
   if String.trim text = "" then []
   else
-    match Yojson.Safe.from_string (String.trim text) with
+    let json_str = match extract_json_array text with
+      | Some s -> s
+      | None -> String.trim text
+    in
+    match Yojson.Safe.from_string json_str with
     | `List items ->
       List.filter_map parse_extraction_result items
     | _ ->

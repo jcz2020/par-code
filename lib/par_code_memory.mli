@@ -31,6 +31,8 @@ val open_db : ?embedding_fn:Par_memory.Memory_service.embedding_fn ->
 
 val close : t -> unit
 
+val raw_db : t -> Sqlite3.db
+
 val resolve_project_id : unit -> string
 
 val add : t -> project_id:string -> kind:kind -> content:string ->

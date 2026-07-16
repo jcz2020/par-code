@@ -138,6 +138,27 @@ let make_runtime_config (cfg : Par_code_config.config) =
 
 let agent_id = "par"
 
+(* No-op persistence for the checkpoint runtime. Prevents checkpoint
+   invoke_generate calls from polluting the conversations table. *)
+let make_noop_persistence () =
+  { Types.
+    save_events_fn = (fun ?scope:_ _events -> Ok ());
+    load_events_fn = (fun _task_id -> Ok []);
+    load_events_by_session_fn = (fun ?scope:_ _sid -> Ok []);
+    load_sessions_fn = (fun ?scope:_ _limit -> Ok []);
+    save_task_state_fn = (fun _ts -> Ok ());
+    load_task_state_fn = (fun _task_id -> Ok None);
+    save_workflow_state_fn = (fun _id _status _ckpt -> Ok ());
+    load_workflow_state_fn = (fun _id -> Ok None);
+    load_all_suspended_workflows_fn = (fun () -> Ok []);
+    save_workflow_def_fn = (fun _id _def -> Ok ());
+    load_all_workflow_defs_fn = (fun () -> Ok []);
+    save_conversation_fn = (fun ?scope:_ _sid _conv -> Ok ());
+    load_conversation_fn = (fun _sid -> Ok None);
+    load_most_recent_conversation_fn = (fun ?scope:_ () -> Ok None);
+    close_fn = ignore;
+  }
+
 let setup_runtime (cfg : Par_code_config.config) ~f =
   ensure_rng ();
   let pers = make_persistence_service cfg in
@@ -158,6 +179,14 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
     Printf.eprintf "Error creating runtime: %s\n%!" (error_to_string e);
     exit 1
   | Ok rt ->
+    let ckpt_llm = make_llm_service provider_tag cfg.Par_code_config.api_key cfg.Par_code_config.api_base net in
+    let ckpt_rt =
+      match Runtime.create ~persistence:(make_noop_persistence ()) ~llm:ckpt_llm ~embeddings ~config:runtime_config switch with
+      | Error e ->
+        Printf.eprintf "Warning: checkpoint runtime unavailable: %s\n%!" (error_to_string e);
+        None
+      | Ok rt' -> Some rt'
+    in
     (* Open the memory database for project memory (v0.3.0). *)
     let memory_embedding_fn : Par_memory.Memory_service.embedding_fn option =
       match provider_tag with
@@ -174,6 +203,9 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
         Printf.eprintf "Warning: memory DB unavailable: %s\n%!" msg;
         None
     in
+    (match mem_db with
+     | Some t -> Par_code_checkpoint.create_schema (Par_code_memory.raw_db t)
+     | None -> ());
     let tools = Builtin_tools.builtin_tools ~switch ~net ~workspace:(Runtime.workspace rt) in
     List.iter (fun (tb : Types.tool_binding) ->
       (match Runtime.register_tool rt
@@ -249,10 +281,39 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
        () with
      | Error e ->
        Printf.eprintf "Warning: extractor agent not registered: %s\n%!" (error_to_string e)
-     | Ok extractor ->
-       (match Runtime.register_agent rt extractor with
-        | Error e -> Printf.eprintf "Warning: extractor agent registration failed: %s\n%!" (error_to_string e)
-        | Ok () -> ()));
+        | Ok extractor ->
+        (match Runtime.register_agent rt extractor with
+         | Error e -> Printf.eprintf "Warning: extractor agent registration failed: %s\n%!" (error_to_string e)
+         | Ok () -> ()));
+    (match ckpt_rt with
+     | None -> ()
+     | Some crt ->
+       (match Runtime.make_agent
+          ~id:Par_code_checkpoint.checkpoint_writer_agent_id
+          ~system_prompt:(Types.stable_prompt Par_code_checkpoint.checkpoint_writer_system_prompt)
+          ~model:model_cfg
+          ~tools:[]
+          ~max_iterations:1
+          () with
+        | Error e ->
+          Printf.eprintf "Warning: checkpoint-writer agent not registered: %s\n%!" (error_to_string e)
+        | Ok ckpt_agent ->
+          (match Runtime.register_agent crt ckpt_agent with
+           | Error e -> Printf.eprintf "Warning: checkpoint-writer agent registration failed: %s\n%!" (error_to_string e)
+           | Ok () -> ()));
+       (match Runtime.make_agent
+          ~id:Par_code_extractor.extractor_agent_id
+          ~system_prompt:(Types.stable_prompt Par_code_extractor.extractor_system_prompt)
+          ~model:model_cfg
+          ~tools:[]
+          ~max_iterations:1
+          () with
+       | Error e ->
+         Printf.eprintf "Warning: extractor agent not registered on ckpt_rt: %s\n%!" (error_to_string e)
+       | Ok ext_agent ->
+         (match Runtime.register_agent crt ext_agent with
+          | Error e -> Printf.eprintf "Warning: extractor registration on ckpt_rt failed: %s\n%!" (error_to_string e)
+           | Ok () -> ())));
     Runtime.register_tool_call_hook rt
       (Bash_confirm.make_hook ?confirm_fn:(Some (fun cmd ->
            Printf.eprintf "\n⚠ bash: %s [y/N] " cmd;
@@ -268,6 +329,7 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
     List.iter (fun (desc : Types.skill_descriptor) ->
       ignore (Runtime.register_skill rt desc : (Types.skill_binding, _) result)
     ) Builtin_skills.builtin_skills;
-    f rt mem_db;
+    f rt mem_db ckpt_rt;
     (match mem_db with Some t -> Par_code_memory.close t | None -> ());
+    (match ckpt_rt with Some crt -> ignore (Runtime.close crt) | None -> ());
     ignore (Runtime.close rt)

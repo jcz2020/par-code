@@ -324,6 +324,13 @@ let search_history_empty_db () =
     | Ok _  -> Alcotest.fail "search_history returned results on empty db"
     | Error (`Db_error msg) -> failf "search_history: %s" msg)
 
+let test_raw_db () =
+  with_temp_db (fun ~tmpdir:_ db ->
+    let raw = Par_code_memory.raw_db db in
+    let rc = Sqlite3.exec raw "CREATE TABLE IF NOT EXISTS _raw_db_test (id INTEGER)" in
+    Alcotest.(check bool) "raw_db returns working handle" true
+      (match rc with Sqlite3.Rc.OK -> true | _ -> false))
+
 let () =
   Alcotest.run "par_memory"
     [ "schema", [ Alcotest.test_case "idempotent" `Quick schema_idempotent ];
@@ -336,6 +343,7 @@ let () =
       "usage",     [ Alcotest.test_case "bump"    `Quick bump_usage_increments ];
       "prune",     [ Alcotest.test_case "stale_semantics" `Quick prune_stale_semantics ];
       "render",    [ Alcotest.test_case "line_cap" `Quick render_index_line_cap ];
+      "raw_db",    [ Alcotest.test_case "accessor" `Quick test_raw_db ];
       "history", [
         Alcotest.test_case "fts_insert_and_search"  `Quick conversations_fts_insert_and_search;
         Alcotest.test_case "snippet_highlighting"    `Quick search_history_snippet_highlighting;
