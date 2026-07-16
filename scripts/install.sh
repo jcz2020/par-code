@@ -177,7 +177,9 @@ install_binary() {
 }
 
 # maybe_update_path: add $PREFIX/bin to shell rc via idempotent markers.
-# Interactive: prompt y/N. Non-interactive: print instructions only.
+# Detects $SHELL and writes to ~/.bashrc / ~/.zshrc / fish config.
+# Non-interactive (curl|bash): auto-adds without prompting.
+# Interactive: prompts [Y/n], defaults to yes.
 maybe_update_path() {
     case ":${PATH}:" in *":${PREFIX}/bin:"*) info "$PREFIX/bin already in PATH"; return 0 ;; esac
     _shell="$(basename "${SHELL:-sh}" 2>/dev/null || printf 'sh')"
