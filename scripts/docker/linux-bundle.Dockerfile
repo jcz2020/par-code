@@ -50,6 +50,7 @@ RUN SQLITE_VERSION=$(grep -E '^[0-9]+' /tmp/sqlite-amalgamation.version 2>/dev/n
     unzip -q /tmp/sqlite3.zip -d /tmp/sqlite3-src && \
     cd /tmp/sqlite3-src/sqlite-amalgamation-* && \
     gcc -O2 -fPIC -shared \
+      -Wl,-soname,libsqlite3.so.0 \
       -DSQLITE_ENABLE_FTS5 \
       -DSQLITE_ENABLE_JSON1 \
       -DSQLITE_THREADSAFE=1 \
