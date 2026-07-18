@@ -24,7 +24,7 @@
   exceeds `context_budget_tokens` (default 100000), older messages are replaced
   with a checkpoint summary while the last 8 messages are kept verbatim.
 - **Periodic mid-session memory extraction**: the checkpoint cycle also triggers
-  memory extraction via the checkpoint Runtime, so facts appear during long
+  memory extraction via save/isolation controls, so facts appear during long
   sessions without waiting for exit.
 - **Config fields**: `checkpoint_enabled` (default true), `checkpoint_interval`
   (default 10), `context_budget_tokens` (default 100000).
