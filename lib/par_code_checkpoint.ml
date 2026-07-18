@@ -2,6 +2,14 @@ open Par
 
 let checkpoint_writer_agent_id = "checkpoint-writer"
 
+(* v0.4.1 Pillar B: keep the LAST n chars of a long transcript, not the first.
+   Long sessions need the latest content for the checkpoint-writer LLM to
+   capture current state — the opening greeting adds nothing. *)
+let truncate_to_last_n (s : string) (n : int) : string =
+  let len = String.length s in
+  if len <= n then s
+  else String.sub s (len - n) n
+
 let checkpoint_writer_system_prompt = {|
 You are a session checkpoint agent. Analyze the coding session transcript and
 produce a structured checkpoint that captures the current state of work.
@@ -121,10 +129,7 @@ let serialize_for_checkpoint (conv : Types.conversation) ~turn_number =
         Buffer.add_string buf (Printf.sprintf "## %s\n\n%s\n\n" role text)
     ) user_assistant_msgs;
     let full = Buffer.contents buf in
-    if String.length full > 8000 then
-      String.sub full 0 8000
-    else
-      full
+    truncate_to_last_n full 8000
 
 let checkpoint_to_json (entry : checkpoint_entry) : string =
   let sl lst = `List (List.map (fun s -> `String s) lst) in
@@ -316,7 +321,44 @@ let render_session_brief mem_db ~session_id =
     ) entries;
     Buffer.contents buf
 
+let format_checkpoints (entries : checkpoint_entry list) : string =
+  (* v0.4.1 Pillar C: multi-line per-entry rendering for the /checkpoints REPL
+     command. Index + Turn + task headline; optional decisions/files/open
+     sections indented underneath, omitted when empty. *)
+  if entries = [] then ""
+  else
+    let buf = Buffer.create 256 in
+    List.iteri (fun i (e : checkpoint_entry) ->
+      Buffer.add_string buf
+        (Printf.sprintf "[%d] Turn %d: %s\n"
+           (i + 1) e.turn_number
+           (if e.task = "" then "(no task)" else e.task));
+      if e.decisions <> [] then begin
+        Buffer.add_string buf "    decisions: ";
+        Buffer.add_string buf (String.concat "; " e.decisions);
+        Buffer.add_char buf '\n'
+      end;
+      if e.files_changed <> [] then begin
+        Buffer.add_string buf "    files: ";
+        Buffer.add_string buf (String.concat ", " e.files_changed);
+        Buffer.add_char buf '\n'
+      end;
+      if e.open_threads <> [] then begin
+        Buffer.add_string buf "    open: ";
+        Buffer.add_string buf (String.concat "; " e.open_threads);
+        Buffer.add_char buf '\n'
+      end
+    ) entries;
+    Buffer.contents buf
+
 let run_checkpoint ~rt mem_db ~session_id ~project_id conv ~turn_number =
+  (* Synchronous checkpoint path. Used by:
+     - Manual /checkpoint REPL command (user explicitly asked; willing to wait
+       for verification)
+     - maybe_checkpoint's async dispatcher (which wraps this in Eio.Fiber.fork
+       for the periodic path)
+
+     Preserves v0.4.0's ~save:false ~update_current:false isolation. *)
   let transcript = serialize_for_checkpoint conv ~turn_number in
   if transcript = "" then ()
   else
@@ -335,20 +377,65 @@ let run_checkpoint ~rt mem_db ~session_id ~project_id conv ~turn_number =
          let entry =
            { entry with turn_number; timestamp = Unix.gettimeofday () }
          in
-          (match store_checkpoint mem_db ~session_id ~project_id entry with
-           | Ok () ->
-             Printf.eprintf "[checkpoint stored at turn %d]\n%!" turn_number;
-              Par_code_extractor.run_extraction rt mem_db
-                ~project_id conv
-            | Error (`Db_error e) ->
-              Printf.eprintf "[checkpoint store failed: %s]\n%!" e))
+         (* v0.4.1 Pillar D: confirmed no-op. Both periodic maybe_checkpoint
+            and the manual /checkpoint REPL command route through run_checkpoint,
+            so both trigger extraction here. No separate wiring needed. *)
+         (match store_checkpoint mem_db ~session_id ~project_id entry with
+          | Ok () ->
+            Printf.eprintf "[checkpoint stored at turn %d]\n%!" turn_number;
+            Par_code_extractor.run_extraction rt mem_db
+              ~project_id conv
+          | Error (`Db_error e) ->
+            Printf.eprintf "[checkpoint store failed: %s]\n%!" e))
 
-let maybe_checkpoint ~rt mem_db ~session_id ~project_id conv
+let maybe_checkpoint ~rt mem_db ~in_flight ~session_id ~project_id conv
     ~turn_number ~enabled ~interval =
   if not enabled then ()
   else if turn_number mod interval <> 0 then ()
+  else if !in_flight then ()  (* v0.4.1 Pillar A Caveat 4: throttle — don't
+                                 stack background LLM calls *)
   else
-    try
-      run_checkpoint ~rt mem_db ~session_id ~project_id conv ~turn_number
-    with exn ->
-      Printf.eprintf "[checkpoint failed: %s]\n%!" (Printexc.to_string exn)
+    (* v0.4.1 Pillar A: async periodic checkpoint via Eio.Fiber.fork on the
+       runtime's cancellation root. The synchronous 2-5s LLM call now runs
+       in a background fiber; the user turn returns immediately.
+
+       Only the PERIODIC path is async — the manual /checkpoint REPL command
+       calls run_checkpoint directly (synchronous) because the user explicitly
+       asked for a checkpoint and is willing to wait for verification.
+
+       See DECISIONS.md [2026-07-19] Oracle verdict for fiber-safety analysis. *)
+    (* Caveat 3: snapshot by value BEFORE forking. The REPL reassigns its conv
+       ref on the next turn; the fiber must see the snapshot from its own
+       turn. *)
+    let conv_snapshot = conv in
+    let session_id_snapshot = session_id in
+    let project_id_snapshot = project_id in
+    let turn_number_snapshot = turn_number in
+    in_flight := true;
+    (* Caveat 9: invoke_generate (runtime.ml:886) reads rt.user_activated_skills
+       live, unlike invoke (runtime.ml:742) which snapshots. par-code never
+       mutates this field after setup, so the race is dormant — but a future
+       contributor adding mid-session skill toggling would re-activate it. *)
+    let _ =
+      Eio.Fiber.fork ~sw:(Par.Runtime.cancellation_root rt) (fun () ->
+        (* Caveat 1: try/with guards against fiber death on unexpected exn.
+           Caveat 4: in_flight reset on every exit path via Fun.protect. *)
+        let body () =
+          run_checkpoint ~rt mem_db
+            ~session_id:session_id_snapshot
+            ~project_id:project_id_snapshot
+            conv_snapshot
+            ~turn_number:turn_number_snapshot
+        in
+        try
+          Fun.protect ~finally:(fun () -> in_flight := false) body
+        with exn ->
+          (* Body raised (network, cancellation, PAR SDK exn). in_flight was
+             reset by finally; log and let the fiber die quietly. *)
+          Printf.eprintf "[checkpoint crashed: %s]\n%!" (Printexc.to_string exn))
+    in
+    (* Caveat 5: do NOT await the fiber — fire-and-forget. Awaiting would
+       re-introduce the synchronous stall v0.4.1 eliminates. The unit-typed
+       result of Eio.Fiber.fork is discarded; the fiber writes its outcomes
+       via stderr (existing pattern) and the memory db. *)
+    ()

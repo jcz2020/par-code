@@ -1,5 +1,134 @@
 # Decisions
 
+## [2026-07-19] v0.4.1: async checkpoint via Eio.Fiber.fork (Oracle SAFE WITH CAVEATS)
+
+**变更前**: v0.4.0 shipped checkpoint-writer + extractor as synchronous
+`invoke_generate` calls inside the user's REPL turn. Every N turns (default
+10) the user waited 2–5 s while the checkpoint LLM call completed before
+the `par>` prompt returned. The v0.4.0 plan had flagged async as a target
+but the ckpt_rt workaround (later eliminated) consumed the design surface;
+the synchronous-at-turn-boundary path shipped.
+
+**变更后**: `Par_code_checkpoint.run_checkpoint` now dispatches its
+`invoke_generate ~save:false ~update_current:false` call via
+`Eio.Fiber.fork ~sw:(Par.Runtime.cancellation_root rt)`. The user turn
+returns immediately; the LLM call, JSON parse, store, and downstream
+`run_extraction` all run in the background fiber. An `in_flight : bool ref`
+in the REPL state throttles concurrent dispatches and is reset on every
+fiber exit path (Ok/Error/exn) via `Fun.protect`. v0.4.0's
+`~save:false ~update_current:false` isolation is preserved unchanged.
+
+**原因**: synchronous checkpoint at every N turns was the most concrete
+user-visible flaw in v0.4.0. PAR SDK 0.7.7 already ships `Eio.Fiber.fork`
+and `Runtime.cancellation_root`; the v0.4.0 ckpt_rt elimination
+([2026-07-18]) cleared the architectural surface needed to consume them
+directly. Oracle review (2026-07-19) of every shared-state mutation in
+`invoke_generate` (`runtime.ml:859-947`) returned **SAFE WITH CAVEATS**
+under `~save:false ~update_current:false` for par-code's single-REPL
+workload. The 9 engineering caveats are baked into the implementation.
+
+**影响范围**: `lib/par_code_checkpoint.ml` (run_checkpoint / maybe_checkpoint
+signatures gain `in_flight:bool ref`; new `format_checkpoints` and
+`truncate_to_last_n` helpers also added in this version),
+`lib/par_code_checkpoint.mli` (signature updates + new exposed vals),
+`lib/par_code_extractor.ml` (local copy of last-N truncation helper),
+`lib/par_code_repl.ml` (new `in_flight_checkpoint` ref in run state;
+`/checkpoint` and `/checkpoints` command paths updated; periodic
+`maybe_checkpoint` call site updated), `test/test_par_code_checkpoint.ml`
+(5 new tests covering Pillar B truncation + Pillar C formatting),
+`CHANGES.md` (v0.4.1 section), `docs/STRATEGY.md` (§8 + §9 updated),
+`docs/DECISIONS.md` (this entry + 3 PAR SDK feedback items below).
+
+**回退方式**: Revert to synchronous `invoke_generate` (drop the
+`Eio.Fiber.fork` wrapper, drop `in_flight` plumbing). All other v0.4.1
+changes (Pillar B truncation, Pillar C format_checkpoints, Pillar D
+no-op confirmation) are pure additions and can stay.
+
+**已知限制**:
+1. Checkpoint/extraction LLM calls no longer appear in `rt.metrics` —
+   the fiber's `ctx.metrics_accumulator` is discarded (no `merge_into`).
+   Acceptable for v0.4.1; tracked for v0.5.0+ if metrics visibility
+   becomes important.
+2. `rt.last_llm_call_at` / `rt.last_llm_call_status` may briefly reflect
+   the checkpoint call instead of the user's call (lost-update race on
+   `runtime.ml:435-436, 442-443`). Diagnostic only; health snapshot
+   tolerates stale reads.
+3. Async return-immediately behavior verified by manual smoke rather than
+   unit test. Mocking `invoke_generate` would require invasive functor
+   refactor; deferred.
+4. `compute_active_skill_effects` (`runtime.ml:886`) reads
+   `rt.user_activated_skills` live (not snapshotted, unlike `invoke`
+   at `runtime.ml:742`). Dormant race today — par-code never mutates
+   this field after setup — but a future contributor adding mid-session
+   skill toggling would activate it. Code comment in `run_checkpoint`
+   flags this.
+
+### Oracle evidence summary (full table in `.sisyphus/plans/v0.4.1.md`)
+
+| Shared field | Touch under `~save:false ~update_current:false` | Race | Verdict |
+|---|---|---|---|
+| `rt.session_id` (`runtime.ml:861-867`) | Write only if None | None — REPL sets at first turn | SAFE |
+| `Event_bus.current_session_id` (`event_bus.ml:141-142`) | Unconditional write, no mutex | Theoretical, always same value | SAFE |
+| `rt.last_llm_call_{at,status}` (`runtime.ml:435-436,442-443`) | Write (record_llm_*) | Lost-update | SAFE (diagnostic) |
+| `rt.metrics` (`metrics.ml:2-7`) | incr_llm via fiber-local ctx | None — invoke_generate never merges | SAFE |
+| `rt.current_conversation` (`runtime.ml:938,944`) | Never read; write gated | None | SAFE |
+| `rt.user_activated_skills` (`runtime.ml:886`) | Read live (not snapshot) | Dormant in par-code | SAFE |
+| `rt.services.llm` | Concurrent HTTP | Stateless providers | SAFE |
+| `save_conversation` (`runtime.ml:939-940`) | All paths gated | None | SAFE |
+
+### 9 engineering caveats baked into implementation
+
+1. `try ... with exn` inside fork body — `invoke_generate` handles LLM errors
+   but PAR SDK or Eio can raise unexpected exceptions.
+2. `~sw:(Par.Runtime.cancellation_root rt)` — not a fresh switch.
+3. Snapshot `transcript` and `conv` by value before `Eio.Fiber.fork`.
+4. `in_flight : bool ref` throttle; reset via `Fun.protect ~finally`.
+5. Do NOT `Promise.await` the fiber handle — fire-and-forget.
+6. All three REPL exit paths (SIGINT/EOF/`/quit`) let `rt.cancellation_root`
+   teardown propagate cancellation via PAR SDK's normal close path.
+7. Accept `rt.metrics` under-count (documented in CHANGES).
+8. Accept `last_llm_call_*` flapping (documented in CHANGES).
+9. Code comment flags the `user_activated_skills` live read.
+
+### Type-mismatch note (why `Eio.Fiber.fork` instead of `Invoke_context.fork_invoke`)
+
+`Invoke_context.fork_invoke` (`invoke_context.mli:96-100`) is typed for
+closures returning `(invoke_result, error_category * conversation) result`,
+but `Runtime.invoke_generate` returns `(generate_result, error_category *
+conversation) result`. These are distinct types in `types.mli`. The
+proposed `fork_invoke`-based sketch in the original v0.4.1 plan would not
+have compiled. Using `Eio.Fiber.fork` directly (which is what `fork_invoke`
+calls underneath, minus the type-restricted handle wrapping) is the
+architecturally correct path. PAR SDK feedback item #3 tracks this gap.
+
+## [2026-07-19] PAR SDK Feedback: 3 items surfaced by v0.4.1 async work
+
+Per global AGENTS.md §1 and the par-code par-sdk-feedback skill, three
+PAR SDK gaps surfaced during v0.4.1 implementation. Tracked here for
+upstream action; none blocks v0.4.1.
+
+1. **`Event_bus.set_session_id` writes without mutex** (`event_bus.ml:141-142`).
+   `publish` reads under `Eio.Mutex.use_ro` (`event_bus.ml:56`), but the
+   setter is bare assignment. In par-code's call pattern the value is
+   always identical (read from already-set `rt.session_id`), so no
+   observable race today. Future PAR SDK consumers that vary session_id
+   per fiber would hit this. **Severity**: low (workaround: caller-side
+   discipline).
+
+2. **`rt.last_llm_call_at` / `rt.last_llm_call_status` are plain mutable**
+   (`runtime.ml:435-436, 442-443`). Lost-update race under concurrent
+   fibers. **Severity**: low (diagnostic only; readers at
+   `runtime.ml:1776-1777` health snapshot and `par_capi.ml:1132-1136`
+   FFI tolerate stale reads).
+
+3. **`Runtime.invoke_async` lacks `?save` / `?update_current`** (re-affirmed
+   from v0.4.0 feedback). The closure signature of
+   `Invoke_context.fork_invoke` (`invoke_context.mli:96-100`) is typed
+   for `invoke_result`, not `generate_result`. Both gaps force consumers
+   needing async + isolation to bypass PAR SDK's async primitives and
+   call `Eio.Fiber.fork` directly. **Severity**: medium (architectural
+   paper-cut; encourages consumers to invent their own async patterns).
+
 ## [2026-07-18] Architecture: eliminate ckpt_rt, use PAR SDK 0.7.7 save/isolation controls
 
 **变更前**：v0.4.0 used a separate checkpoint Runtime (`ckpt_rt`) with no-op persistence to isolate checkpoint/extractor `invoke_generate` calls from the user's Runtime. This was a ~50-line workaround for PAR SDK's lack of save/isolation controls.

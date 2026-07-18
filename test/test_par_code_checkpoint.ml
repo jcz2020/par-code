@@ -251,7 +251,95 @@ let serialize_too_few_messages () =
   let result = Par_code_checkpoint.serialize_for_checkpoint conv ~turn_number:1 in
   Alcotest.(check string) "single message returns empty" "" result
 
-(* ── Context (token_estimate + compact) tests ────────────────────────── *)
+let serialize_truncation_keeps_last () =
+  (* v0.4.1 Pillar B: when transcript > 8000 chars, the LAST 8000 must be kept
+     (not the first 8000 as in v0.4.0). Long sessions need the latest content
+     for the checkpoint-writer LLM to capture current state.
+
+     Test layout (buffer ~10100+ chars):
+       msg1: 5000 chars with EARLY_MARKER near the start  → position ~50
+       msg2: 5000 chars filler                            → position 5000-10000
+       msg3: small text with LATE_MARKER at the start     → position ~10050
+     Last 8000 = chars 2100..10100. EARLY at 50 → DROPPED. LATE at 10050 → KEPT. *)
+  let early_marker = "EARLY_MARKER_MUST_DROP" in
+  let late_marker = "LATE_MARKER_MUST_KEEP" in
+  let msg1 = early_marker ^ String.make 5000 'A' in
+  let msg2 = String.make 5000 'B' in
+  let msg3 = late_marker ^ String.make 100 'C' in
+  let conv = Par.Types.
+    { messages = [
+        { role = User;
+          content_blocks = [ Text_block { text = msg1; cache_control = None } ];
+          tool_calls = None; tool_call_id = None; name = None };
+        { role = Assistant;
+          content_blocks = [ Text_block { text = msg2; cache_control = None } ];
+          tool_calls = None; tool_call_id = None; name = None };
+        { role = User;
+          content_blocks = [ Text_block { text = msg3; cache_control = None } ];
+          tool_calls = None; tool_call_id = None; name = None };
+      ];
+      metadata = [] } in
+  let result = Par_code_checkpoint.serialize_for_checkpoint conv ~turn_number:5 in
+  Alcotest.(check bool) "non-empty" true (result <> "");
+  Alcotest.(check bool) "keeps the LATE marker (last 8000 chars)"
+    true (string_contains result late_marker);
+  Alcotest.(check bool) "drops the EARLY marker (truncated away)"
+    false (string_contains result early_marker)
+
+(* ── Format checkpoints tests (v0.4.1 Pillar C) ─────────────────────── *)
+
+let format_empty_list () =
+  let result = Par_code_checkpoint.format_checkpoints [] in
+  Alcotest.(check string) "empty list renders placeholder" "" result
+
+let format_single_minimal () =
+  let entry = make_entry ~task:"do thing" ~turn_number:5 () in
+  let result = Par_code_checkpoint.format_checkpoints [entry] in
+  Alcotest.(check bool) "non-empty" true (result <> "");
+  Alcotest.(check bool) "includes index [1]" true (string_contains result "[1]");
+  Alcotest.(check bool) "includes turn number" true (string_contains result "Turn 5");
+  Alcotest.(check bool) "includes task" true (string_contains result "do thing")
+
+let format_multi_field_entry () =
+  (* v0.4.1 Pillar C: /checkpoints should show decisions, files, and open
+     threads per entry — not just the one-line task. Empty sections omitted. *)
+  let entry = make_entry
+    ~task:"refactor auth middleware"
+    ~decisions:["use JWT not session cookies"; "token lifetime 1h"]
+    ~files_changed:["lib/auth.ml"; "lib/middleware.ml"; "test/test_auth.ml"]
+    ~open_threads:["refresh-token rotation not yet implemented"]
+    ~turn_number:20
+    () in
+  let result = Par_code_checkpoint.format_checkpoints [entry] in
+  Alcotest.(check bool) "non-empty" true (result <> "");
+  Alcotest.(check bool) "includes task line" true
+    (string_contains result "refactor auth middleware");
+  Alcotest.(check bool) "includes decisions section" true
+    (string_contains result "decisions:");
+  Alcotest.(check bool) "includes first decision text" true
+    (string_contains result "use JWT not session cookies");
+  Alcotest.(check bool) "includes files section" true
+    (string_contains result "files:");
+  Alcotest.(check bool) "includes first file path" true
+    (string_contains result "lib/auth.ml");
+  Alcotest.(check bool) "includes open threads section" true
+    (string_contains result "open:");
+  Alcotest.(check bool) "includes the actual open thread text" true
+    (string_contains result "refresh-token rotation")
+
+let format_omits_empty_sections () =
+  let entry = make_entry
+    ~task:"trivial task"
+    ~decisions:[] ~files_changed:[] ~open_threads:[]
+    ~turn_number:3 () in
+  let result = Par_code_checkpoint.format_checkpoints [entry] in
+  Alcotest.(check bool) "no decisions section when empty" false
+    (string_contains result "decisions:");
+  Alcotest.(check bool) "no files section when empty" false
+    (string_contains result "files:");
+  Alcotest.(check bool) "no open section when empty" false
+    (string_contains result "open:")
+
 
 let make_large_conv n =
   let mk_msg role text =
@@ -341,6 +429,13 @@ let () =
       "serialize", [
         Alcotest.test_case "basic"           `Quick serialize_basic;
         Alcotest.test_case "too_few_messages" `Quick serialize_too_few_messages;
+        Alcotest.test_case "truncation_keeps_last" `Quick serialize_truncation_keeps_last;
+      ];
+      "format", [
+        Alcotest.test_case "empty_list"        `Quick format_empty_list;
+        Alcotest.test_case "single_minimal"    `Quick format_single_minimal;
+        Alcotest.test_case "multi_field_entry" `Quick format_multi_field_entry;
+        Alcotest.test_case "omits_empty_sections" `Quick format_omits_empty_sections;
       ];
       "context", [
         Alcotest.test_case "token_estimate_basic" `Quick token_estimate_basic;

@@ -108,6 +108,11 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
   let session_id = ref None in
   let is_first_turn = ref true in
   let first_turn_appendix = ref None in
+  (* v0.4.1 Pillar A: throttle flag — set true while a checkpoint fiber is in
+     flight, false otherwise. Prevents stacking background LLM calls if user
+     hammers turns faster than the checkpoint LLM responds. Reset by the fiber
+     on every exit path (Ok/Error/exn) via Fun.protect. *)
+  let in_flight_checkpoint = ref false in
   let loaded_cfg = Par_code_config.load () in
   let ckpt_enabled = match loaded_cfg with Some c -> c.Par_code_config.checkpoint_enabled | None -> true in
   let ckpt_interval = match loaded_cfg with Some c -> c.Par_code_config.checkpoint_interval | None -> 10 in
@@ -153,31 +158,32 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
              (match !conv with None -> "none" | Some c -> Printf.sprintf "%d messages" (List.length c.Types.messages))
          | "/health" -> format_health (Runtime.health rt)
          | "/reset" -> conv := None; Printf.printf "[conversation reset]\n%!"
-          | "/checkpoint" ->
-            (match mem_db, !conv, !session_id with
-             | Some t, Some c, Some sid ->
-               let pid = Par_code_memory.resolve_project_id () in
-               (try
-                  Par_code_checkpoint.run_checkpoint ~rt t
-                    ~session_id:sid ~project_id:pid c ~turn_number:!turn_count
-                with exn ->
-                  Printf.eprintf "[checkpoint failed: %s]\n%!" (Printexc.to_string exn))
-             | _ ->
-               Printf.eprintf "[checkpoint unavailable — need active session]\n%!");
-           loop ()
-         | "/checkpoints" ->
-           (match mem_db, !session_id with
-            | Some t, Some sid ->
-              (match Par_code_checkpoint.load_checkpoints t ~session_id:sid with
-               | Ok [] -> Printf.printf "No checkpoints for this session.\n%!"
-               | Ok entries ->
-                 List.iteri (fun i (e : Par_code_checkpoint.checkpoint_entry) ->
-                   Printf.printf "  [%d] Turn %d: %s\n" (i+1) e.Par_code_checkpoint.turn_number
-                     (if e.Par_code_checkpoint.task = "" then "(no task)" else e.Par_code_checkpoint.task)
-                 ) entries
-               | Error (`Db_error msg) -> Printf.eprintf "Error: %s\n%!" msg)
-            | _ -> Printf.eprintf "[checkpoints unavailable]\n%!");
-           loop ()
+           | "/checkpoint" ->
+             (match mem_db, !conv, !session_id with
+              | Some t, Some c, Some sid ->
+                let pid = Par_code_memory.resolve_project_id () in
+                (* Manual /checkpoint is SYNCHRONOUS (v0.4.1 design): user
+                   explicitly asked, willing to wait for verification. Only
+                   the periodic path is async. *)
+                (try
+                   Par_code_checkpoint.run_checkpoint ~rt t
+                     ~session_id:sid ~project_id:pid c ~turn_number:!turn_count
+                 with exn ->
+                   Printf.eprintf "[checkpoint failed: %s]\n%!" (Printexc.to_string exn))
+              | _ ->
+                Printf.eprintf "[checkpoint unavailable — need active session]\n%!");
+            loop ()
+          | "/checkpoints" ->
+            (match mem_db, !session_id with
+             | Some t, Some sid ->
+               (match Par_code_checkpoint.load_checkpoints t ~session_id:sid with
+                | Ok [] -> Printf.printf "No checkpoints for this session.\n%!"
+                | Ok entries ->
+                  let rendered = Par_code_checkpoint.format_checkpoints entries in
+                  Printf.printf "%s%!" rendered
+                | Error (`Db_error msg) -> Printf.eprintf "Error: %s\n%!" msg)
+             | _ -> Printf.eprintf "[checkpoints unavailable]\n%!");
+            loop ()
          | "/quit" | "/exit" ->
             let _ = Runtime.save_conversation rt ?conversation:!conv () in
             maybe_extract rt !conv;
@@ -235,15 +241,16 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
                if !session_id = None then begin
                  (try session_id := Some (Runtime.get_session_id rt) with _ -> ())
                end;
-               if not env_no_ckpt && ckpt_enabled then begin
-                 (match mem_db, !conv, !session_id with
-                  | Some t, Some c, Some sid ->
-                    let pid = Par_code_memory.resolve_project_id () in
-                    Par_code_checkpoint.maybe_checkpoint ~rt t
-                      ~session_id:sid ~project_id:pid c
-                      ~turn_number:!turn_count ~enabled:ckpt_enabled ~interval:ckpt_interval
-                  | _ -> ())
-               end)
+                if not env_no_ckpt && ckpt_enabled then begin
+                  (match mem_db, !conv, !session_id with
+                   | Some t, Some c, Some sid ->
+                     let pid = Par_code_memory.resolve_project_id () in
+                     Par_code_checkpoint.maybe_checkpoint ~rt t
+                       ~in_flight:in_flight_checkpoint
+                       ~session_id:sid ~project_id:pid c
+                       ~turn_number:!turn_count ~enabled:ckpt_enabled ~interval:ckpt_interval
+                   | _ -> ())
+                end)
          with ex ->
            Printf.eprintf "\n[error] %s\n%!" (Printexc.to_string ex));
         loop ()

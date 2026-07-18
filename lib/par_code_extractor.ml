@@ -98,10 +98,11 @@ let serialize_transcript (conv : Types.conversation) : string =
       end
     ) user_assistant_msgs;
     let full = Buffer.contents buf in
-    if String.length full > 8000 then
-      String.sub full 0 8000
-    else
-      full
+    (* v0.4.1 Pillar B: keep the LAST 8000 chars so the extractor sees the
+       most recent state of a long session. Local copy of the helper to avoid
+       a cross-module dependency for a 4-line primitive. *)
+    let len = String.length full in
+    if len > 8000 then String.sub full (len - 8000) 8000 else full
 
 (* -------------------------------------------------------------------------- *)
 (* JSON parsing                                                              *)

@@ -1,6 +1,6 @@
 # par-code Strategy
 
-> **Last updated**: 2026-07-03
+> **Last updated**: 2026-07-19
 > **Status**: Active
 > **Owner**: PAR-Code Contributors
 >
@@ -167,6 +167,10 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
   subagent with save/isolation controls + Context Ledger storage + budgeted
   context injection + context reconstruction on resume + periodic mid-session
   extraction
+- **v0.4.1 ✅ shipped** — async checkpoints via `Eio.Fiber.fork` (Oracle
+  SAFE WITH CAVEATS) + last-N transcript truncation + richer `/checkpoints`
+  listing. Finishes v0.4.0's unfinished business. Pillar D confirmed no-op
+  via code-path audit.
 - v0.4.0+ — plan mode, subagents, autonomy, reasoning,
   self-improvement, compose mode, ecosystem, code intelligence, safety, polish
   → v1.0
@@ -203,6 +207,9 @@ per global rules) lives in `docs/DECISIONS.md`. Strategic-level entries:
 | 2026-07-16 | v0.4.0: Context Ledger pattern for checkpoint storage (structured entries, not prose) | Active |
 | 2026-07-16 | v0.4.0: budgeted context injection via chars/4 heuristic (conservative compaction) | Active |
 | 2026-07-16 | v0.4.0 shipped — Long-session continuity (checkpoint-writer + context budget + mid-session extraction) | Active |
+| 2026-07-19 | v0.4.1: async checkpoint/extraction via Eio.Fiber.fork on rt.cancellation_root (Oracle SAFE WITH CAVEATS) | Active |
+| 2026-07-19 | v0.4.1: PAR SDK feedback filed (3 items: Event_bus.set_session_id unlocked; last_llm_call_* non-atomic; invoke_async lacks ?save/?update_current — re-affirmed) | Active |
+| 2026-07-19 | v0.4.1 shipped — Async checkpoints + UX polish (Pillar A async, B last-N truncation, C richer /checkpoints, D confirmed no-op) | Active |
 
 ## 10. Revision Protocol
 

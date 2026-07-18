@@ -1,5 +1,94 @@
 # CHANGES
 
+## v0.4.1 — Async checkpoints + UX polish
+
+> Four targeted improvements that finish v0.4.0's unfinished business. The
+> REPL no longer freezes during checkpoints; long-session transcripts feed
+> the checkpoint-writer their latest content; `/checkpoints` shows decisions,
+> files, and open threads per entry.
+
+### Added
+- **Async checkpoint + extraction (Pillar A)**: `Par_code_checkpoint.run_checkpoint`
+  now dispatches its LLM call via `Eio.Fiber.fork ~sw:(Runtime.cancellation_root rt)`
+  instead of calling `invoke_generate` synchronously. The 2–5 s checkpoint
+  LLM call now runs in a background fiber; the user turn returns immediately.
+  Preserves v0.4.0's `~save:false ~update_current:false` isolation. An
+  `in_flight` ref throttles concurrent checkpoint dispatches and is reset on
+  every fiber exit path (Ok/Error/exception) via `Fun.protect`. See
+  DECISIONS.md [2026-07-19] for the Oracle fiber-safety verdict and 9
+  engineering caveats.
+- **`Par_code_checkpoint.format_checkpoints`**: new public function that
+  renders a checkpoint list as multi-line text for the `/checkpoints` REPL
+  command (Pillar C). Each entry shows an index, turn number, task headline,
+  plus optional `decisions:`, `files:`, and `open:` sections indented
+  underneath; empty sections are omitted.
+
+### Changed
+- **Transcript truncation switched from first-N to last-N (Pillar B)**:
+  `Par_code_checkpoint.serialize_for_checkpoint` and
+  `Par_code_extractor.serialize_transcript` now keep the **last** 8000 chars
+  of a long transcript instead of the first. Long sessions need the latest
+  content for the checkpoint-writer / extractor to capture current state —
+  the opening greeting adds nothing.
+- **`/checkpoints` REPL command**: now uses `format_checkpoints` (Pillar C)
+  to render richer output. Previous single-line `[i] Turn N: task` replaced
+  with multi-line entries showing decisions, files, and open threads.
+
+### Confirmed no-op
+- **`/checkpoint` extraction chaining (Pillar D)**: investigation during
+  plan review (Momus, 2026-07-19) confirmed that `par_code_checkpoint.ml:341`
+  already chains `Par_code_extractor.run_extraction` after a successful
+  `store_checkpoint`. Both periodic and manual checkpoints route through
+  `run_checkpoint`, so both already trigger extraction. No code change
+  needed; documented as a confirmed no-op for traceability.
+
+### Architecture
+- **Fiber model**: checkpoint/extraction now run as background Eio fibers
+  under `rt.cancellation_root`. REPL shutdown propagates cancellation to
+  in-flight fibers via PAR SDK's existing switch teardown. No new switch
+  lifecycle to manage at the par-code level.
+- **PAR SDK Feedback filed (3 items, not blocking v0.4.1)**:
+  1. `Event_bus.set_session_id` writes without mutex (`event_bus.ml:141-142`);
+     `publish` reads under `use_ro` (`event_bus.ml:56`). In par-code's call
+     pattern the value is always identical, so no observable race today.
+  2. `rt.last_llm_call_at` / `rt.last_llm_call_status` are plain mutable
+     (`runtime.ml:435-436`, `442-443`); lost-update race under concurrent
+     fibers. Diagnostic only; health snapshot tolerates stale reads.
+  3. `Runtime.invoke_async` lacks `?save` / `?update_current` (re-affirmed).
+     This is why par-code uses `Eio.Fiber.fork` directly instead of
+     `Invoke_context.fork_invoke` (which is typed for `invoke_result`, not
+     `generate_result`).
+
+### Known Limitations
+- Checkpoint/extraction LLM calls no longer appear in `rt.metrics`. The
+  fiber's `ctx.metrics_accumulator` is allocated fresh and discarded
+  (`invoke_generate` doesn't call `Metrics.merge_into`). Acceptable for
+  v0.4.1 — these are background bookkeeping calls.
+- `rt.last_llm_call_at` / `rt.last_llm_call_status` may briefly reflect the
+  checkpoint call instead of the user's call (lost-update race, see PAR SDK
+  feedback #2). Health snapshot unaffected in practice.
+- Async return-immediately behavior is verified by manual smoke rather than
+  unit test. Mocking `invoke_generate` would require an invasive functor
+  refactor; deferred to v0.5.0+ if metrics visibility becomes important.
+- **PRE-EXISTING (inherited from v0.4.0, not introduced by v0.4.1)**: the
+  `conversation` field returned by `Runtime.invoke` contains only `System`
+  + `User` messages — `Assistant` responses are not included in
+  `conv.messages`. Checkpoint-writer / extractor therefore see only the
+  user side of the dialogue, which limits checkpoint quality. Manual smoke
+  (2026-07-19) confirmed: after N turns, `conv.messages` has 1 System +
+  N User + 0 Assistant. This is a PAR SDK contract issue OR a par-code
+  integration gap; tracked for separate investigation in v0.4.2 or v0.5.0.
+  Not a regression — v0.4.0 has the same behavior.
+
+### Tests
+- 4 new tests in `test_par_code_checkpoint.ml`:
+  - `serialize.truncation_keeps_last` — verifies last-N truncation
+  - `format.empty_list`, `format.single_minimal`, `format.multi_field_entry`,
+    `format.omits_empty_sections` — verify `format_checkpoints` output shape
+- All 44 tests (5 + 25 + 14) pass on a clean build.
+
+---
+
 ## v0.4.0 — Long-session continuity
 
 > Checkpoint-writer subagent with save/isolation controls, budgeted context
