@@ -1,5 +1,19 @@
 # Decisions
 
+## [2026-07-18] Architecture: eliminate ckpt_rt, use PAR SDK 0.7.7 save/isolation controls
+
+**变更前**：v0.4.0 used a separate checkpoint Runtime (`ckpt_rt`) with no-op persistence to isolate checkpoint/extractor `invoke_generate` calls from the user's Runtime. This was a ~50-line workaround for PAR SDK's lack of save/isolation controls.
+
+**变更后**：PAR SDK v0.7.7 shipped `?save:bool` and `?update_current:bool` on `invoke_generate`, and `?conversation:` on `save_conversation`. par-code now runs checkpoint/extractor on the user's Runtime with `~save:false ~update_current:false`. The separate Runtime, no-op persistence, and second LLM service are eliminated. Exit paths use `save_conversation ?conversation:!conv` to save the authoritative ref directly.
+
+**原因**：The ckpt_rt was a workaround for a PAR SDK limitation. With the limitation fixed at root (PAR SDK 0.7.7), the workaround is unnecessary overhead — a second Runtime, second LLM connection, and duplicate agent registrations. Removing it simplifies the architecture and reduces resource consumption.
+
+**影响范围**：`lib/par_code_checkpoint.ml` (run_checkpoint/maybe_checkpoint use rt instead of ckpt_rt), `lib/par_code_extractor.ml` (invoke_generate gains ~save:false ~update_current:false), `lib/par_code_setup.ml` (removed ckpt_rt creation + agent registrations), `lib/par_code_repl.ml` (removed ~ckpt_rt parameter), `bin/main.ml` (simplified callbacks).
+
+**回退方式**：Revert to ckpt_rt architecture. The checkpoint module still accepts `~rt` which can be either the user's or a separate Runtime.
+
+**已知限制**：`invoke_generate` with `~save:false ~update_current:false` still mutates `rt.session_id` (if None), `event_bus`, and metrics. In par-code's single-threaded REPL, these are benign (session_id is already set, metrics inflation is negligible). Not full fiber-safe isolation — reduced shared-state dependency, not eliminated.
+
 ## [2026-07-16] v0.4.0 shipped — Long-session continuity
 
 **变更前**：v0.3.3 shipped (hybrid memory search). v0.4.0 was unimplemented. Long sessions relied on the full conversation being passed to each invoke, eventually exceeding the model's context window with no recovery mechanism.

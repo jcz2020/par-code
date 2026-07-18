@@ -226,8 +226,8 @@ the session state into a structured entry:
 - **Interfaces added/modified** (function/type signatures)
 - **Open threads** (TODOs, unresolved questions)
 
-Checkpoints run on a **separate isolated Runtime** — checkpoint LLM calls never
-interfere with your main conversation's state.
+Checkpoints run with `~save:false ~update_current:false` — checkpoint and
+extraction LLM calls never interfere with your conversation state.
 
 ```sh
 /checkpoint      # Force an immediate checkpoint
@@ -276,7 +276,7 @@ Version numbers stay minimal (no 1.0 until core parity is earned).
 | **v0.3.1** ✅ | Auto-extraction + history search — session-end memory extraction + FTS5 search over past conversations. *"It remembers without being asked, and recalls what it wrote."* |
 | **v0.3.2** ✅ | Linux arm64 pre-built binary — Raspberry Pi / AWS Graviton / other aarch64 Linux supported with one-line installer. *"Install on ARM without compiling."* |
 | **v0.3.3** ✅ | PAR SDK 0.7.3 + hybrid memory search — memory storage migrated to PAR SDK `Sqlite_memory`; FTS5 + vector + RRF hybrid search via configurable embedding service; per-turn memory injection. *"Memory search understands meaning, not just keywords."* |
-| **v0.4.0** ✅ | Long-session continuity — checkpoint-writer subagent on a separate isolated Runtime, budgeted context injection, context reconstruction on resume, periodic mid-session memory extraction. *"Hours-long sessions never lose the thread."* |
+| **v0.4.0** ✅ | Long-session continuity — checkpoint-writer subagent, budgeted context injection, context reconstruction on resume, periodic mid-session memory extraction. *"Hours-long sessions never lose the thread."* |
 | **v0.5.0** | Plan mode — read-only plan agent, build/plan switching, plan_enter/plan_exit. *"It plans before it touches code."* |
 | **v0.6.0** | Subagent delegation — general/explore subagents, actor tool, task tree. *"It spawns helpers to explore and work in parallel."* |
 | **v0.7.0** | Goal-driven autonomy — `/goal` + independent judge model + doom-loop detection. *"It won't declare done until the goal is truly met."* |

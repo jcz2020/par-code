@@ -227,7 +227,7 @@ let run_extraction (rt : Runtime.runtime) (mem_db : Par_code_memory.t)
   if transcript = "" then ()
   else begin
     Printf.eprintf "[extracting memories...]\n%!";
-    match Runtime.invoke_generate rt ~agent_id:extractor_agent_id ~message:transcript () with
+    match Runtime.invoke_generate rt ~agent_id:extractor_agent_id ~save:false ~update_current:false ~message:transcript () with
     | Error (e, _) ->
       Printf.eprintf "Warning: memory extraction failed: %s\n%!"
         (error_to_string e)
