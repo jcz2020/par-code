@@ -138,27 +138,6 @@ let make_runtime_config (cfg : Par_code_config.config) =
 
 let agent_id = "par"
 
-(* No-op persistence for the checkpoint runtime. Prevents checkpoint
-   invoke_generate calls from polluting the conversations table. *)
-let make_noop_persistence () =
-  { Types.
-    save_events_fn = (fun ?scope:_ _events -> Ok ());
-    load_events_fn = (fun _task_id -> Ok []);
-    load_events_by_session_fn = (fun ?scope:_ _sid -> Ok []);
-    load_sessions_fn = (fun ?scope:_ _limit -> Ok []);
-    save_task_state_fn = (fun _ts -> Ok ());
-    load_task_state_fn = (fun _task_id -> Ok None);
-    save_workflow_state_fn = (fun _id _status _ckpt -> Ok ());
-    load_workflow_state_fn = (fun _id -> Ok None);
-    load_all_suspended_workflows_fn = (fun () -> Ok []);
-    save_workflow_def_fn = (fun _id _def -> Ok ());
-    load_all_workflow_defs_fn = (fun () -> Ok []);
-    save_conversation_fn = (fun ?scope:_ _sid _conv -> Ok ());
-    load_conversation_fn = (fun _sid -> Ok None);
-    load_most_recent_conversation_fn = (fun ?scope:_ () -> Ok None);
-    close_fn = ignore;
-  }
-
 let setup_runtime (cfg : Par_code_config.config) ~f =
   ensure_rng ();
   let pers = make_persistence_service cfg in
@@ -179,14 +158,6 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
     Printf.eprintf "Error creating runtime: %s\n%!" (error_to_string e);
     exit 1
   | Ok rt ->
-    let ckpt_llm = make_llm_service provider_tag cfg.Par_code_config.api_key cfg.Par_code_config.api_base net in
-    let ckpt_rt =
-      match Runtime.create ~persistence:(make_noop_persistence ()) ~llm:ckpt_llm ~embeddings ~config:runtime_config switch with
-      | Error e ->
-        Printf.eprintf "Warning: checkpoint runtime unavailable: %s\n%!" (error_to_string e);
-        None
-      | Ok rt' -> Some rt'
-    in
     (* Open the memory database for project memory (v0.3.0). *)
     let memory_embedding_fn : Par_memory.Memory_service.embedding_fn option =
       match provider_tag with
@@ -285,43 +256,71 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
         (match Runtime.register_agent rt extractor with
          | Error e -> Printf.eprintf "Warning: extractor agent registration failed: %s\n%!" (error_to_string e)
          | Ok () -> ()));
-    (match ckpt_rt with
-     | None -> ()
-     | Some crt ->
-       (match Runtime.make_agent
-          ~id:Par_code_checkpoint.checkpoint_writer_agent_id
-          ~system_prompt:(Types.stable_prompt Par_code_checkpoint.checkpoint_writer_system_prompt)
-          ~model:model_cfg
-          ~tools:[]
-          ~max_iterations:1
-          () with
-        | Error e ->
-          Printf.eprintf "Warning: checkpoint-writer agent not registered: %s\n%!" (error_to_string e)
-        | Ok ckpt_agent ->
-          (match Runtime.register_agent crt ckpt_agent with
-           | Error e -> Printf.eprintf "Warning: checkpoint-writer agent registration failed: %s\n%!" (error_to_string e)
-           | Ok () -> ()));
-       (match Runtime.make_agent
-          ~id:Par_code_extractor.extractor_agent_id
-          ~system_prompt:(Types.stable_prompt Par_code_extractor.extractor_system_prompt)
-          ~model:model_cfg
-          ~tools:[]
-          ~max_iterations:1
-          () with
-       | Error e ->
-         Printf.eprintf "Warning: extractor agent not registered on ckpt_rt: %s\n%!" (error_to_string e)
-       | Ok ext_agent ->
-         (match Runtime.register_agent crt ext_agent with
-          | Error e -> Printf.eprintf "Warning: extractor registration on ckpt_rt failed: %s\n%!" (error_to_string e)
-           | Ok () -> ())));
+    (match Runtime.make_agent
+       ~id:Par_code_checkpoint.checkpoint_writer_agent_id
+       ~system_prompt:(Types.stable_prompt Par_code_checkpoint.checkpoint_writer_system_prompt)
+       ~model:model_cfg
+       ~tools:[]
+       ~max_iterations:1
+       () with
+    | Error e ->
+      Printf.eprintf "Warning: checkpoint-writer agent not registered: %s\n%!" (error_to_string e)
+    | Ok ckpt_agent ->
+      (match Runtime.register_agent rt ckpt_agent with
+       | Error e -> Printf.eprintf "Warning: checkpoint-writer agent registration failed: %s\n%!" (error_to_string e)
+       | Ok () -> ()));
+    Runtime.set_tool_description_overrides rt [
+      "bash", "Execute a system command (e.g. git, npm, docker, make, systemctl). \
+               NOT for file operations — use read/ls/grep/find tools for those.";
+    ];
     Runtime.register_tool_call_hook rt
       (Bash_confirm.make_hook ?confirm_fn:(Some (fun cmd ->
-           Printf.eprintf "\n⚠ bash: %s [y/N] " cmd;
-           flush stderr;
-           match input_line stdin with
-           | line when String.lowercase_ascii (String.trim line) = "y" -> true
-           | exception _ -> false
-           | _ -> false)) Runtime.default_bash_confirm);
+           let extract_first_word s =
+             let s = String.trim s in
+             let i = ref 0 in
+             while !i < String.length s && s.[!i] <> ' ' && s.[!i] <> '&' do incr i done;
+             String.sub s 0 !i
+           in
+           let first_word =
+             try
+               let json = Yojson.Safe.from_string cmd in
+               let open Yojson.Safe.Util in
+               (match json |> member "argv" with
+                | `List (s :: _) -> extract_first_word (to_string s)
+                | `List [] -> ""
+                | _ -> extract_first_word cmd)
+             with _ -> extract_first_word cmd
+           in
+           let safe_commands = [
+             "ls"; "cat"; "head"; "tail"; "grep"; "find"; "which"; "wc";
+             "diff"; "stat"; "file"; "du"; "df"; "pwd"; "echo"; "env";
+             "printenv"; "date"; "whoami"; "hostname"; "uname"; "ps";
+             "uptime"; "free"; "top";
+           ] in
+           let safe_prefixes = [
+             "git status"; "git log"; "git diff"; "git show";
+             "git branch"; "git tag"; "git remote";
+           ] in
+           let full_cmd =
+             try
+               let json = Yojson.Safe.from_string cmd in
+               let open Yojson.Safe.Util in
+               String.concat " " (List.map to_string (json |> member "argv" |> to_list))
+             with _ -> cmd
+           in
+           let is_safe = List.mem first_word safe_commands
+             || List.exists (fun p -> String.length full_cmd >= String.length p
+                 && String.sub full_cmd 0 (String.length p) = p) safe_prefixes
+           in
+           if is_safe then true
+           else begin
+             Printf.eprintf "\n⚠ bash: %s [y/N] " full_cmd;
+             flush stderr;
+             match input_line stdin with
+             | line when String.lowercase_ascii (String.trim line) = "y" -> true
+             | exception _ -> false
+             | _ -> false
+           end)) Runtime.default_bash_confirm);
     Runtime.register_tool_call_hook rt
       (fun (ctx : Hook.tool_call_context) ->
         Printf.eprintf "  [%s]\n%!" ctx.Hook.tool_name;
@@ -329,7 +328,6 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
     List.iter (fun (desc : Types.skill_descriptor) ->
       ignore (Runtime.register_skill rt desc : (Types.skill_binding, _) result)
     ) Builtin_skills.builtin_skills;
-    f rt mem_db ckpt_rt;
+    f rt mem_db;
     (match mem_db with Some t -> Par_code_memory.close t | None -> ());
-    (match ckpt_rt with Some crt -> ignore (Runtime.close crt) | None -> ());
     ignore (Runtime.close rt)

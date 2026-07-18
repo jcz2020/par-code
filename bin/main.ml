@@ -22,8 +22,8 @@ let cmd_chat
     | false, Some id -> Par_code_repl.Resume_of id
     | false, None -> Par_code_repl.No_prior
   in
-  Par_code_setup.setup_runtime cfg ~f:(fun rt mem_db ckpt_rt ->
-    Par_code_repl.run rt ~mem_db ~ckpt_rt ~resume:resume_target)
+  Par_code_setup.setup_runtime cfg ~f:(fun rt mem_db ->
+    Par_code_repl.run rt ~mem_db ~resume:resume_target)
 
 let term_chat =
   let open Term in
@@ -55,8 +55,8 @@ let cmd_ask
     Printf.eprintf "Usage: par ask <question>\n%!";
     exit 1
   end;
-  Par_code_setup.setup_runtime cfg ~f:(fun rt mem_db ckpt_rt ->
-    Par_code_repl.run_single_shot rt ~mem_db ~ckpt_rt ~message:question)
+  Par_code_setup.setup_runtime cfg ~f:(fun rt mem_db ->
+    Par_code_repl.run_single_shot rt ~mem_db ~message:question)
 
 let term_ask =
   let open Term in

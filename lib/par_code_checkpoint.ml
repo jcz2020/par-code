@@ -316,12 +316,13 @@ let render_session_brief mem_db ~session_id =
     ) entries;
     Buffer.contents buf
 
-let run_checkpoint ~ckpt_rt mem_db ~session_id ~project_id conv ~turn_number =
+let run_checkpoint ~rt mem_db ~session_id ~project_id conv ~turn_number =
   let transcript = serialize_for_checkpoint conv ~turn_number in
   if transcript = "" then ()
   else
-    match Runtime.invoke_generate ckpt_rt
+    match Runtime.invoke_generate rt
             ~agent_id:checkpoint_writer_agent_id
+            ~save:false ~update_current:false
             ~message:transcript ()
     with
     | Error (err, _) ->
@@ -337,17 +338,17 @@ let run_checkpoint ~ckpt_rt mem_db ~session_id ~project_id conv ~turn_number =
           (match store_checkpoint mem_db ~session_id ~project_id entry with
            | Ok () ->
              Printf.eprintf "[checkpoint stored at turn %d]\n%!" turn_number;
-             Par_code_extractor.run_extraction ckpt_rt mem_db
-               ~project_id conv
-           | Error (`Db_error e) ->
-             Printf.eprintf "[checkpoint store failed: %s]\n%!" e))
+              Par_code_extractor.run_extraction rt mem_db
+                ~project_id conv
+            | Error (`Db_error e) ->
+              Printf.eprintf "[checkpoint store failed: %s]\n%!" e))
 
-let maybe_checkpoint ~ckpt_rt mem_db ~session_id ~project_id conv
+let maybe_checkpoint ~rt mem_db ~session_id ~project_id conv
     ~turn_number ~enabled ~interval =
   if not enabled then ()
   else if turn_number mod interval <> 0 then ()
   else
     try
-      run_checkpoint ~ckpt_rt mem_db ~session_id ~project_id conv ~turn_number
+      run_checkpoint ~rt mem_db ~session_id ~project_id conv ~turn_number
     with exn ->
       Printf.eprintf "[checkpoint failed: %s]\n%!" (Printexc.to_string exn)

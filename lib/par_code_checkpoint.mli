@@ -42,15 +42,15 @@ val render_session_brief : Par_code_memory.t -> session_id:string -> string
 (** Render recent checkpoints into a compact markdown summary for session resume. *)
 
 val run_checkpoint :
-  ckpt_rt:Par.Runtime.runtime ->
+  rt:Par.Runtime.runtime ->
   Par_code_memory.t ->
   session_id:string -> project_id:string ->
   Par.Types.conversation -> turn_number:int ->
   unit
-(** Serialize conv, invoke_generate on ckpt_rt, parse, store. Non-fatal on error. *)
+(** Serialize conv, invoke_generate on rt with ~save:false ~update_current:false, parse, store. Non-fatal on error. *)
 
 val maybe_checkpoint :
-  ckpt_rt:Par.Runtime.runtime ->
+  rt:Par.Runtime.runtime ->
   Par_code_memory.t ->
   session_id:string -> project_id:string ->
   Par.Types.conversation -> turn_number:int ->
