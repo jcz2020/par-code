@@ -1,5 +1,39 @@
 # CHANGES
 
+## v0.4.2 — Critical fix: multi-turn conversation context (PAR SDK 0.7.8)
+
+> The PAR SDK 0.7.8 bug that silently dropped assistant responses from the
+> conversation history has been fixed upstream. par-code v0.4.2 rebuilds
+> against the fixed PAR SDK; multi-turn coding sessions now correctly
+> preserve assistant context across turns. Checkpoint-writer / extractor
+> also see the full dialogue (was seeing only the user side).
+
+### Fixed
+- **Multi-turn conversation coherence (critical)**: in v0.4.0 and v0.4.1,
+  the conversation returned by `Runtime.invoke` contained only `System` +
+  `User` messages — `Assistant` responses were silently dropped. This meant:
+  - On each subsequent turn, the LLM could not see its own prior responses,
+    degrading coherence in long coding sessions.
+  - The checkpoint-writer and memory extractor saw only the user side of the
+    dialogue, producing low-quality checkpoints.
+  Root cause was in PAR SDK's ReAct engine (`engine.ml:1024-1029`): the
+  `Stop`/`Content_filter` terminal branch omitted the `add_assistant_message`
+  call that all other terminal branches made. PAR SDK 0.7.8 fixes this with
+  a single egress wrap at the loop boundary (Oracle-audited, 4 redundant
+  inline appends removed, loop invariant formalized).
+
+### Upgrade urgency
+**High for any user running v0.4.0 or v0.4.1.** Run `par upgrade` to get
+v0.4.2. Multi-turn coherence is fundamental to coding agent quality; users
+on v0.4.0/v0.4.1 have been silently affected.
+
+### No other changes
+This is a binary-only rebuild. par-code source itself has no logic changes
+beyond the version bump and documentation sync. The fix lives entirely in
+the PAR SDK dependency that ships bundled in the binary.
+
+---
+
 ## v0.4.1 — Async checkpoints + UX polish
 
 > Four targeted improvements that finish v0.4.0's unfinished business. The
@@ -70,15 +104,14 @@
 - Async return-immediately behavior is verified by manual smoke rather than
   unit test. Mocking `invoke_generate` would require an invasive functor
   refactor; deferred to v0.5.0+ if metrics visibility becomes important.
-- **PRE-EXISTING (inherited from v0.4.0, not introduced by v0.4.1)**: the
-  `conversation` field returned by `Runtime.invoke` contains only `System`
-  + `User` messages — `Assistant` responses are not included in
-  `conv.messages`. Checkpoint-writer / extractor therefore see only the
-  user side of the dialogue, which limits checkpoint quality. Manual smoke
-  (2026-07-19) confirmed: after N turns, `conv.messages` has 1 System +
-  N User + 0 Assistant. This is a PAR SDK contract issue OR a par-code
-  integration gap; tracked for separate investigation in v0.4.2 or v0.5.0.
-  Not a regression — v0.4.0 has the same behavior.
+- **PRE-EXISTING (inherited from v0.4.0, not introduced by v0.4.1; FIXED
+  in v0.4.2)**: the `conversation` field returned by `Runtime.invoke`
+  contained only `System` + `User` messages — `Assistant` responses were
+  not included in `conv.messages`. Checkpoint-writer / extractor therefore
+  saw only the user side of the dialogue, which limited checkpoint quality.
+  Root cause was a missing `add_assistant_message` call in PAR SDK's
+  ReAct engine; fixed upstream in PAR SDK 0.7.8 (single egress wrap) and
+  consumed by par-code v0.4.2.
 
 ### Tests
 - 4 new tests in `test_par_code_checkpoint.ml`:

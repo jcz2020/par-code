@@ -1,5 +1,67 @@
 # Decisions
 
+## [2026-07-19] v0.4.2: critical fix — multi-turn conversation context (PAR SDK 0.7.8)
+
+**变更前**: v0.4.0 and v0.4.1 shipped a binary bundling PAR SDK 0.7.8
+*before* the engine.ml fix landed. PAR SDK's `Engine.run_agent` had a bug
+at `engine.ml:1024-1029` (the `Stop`/`Content_filter` terminal branch of
+the ReAct loop): the `add_assistant_message` call was missing — every
+other terminal branch called it. The result: `Runtime.invoke` returned
+an `invoke_result` whose `response.text` held the final assistant content
+but whose `conversation.messages` was missing the corresponding
+`{role=Assistant; ...}` entry. This silently degraded:
+
+- Multi-turn coherence: the LLM could not see its own prior responses on
+  subsequent turns (the conversation passed via `?conversation` lacked
+  Assistant entries).
+- Checkpoint-writer / extractor quality: the LLM saw only the user side
+  of the dialogue.
+
+**变更后**: PAR SDK 0.7.8 fixed the root cause via a single egress wrap
+at the loop boundary (`engine.ml:1165`:
+
+  `let conv_final = if needs_append then add_assistant_message conv_pre resp else conv_pre in`)
+
+— eliminating the "remember-to-call-add_assistant_message" pattern that
+had already produced one missing-branch bug. Oracle audited the fix
+across three rounds of review; the final commit closed an idempotency
+hole where the egress wrap could double-append in handoff scenarios.
+
+par-code v0.4.2 rebuilds against the fixed PAR SDK 0.7.8. No par-code
+source changes beyond version bump and documentation sync. Manual smoke
+2026-07-19 confirmed: 2-turn session now produces `[System; User;
+Assistant; User; Assistant]` in `conv.messages` (was `[System; User;
+User]` before the fix); `/checkpoint` successfully stores; extraction
+runs.
+
+**原因**: multi-turn coherence is foundational to coding-agent quality.
+v0.4.0 and v0.4.1 users have been silently affected. Critical-path
+patch release — no other changes bundled.
+
+**影响范围**: Binary-only rebuild. `dune-project`, `par_code.opam`,
+`test/test_par_code.ml` (version assertion bumped 0.4.1 → 0.4.2),
+`README.md` (Status line + roadmap), `CHANGES.md` (v0.4.2 section;
+v0.4.1 Known Limitations note updated to point at v0.4.2 as the fix),
+`docs/STRATEGY.md` (§8 + §9), this DECISIONS entry.
+
+**回退方式**: Revert to PAR SDK pre-fix state and rebuild (no par-code
+source rollback needed). Discouraged — the fix is architecturally
+correct (single egress wrap is strictly better than 7 scattered inline
+appends).
+
+**已知限制**: None. The fix is closed-form — every Ok-bearing terminal
+path now flows through the single egress wrap. PAR SDK 0.7.8's test
+suite includes P0 handoff + generate coverage that exercises this path
+(added in commit `0e835a1`).
+
+### Historical reference
+
+The bug was discovered during v0.4.1 manual smoke testing (2026-07-19)
+when `/checkpoint` showed `[System; User; User]` instead of
+`[System; User; Assistant; User; Assistant]`. Explore-agent diagnosis
+2026-07-19 traced root cause to `engine.ml:1024-1029`. PAR SDK fix
+landed upstream the same day.
+
 ## [2026-07-19] v0.4.1: async checkpoint via Eio.Fiber.fork (Oracle SAFE WITH CAVEATS)
 
 **变更前**: v0.4.0 shipped checkpoint-writer + extractor as synchronous

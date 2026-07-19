@@ -1,6 +1,6 @@
 # par-code Strategy
 
-> **Last updated**: 2026-07-19
+> **Last updated**: 2026-07-19 (v0.4.2)
 > **Status**: Active
 > **Owner**: PAR-Code Contributors
 >
@@ -171,6 +171,10 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
   SAFE WITH CAVEATS) + last-N transcript truncation + richer `/checkpoints`
   listing. Finishes v0.4.0's unfinished business. Pillar D confirmed no-op
   via code-path audit.
+- **v0.4.2 ✅ shipped** — critical fix: PAR SDK 0.7.8 engine.ml bug that
+  silently dropped assistant responses from `conversation.messages`. Binary
+  rebuild only; no par-code source changes. Multi-turn coherence + checkpoint
+  quality restored.
 - v0.4.0+ — plan mode, subagents, autonomy, reasoning,
   self-improvement, compose mode, ecosystem, code intelligence, safety, polish
   → v1.0
@@ -210,6 +214,7 @@ per global rules) lives in `docs/DECISIONS.md`. Strategic-level entries:
 | 2026-07-19 | v0.4.1: async checkpoint/extraction via Eio.Fiber.fork on rt.cancellation_root (Oracle SAFE WITH CAVEATS) | Active |
 | 2026-07-19 | v0.4.1: PAR SDK feedback filed (3 items: Event_bus.set_session_id unlocked; last_llm_call_* non-atomic; invoke_async lacks ?save/?update_current — re-affirmed) | Active |
 | 2026-07-19 | v0.4.1 shipped — Async checkpoints + UX polish (Pillar A async, B last-N truncation, C richer /checkpoints, D confirmed no-op) | Active |
+| 2026-07-19 | v0.4.2 shipped — critical fix: PAR SDK 0.7.8 engine.ml bug silently dropped assistant messages from `conversation.messages`; multi-turn coherence + checkpoint quality restored via single-egress-wrap fix upstream | Active |
 
 ## 10. Revision Protocol
 
