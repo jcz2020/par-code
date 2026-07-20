@@ -30,13 +30,14 @@ let make_tool_event_callback () =
 
 let print_help () =
   Printf.printf "Commands:\n";
-  Printf.printf "  /help     Show this help\n";
-  Printf.printf "  /session  Show session info\n";
-  Printf.printf "  /health   Show runtime health\n";
-  Printf.printf "  /reset       Reset conversation (clear history)\n";
-  Printf.printf "  /checkpoint  Force a session checkpoint\n";
-  Printf.printf "  /checkpoints List session checkpoints\n";
-  Printf.printf "  /quit        Exit\n%!"
+  Printf.printf "  /help       Show this help\n";
+  Printf.printf "  /session    Show session info\n";
+  Printf.printf "  /health     Show runtime health\n";
+  Printf.printf "  /cost       Show session token usage and operational metrics\n";
+  Printf.printf "  /reset         Reset conversation (clear history)\n";
+  Printf.printf "  /checkpoint    Force a session checkpoint\n";
+  Printf.printf "  /checkpoints   List session checkpoints\n";
+  Printf.printf "  /quit          Exit\n%!"
 
 let format_health (h : Types.health_status) =
   let runtime_label = if h.Types.runtime_alive then "alive" else "DEAD" in
@@ -101,6 +102,44 @@ let build_memory_appendix (mem_db : Par_code_memory.t option) =
     if index = "" then None else Some ("\n\n## Project Memory\n\n" ^ index)
   | None -> None
 
+(* ── Session cost tracking ──────────────────────────────────────────────── *)
+
+type cost_state = {
+  llm_calls : int;
+  prompt_tokens : int;
+  completion_tokens : int;
+  total_tokens : int;
+}
+
+let empty_cost = {
+  llm_calls = 0;
+  prompt_tokens = 0;
+  completion_tokens = 0;
+  total_tokens = 0;
+}
+
+let add_usage (state : cost_state) (usage : Types.usage_stats) : cost_state = {
+  llm_calls = state.llm_calls + 1;
+  prompt_tokens = state.prompt_tokens + usage.Types.prompt_tokens;
+  completion_tokens = state.completion_tokens + usage.Types.completion_tokens;
+  total_tokens = state.total_tokens + usage.Types.total_tokens;
+}
+
+let format_cost_output ~cost ~context_tokens ~turn_count ~metrics =
+  let b = Buffer.create 256 in
+  Buffer.add_string b "Session usage:\n";
+  Buffer.add_string b (Printf.sprintf "  LLM calls:        %d\n" cost.llm_calls);
+  Buffer.add_string b (Printf.sprintf "  Prompt tokens:    %d\n" cost.prompt_tokens);
+  Buffer.add_string b (Printf.sprintf "  Output tokens:    %d\n" cost.completion_tokens);
+  Buffer.add_string b (Printf.sprintf "  Total tokens:     %d\n" cost.total_tokens);
+  Buffer.add_string b (Printf.sprintf "  Context size:     %d tokens (current)\n" context_tokens);
+  Buffer.add_string b (Printf.sprintf "  Turns completed:  %d\n" turn_count);
+  Buffer.add_string b "\nOperational metrics:\n";
+  List.iter (fun (k, v) ->
+    Buffer.add_string b (Printf.sprintf "  %s: %d\n" k v)) metrics;
+  Buffer.add_string b "\nNote: excludes async checkpoint/extraction calls.\n";
+  Buffer.contents b
+
 let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
   Printf.printf "par %s — type a message (or /help for commands, Ctrl-D to quit)\n%!" Par_code_version.version;
   let conv : Types.conversation option ref = ref (load_initial_conv rt resume) in
@@ -113,6 +152,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
      hammers turns faster than the checkpoint LLM responds. Reset by the fiber
      on every exit path (Ok/Error/exn) via Fun.protect. *)
   let in_flight_checkpoint = ref false in
+  let cost = ref empty_cost in
   let loaded_cfg = Par_code_config.load () in
   let ckpt_enabled = match loaded_cfg with Some c -> c.Par_code_config.checkpoint_enabled | None -> true in
   let ckpt_interval = match loaded_cfg with Some c -> c.Par_code_config.checkpoint_interval | None -> 10 in
@@ -185,9 +225,18 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
              | _ -> Printf.eprintf "[checkpoints unavailable]\n%!");
             loop ()
          | "/quit" | "/exit" ->
-            let _ = Runtime.save_conversation rt ?conversation:!conv () in
-            maybe_extract rt !conv;
-             Printf.printf "Bye!\n%!"; exit 0
+             let _ = Runtime.save_conversation rt ?conversation:!conv () in
+             maybe_extract rt !conv;
+              Printf.printf "Bye!\n%!"; exit 0
+          | "/cost" ->
+            let metrics = Runtime.metrics_snapshot rt in
+            let context_tokens = match !conv with
+              | Some c -> Par_code_context.token_estimate c
+              | None -> 0
+            in
+            let output = format_cost_output
+              ~cost:!cost ~context_tokens ~turn_count:!turn_count ~metrics in
+            Printf.printf "%s%!" output
           | _ -> Printf.eprintf "Unknown command: %s (try /help)\n%!" cmd);
          loop ()
        end else begin
@@ -233,9 +282,10 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
               conv := Some recovered_conv;
               Printf.eprintf "Error: %s\n%!" (Par_code_setup.error_to_string e);
                let _ = Runtime.save_conversation rt ?conversation:!conv () in ()
-             | Ok { Types.response = _; conversation = returned_conv } ->
+             | Ok { Types.response = resp; conversation = returned_conv } ->
                conv := Some returned_conv;
                Printf.printf "\n%!";
+               cost := add_usage !cost resp.Types.usage;
                let _ = Runtime.save_conversation rt ?conversation:!conv () in ();
                incr turn_count;
                if !session_id = None then begin
