@@ -1,5 +1,118 @@
 # Decisions
 
+## [2026-07-20] v0.4.3: per-session token accumulator for `/cost` command
+
+**变更前**: par-code's REPL had no way to show token usage. PAR SDK's
+`Metrics.counters` type tracks only operational counts (`llm_requests_total`,
+`task_completed_total`, `task_failed_total`, `tool_invocations_total`,
+`events_published_total`, `events_dropped_total`) — no token-level fields.
+`Types.usage_stats` carries per-call token counts (`prompt_tokens`,
+`completion_tokens`, `total_tokens`, etc.) returned in
+`invoke_result.response.usage`, but nothing accumulated these across calls.
+
+**变更后**: `lib/par_code_repl.ml` adds an immutable `cost_state` record
+plus a mutable `cost_state ref` in the `run` function. After each
+`Runtime.invoke` returns `Ok { Types.response; conversation }`, the
+accumulator is updated: `cost := add_usage !cost resp.Types.usage`. Error
+branches do NOT touch the accumulator. A new `/cost` slash command prints
+the accumulator state, current context size (via
+`Par_code_context.token_estimate !conv`), turn count, and the operational
+metrics list from `Runtime.metrics_snapshot rt`.
+
+**原因**: `/cost` was the top P0 user-pain item from the v0.4.2 post-release
+review. Token usage visibility is foundational for users to understand
+session cost and debug context-window exhaustion. PAR SDK's `Metrics` module
+architecture (operational counts only) means token accumulation must live
+in downstream consumers; par-code is the right place.
+
+**影响范围**: `lib/par_code_repl.ml` (+72 lines: new `cost_state` type,
+`empty_cost`, `add_usage`, `format_cost_output` helpers, `cost` ref,
+`/cost` slash command, `/help` update, Ok-branch accumulator update),
+`test/test_par_code_repl.ml` (NEW: 7 tests covering cost_state operations
+and format_cost_output formatting).
+
+**回退方式**: Remove the `cost` ref, `add_usage` call in Ok branch, `/cost`
+slash command case, and `/help` line. The accumulator is a pure addition
+with no side effects on existing code paths.
+
+**已知限制**: Async checkpoint/extraction LLM calls (v0.4.1 Eio.Fiber.fork
+dispatch) bypass the accumulator — their fiber's metrics are discarded.
+`/cost` output explicitly notes this exclusion. Affects ~5-10% undercounting
+in long sessions. Acceptable for v0.4.3; tracked for v0.5.0+ if metrics
+visibility becomes important (would require PAR SDK enhancement to merge
+fiber metrics back into `rt.metrics`).
+
+## [2026-07-20] v0.4.3: memory `recall` usage-field workaround (PAR SDK limitation)
+
+**变更前**: `Par_code_memory.recall` delegated to
+`Sqlite_memory.search` (PAR SDK), which returns
+`Memory_object.memory_object list`. That type lacks `last_used_at` and
+`usage_count` fields entirely. par-code's `memory_of_object` conversion
+hardcoded these to `None` / `0`. Result: the `recall_memory` LLM tool
+showed stale usage stats even though the DB columns were being maintained
+correctly by PAR SDK's internal `Sqlite_memory.search_fts` bump_usage.
+
+**变更后**: `Par_code_memory.recall` now runs a supplementary parameterized
+SQL query (`fetch_usage_stats`) after `Sqlite_memory.search` returns. The
+query binds all returned memory IDs via `Sqlite3.bind` (never string
+interpolation — injection-safe), reads `(last_used_at, usage_count)` from
+the `memory_entries` table, and the converted `memory` records are patched
+via immutable record update before return. Empty result list short-circuits
+to avoid generating invalid `IN ()` SQL. Exceptions in the supplementary
+query are caught and degrade gracefully to returning unpatched memories
+(consistent with par-code's existing `with _ -> ()` style for raw SQL).
+
+**原因**: PAR SDK's `Memory_object.t` (`lib/memory/memory_object.mli:1-11`)
+was designed without usage-tracking fields. The DB schema has the columns
+(`sqlite_memory.ml:81-82`), the SDK's `row_to_memory` reads them but
+discards (underscore-prefixed at `sqlite_memory.ml:208-212`), and
+`search_fts` internally bumps them via private `bump_usage`
+(`sqlite_memory.ml:327, 363, 379, 399, 417, 482`). The data is in the DB
+and being maintained — it just isn't surfaced through the SDK's public
+type. Per AGENTS.md §1 (PAR SDK boundary), the workaround belongs on the
+par-code side, with PAR SDK feedback filed for the upstream fix.
+
+**影响范围**: `lib/par_code_memory.ml` (+30 lines: `fetch_usage_stats`
+helper + `recall` modification), `test/test_par_code_memory.ml` (+2 new
+tests: `recall_usage.returns_usage_fields` and
+`recall_usage.safe_with_metachar_ids` — adversarial SQL injection test).
+
+**回退方式**: Revert `recall` to direct `List.map memory_of_object results`.
+The supplementary query is a pure addition.
+
+**已知限制**: One extra SQL query per `recall` call (negligible — indexed
+by `ext_id`, returns ≤ `limit` rows). The underlying PAR SDK limitation
+remains: `Memory_object.t` still lacks the fields, so any future code path
+that uses `Sqlite_memory.search` directly (without going through par-code's
+`recall`) will still drop them. PAR SDK feedback filed separately
+([2026-07-20] PAR SDK Feedback entry below).
+
+## [2026-07-20] PAR SDK Feedback: Memory_object.t lacks usage-tracking fields
+
+Per global AGENTS.md §1 and the par-code par-sdk-feedback skill, one PAR
+SDK gap surfaced during v0.4.3 implementation. Tracked here for upstream
+action; does not block v0.4.3 (worked around in par-code).
+
+1. **`Memory_object.memory_object` lacks `last_used_at` / `usage_count`
+   fields** (`lib/memory/memory_object.mli:1-11`). The DB schema has both
+   columns (`sqlite_memory.ml:81-82`); the SDK's `row_to_memory` reads
+   them but discards (`sqlite_memory.ml:208-212`, underscore-prefixed);
+   the SDK's `search_fts` internally bumps them via private `bump_usage`
+   (`sqlite_memory.ml:327, 363, 379, 399, 417, 482`). The data is in the
+   DB and being maintained — it just isn't surfaced through the SDK's
+   public type. Downstream consumers needing usage stats from search
+   results must do a supplementary SQL fetch (par-code v0.4.3 workaround
+   in `Par_code_memory.recall`). **Severity**: medium (architectural
+   paper-cut; the type design implies usage-tracking is unsupported,
+   when in fact it's half-implemented but invisible).
+
+   Suggested upstream fix: add `last_used_at : float option` and
+   `usage_count : int` to `Memory_object.memory_object`. Update
+   `row_to_memory` to populate them (read columns 8-9 instead of
+   discarding). Update `Sqlite_memory.add` signature to NOT accept them
+   (correct as-is: new memories start at 0/None). No schema migration
+   needed — columns already exist.
+
 ## [2026-07-19] v0.4.2: critical fix — multi-turn conversation context (PAR SDK 0.7.8)
 
 **变更前**: v0.4.0 and v0.4.1 shipped a binary bundling PAR SDK 0.7.8

@@ -9,7 +9,7 @@ CLI conventions and drives the full PAR surface — ReAct loop, tool dispatch,
 type-safe bash, MCP client, skills, workflows, streaming — to both ship a
 useful agent and prove out the PAR SDK in anger.
 
-**Status:** `v0.4.2` — critical fix: PAR SDK 0.7.8 bug silently dropped assistant responses from conversation history. Multi-turn coherence restored. Pre-built binaries with a
+**Status:** `v0.4.3` — UX quick patch: `/cost` slash command for token visibility, `par config show` + 6 new wizard prompts, memory recall now returns real usage stats. Pre-built binaries with a
 one-line installer (`curl | bash`) for Linux x86_64/arm64 + macOS arm64, plus `par upgrade`
 self-update. No OCaml or opam needed for end users.
 
@@ -279,6 +279,7 @@ Version numbers stay minimal (no 1.0 until core parity is earned).
 | **v0.4.0** ✅ | Long-session continuity — checkpoint-writer subagent, budgeted context injection, context reconstruction on resume, periodic mid-session memory extraction. *"Hours-long sessions never lose the thread."* |
 | **v0.4.1** ✅ | Async checkpoints + UX polish — periodic checkpoint/extraction now run as background Eio fibers (no REPL freeze); transcript truncation switched from first-N to last-N; `/checkpoints` shows decisions, files, and open threads per entry. Manual `/checkpoint` stays synchronous for verification. *"Checkpoints no longer freeze the REPL."* |
 | **v0.4.2** ✅ | Critical fix — multi-turn conversations now correctly preserve assistant responses in `conversation.history`. PAR SDK 0.7.8 engine bug (silently dropped the terminal assistant message) was affecting v0.4.0 and v0.4.1; this release rebuilds against the fixed PAR SDK. *"The agent remembers what it just said."* |
+| **v0.4.3** ✅ | UX quick patch — `/cost` slash command (per-session token accumulator + operational metrics); `par config show` subcommand (prints all 19 fields with masked api_key); config wizard now prompts for 6 previously-hidden options (max_tokens, top_p, auto_extract, checkpoint_*, context_budget_tokens); memory `recall` no longer drops `usage_count`/`last_used_at` fields. Dead `bump_usage` removed. *"Daily-friction fixes — see what your session costs, inspect config without entering the wizard."* |
 | **v0.5.0** | Plan mode — read-only plan agent, build/plan switching, plan_enter/plan_exit. *"It plans before it touches code."* |
 | **v0.6.0** | Subagent delegation — general/explore subagents, actor tool, task tree. *"It spawns helpers to explore and work in parallel."* |
 | **v0.7.0** | Goal-driven autonomy — `/goal` + independent judge model + doom-loop detection. *"It won't declare done until the goal is truly met."* |

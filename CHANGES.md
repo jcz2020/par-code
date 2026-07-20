@@ -1,5 +1,92 @@
 # CHANGES
 
+## v0.4.3 — UX quick patch: cost visibility, config inspection, memory fix
+
+> Four targeted improvements addressing daily-friction points found during
+> v0.4.2 post-release review. No new signature capability (that's v0.5.0's
+> plan mode); this release closes known UX gaps and a silent memory-quality
+> bug.
+
+### Added
+- **`/cost` slash command**: per-session token accumulator visible at any
+  time. Prints prompt/completion/total tokens, LLM call count, current
+  context size via `Par_code_context.token_estimate`, and operational
+  metrics from `Runtime.metrics_snapshot` (LLM requests, tool invocations,
+  tasks). Notes that async checkpoint/extraction calls are excluded (their
+  fiber's `metrics_accumulator` is discarded per v0.4.1 design). The
+  accumulator is a pure `cost_state` ref updated only on `Runtime.invoke`
+  Ok branches; Error branches do not accumulate.
+- **`par config show` subcommand**: prints current configuration with
+  `api_key` masked (showing only first 4 + last 4 chars, or first/last
+  char for short keys ≤ 8 chars). All 19 fields rendered; `system_prompt`
+  shows `<default>` / `<custom>` rather than the (potentially sensitive)
+  content. Backward-compatible: bare `par config` still launches the
+  wizard via Cmdliner's `~default:term_config_set`. The new `set`
+  subcommand exposes the wizard explicitly.
+- **6 new config wizard prompts**: `max_tokens`, `top_p`, `auto_extract`,
+  `checkpoint_enabled`, `checkpoint_interval`, `context_budget_tokens`.
+  Previously these fields were hardcoded to defaults at wizard exit time;
+  users had to hand-edit `~/.par/config.json` to change them.
+
+### Fixed
+- **Memory `recall` was silently dropping usage stats**: when `recall_memory`
+  searched via PAR SDK `Sqlite_memory.search`, the returned `Memory_object.t`
+  lacked `last_used_at` and `usage_count` fields (PAR SDK type limitation).
+  par-code's own `row_to_memory` (used by `list` / `render_index` /
+  `export_markdown`) reads these correctly via raw SQL, but `recall` went
+  through the PAR SDK path → `memory_of_object` conversion → fields
+  hardcoded to `None` / `0`. Now `recall` does a supplementary
+  parameterized SQL query (`fetch_usage_stats`) to fetch the real values
+  and patches the converted records via immutable update. Adversarial
+  test with `'; DROP TABLE memory_entries; --` as a memory ID passes —
+  parameterized bindings are injection-safe. This unblocks usage-count
+  visibility for the LLM (recall tool now shows accurate stats) and
+  closes a quality-of-life gap for usage-based pruning diagnostics.
+
+### Removed
+- **Dead code: `Par_code_memory.bump_usage`**: 11-line function defined
+  but never called from any production path. PAR SDK's
+  `Sqlite_memory.search_fts` already calls its own internal `bump_usage`
+  for every search result (PAR SDK `sqlite_memory.ml:363, 379`), so
+  par-code's copy was redundant. Removal is safe — search behavior
+  unchanged, all 15 memory tests pass. Public signature `.mli` updated;
+  no external consumers per grep.
+
+### Known Limitations
+- `/cost` token totals exclude async checkpoint/extraction LLM calls
+  (their fiber's `metrics_accumulator` is discarded — see v0.4.1 decision
+  `[2026-07-19] v0.4.1: async checkpoint via Eio.Fiber.fork`). Affects
+  ~5-10% undercounting in long sessions. Acceptable; the primary value
+  is the call count + context size visibility.
+- T5 fix is a par-code-side workaround for a PAR SDK limitation
+  (`Memory_object.t` lacks usage fields). Filed as PAR SDK feedback for
+  upstream addition.
+
+### Architecture
+- **Token accumulator pattern**: `cost_state` is an immutable record
+  (`{ llm_calls; prompt_tokens; completion_tokens; total_tokens }`);
+  `add_usage : cost_state -> Types.usage_stats -> cost_state` is a pure
+  function. The REPL holds `cost : cost_state ref`; only `Runtime.invoke`
+  Ok branches mutate it. The accumulator type is exported in
+  `Par_code_repl` for testability.
+- **PAR SDK feedback filed (1 item, not blocking v0.4.3)**:
+  `Memory_object.t` lacks `last_used_at : float option` and
+  `usage_count : int` fields even though (a) the DB schema has the
+  columns, (b) PAR SDK's `row_to_memory` reads them but discards
+  (underscore-prefixed), (c) `Sqlite_memory.search_fts` internally
+  bumps them via private `bump_usage`. Severity: medium (architectural
+  paper-cut; downstream consumers must do supplementary SQL fetch to
+  surface usage stats from SDK search results).
+
+### Upgrade urgency
+**Low.** All changes are additive (new command, new subcommand, new
+wizard prompts) or quality-of-life fixes (memory recall correctness).
+No breaking changes; no API removals (only dead code removal). Users
+on v0.4.2 do not need to upgrade urgently, but the `/cost` visibility
+and `par config show` are daily-use improvements worth getting.
+
+---
+
 ## v0.4.2 — Critical fix: multi-turn conversation context (PAR SDK 0.7.8)
 
 > The PAR SDK 0.7.8 bug that silently dropped assistant responses from the

@@ -1,6 +1,6 @@
 # par-code Strategy
 
-> **Last updated**: 2026-07-19 (v0.4.2)
+> **Last updated**: 2026-07-20 (v0.4.3)
 > **Status**: Active
 > **Owner**: PAR-Code Contributors
 >
@@ -175,6 +175,12 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
   silently dropped assistant responses from `conversation.messages`. Binary
   rebuild only; no par-code source changes. Multi-turn coherence + checkpoint
   quality restored.
+- **v0.4.3 ✅ shipped** — UX quick patch (no new signature capability;
+  v0.5.0 plan mode still next). Four daily-friction fixes: `/cost` REPL
+  command with per-session token accumulator, `par config show` subcommand,
+  config wizard prompts for 6 previously-hidden options, memory `recall`
+  supplementary SQL fetch to recover `usage_count`/`last_used_at` dropped by
+  PAR SDK `Memory_object.t` type limitation. Dead `bump_usage` removed.
 - v0.4.0+ — plan mode, subagents, autonomy, reasoning,
   self-improvement, compose mode, ecosystem, code intelligence, safety, polish
   → v1.0
@@ -215,6 +221,9 @@ per global rules) lives in `docs/DECISIONS.md`. Strategic-level entries:
 | 2026-07-19 | v0.4.1: PAR SDK feedback filed (3 items: Event_bus.set_session_id unlocked; last_llm_call_* non-atomic; invoke_async lacks ?save/?update_current — re-affirmed) | Active |
 | 2026-07-19 | v0.4.1 shipped — Async checkpoints + UX polish (Pillar A async, B last-N truncation, C richer /checkpoints, D confirmed no-op) | Active |
 | 2026-07-19 | v0.4.2 shipped — critical fix: PAR SDK 0.7.8 engine.ml bug silently dropped assistant messages from `conversation.messages`; multi-turn coherence + checkpoint quality restored via single-egress-wrap fix upstream | Active |
+| 2026-07-20 | v0.4.3: per-session token accumulator for `/cost` REPL command (PAR SDK `Metrics.counters` only tracks operational counts, not tokens; par-code accumulates `Types.usage_stats` from each `Runtime.invoke` Ok branch) | Active |
+| 2026-07-20 | v0.4.3: PAR SDK feedback filed — `Memory_object.t` lacks `last_used_at`/`usage_count` fields even though DB schema has the columns and `Sqlite_memory.search_fts` internally bumps them; par-code side workaround via supplementary parameterized SQL fetch in `recall` | Active |
+| 2026-07-20 | v0.4.3 shipped — UX quick patch: `/cost` + `par config show` + 6 wizard prompts + memory recall usage-field fix + dead `bump_usage` removal (63 tests, Oracle-reviewed) | Active |
 
 ## 10. Revision Protocol
 
