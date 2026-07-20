@@ -269,6 +269,38 @@ let require_config () =
       (config_path ());
     exit 1
 
+let mask_api_key key =
+  let len = String.length key in
+  if len <= 4 then "****"
+  else if len <= 8 then
+    Printf.sprintf "%c****%c" key.[0] key.[len - 1]
+  else Printf.sprintf "%s****%s"
+    (String.sub key 0 4)
+    (String.sub key (len - 4) 4)
+
+let show (cfg : config) =
+  Printf.printf "par-code configuration:\n";
+  Printf.printf "  provider:                %s\n" cfg.provider;
+  Printf.printf "  api_key:                 %s\n" (mask_api_key cfg.api_key);
+  Printf.printf "  api_base:                %s\n" (match cfg.api_base with Some s -> s | None -> "<default>");
+  Printf.printf "  model:                   %s\n" cfg.model;
+  Printf.printf "  persistence:             %s\n" cfg.persistence;
+  Printf.printf "  db_uri:                  %s\n" (match cfg.db_uri with Some s -> s | None -> "<default>");
+  Printf.printf "  temperature:             %.2f\n" cfg.temperature;
+  Printf.printf "  max_iterations:          %d\n" cfg.max_iterations;
+  Printf.printf "  max_tokens:              %s\n" (match cfg.max_tokens with Some n -> string_of_int n | None -> "<unlimited>");
+  Printf.printf "  top_p:                   %s\n" (match cfg.top_p with Some f -> Printf.sprintf "%.4f" f | None -> "<default>");
+  Printf.printf "  parallel_tool_execution: %b\n" cfg.parallel_tool_execution;
+  Printf.printf "  event_retention_days:    %.1f\n" cfg.event_retention_days;
+  Printf.printf "  auto_extract:            %b\n" cfg.auto_extract;
+  Printf.printf "  embedding_base_url:      %s\n" (match cfg.embedding_base_url with Some s -> s | None -> "<default>");
+  Printf.printf "  embedding_model:         %s\n" (match cfg.embedding_model with Some s -> s | None -> "<default>");
+  Printf.printf "  embedding_dimension:     %d\n" cfg.embedding_dimension;
+  Printf.printf "  checkpoint_enabled:      %b\n" cfg.checkpoint_enabled;
+  Printf.printf "  checkpoint_interval:     %d\n" cfg.checkpoint_interval;
+  Printf.printf "  context_budget_tokens:   %d\n" cfg.context_budget_tokens;
+  Printf.printf "  system_prompt:           %s\n" (if cfg.system_prompt = default.system_prompt then "<default>" else "<custom>")
+
 let prompt_line label default =
   let prompt = match default with
     | Some d -> Printf.sprintf "%s [%s]: " label d
@@ -330,6 +362,50 @@ let run_wizard () =
   let max_iter_str = prompt_line "Max ReAct iterations" max_iter_default in
   let max_iterations = match int_of_string_opt max_iter_str with Some n when n > 0 -> n | _ -> 50 in
 
+  Printf.printf "\n--- Advanced options ---\n%!";
+
+  let max_tokens =
+    let s = prompt_line "max_tokens (blank = unlimited)" None in
+    match s with
+    | "" -> None
+    | s -> (try Some (int_of_string s) with _ ->
+        Printf.eprintf "Invalid int, using unlimited\n%!"; None)
+  in
+
+  let top_p =
+    let s = prompt_line "top_p (blank = provider default)" None in
+    match s with
+    | "" -> None
+    | s -> (try Some (float_of_string s) with _ ->
+        Printf.eprintf "Invalid float, using default\n%!"; None)
+  in
+
+  let auto_extract =
+    Printf.printf "Enable auto memory extraction at session exit? [Y/n]: %!";
+    match input_line stdin with
+    | line when String.lowercase_ascii (String.trim line) = "n" -> false
+    | exception End_of_file -> true
+    | _ -> true
+  in
+
+  let checkpoint_enabled =
+    Printf.printf "Enable session checkpointing? [Y/n]: %!";
+    match input_line stdin with
+    | line when String.lowercase_ascii (String.trim line) = "n" -> false
+    | exception End_of_file -> true
+    | _ -> true
+  in
+
+  let checkpoint_interval =
+    let s = prompt_line "checkpoint_interval (turns, default 10)" (Some "10") in
+    (try max 1 (int_of_string s) with _ -> 10)
+  in
+
+  let context_budget_tokens =
+    let s = prompt_line "context_budget_tokens (default 100000)" (Some "100000") in
+    (try max 1000 (int_of_string s) with _ -> 100000)
+  in
+
   Printf.printf "\nEmbedding API (for semantic memory search).\n%!";
   Printf.printf "  Uses your chat provider by default. Configure separately if your\n%!";
   Printf.printf "  provider doesn't support /embeddings or uses a different dimension.\n%!";
@@ -375,12 +451,12 @@ let run_wizard () =
     provider; api_key; api_base; model;
     persistence = "sqlite"; db_uri = None;
     temperature; system_prompt = default_system_prompt; max_iterations;
-    max_tokens = None; top_p = None;
+    max_tokens; top_p;
     parallel_tool_execution = true;
     event_retention_days = 7.0;
-    auto_extract = true;
+    auto_extract;
     embedding_base_url; embedding_model; embedding_dimension;
-    checkpoint_enabled = true; checkpoint_interval = 10; context_budget_tokens = 100000;
+    checkpoint_enabled; checkpoint_interval; context_budget_tokens;
   } in
   save cfg;
   Printf.printf "\nSaved config to %s\n%!" (config_path ())

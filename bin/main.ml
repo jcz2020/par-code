@@ -70,13 +70,30 @@ let term_ask =
 
 let info_ask = Cmd.info "ask" ~doc:"Ask a single question and print the answer"
 
-let cmd_config () = Par_code_config.run_wizard ()
+let cmd_config_show () =
+  match Par_code_config.load () with
+  | Some cfg -> Par_code_config.show cfg
+  | None -> Printf.eprintf "No config found. Run `par config` to create one.\n%!"
 
-let term_config =
+let term_config_show =
   let open Term in
-  const (fun () -> cmd_config ()) $ const ()
+  const (fun () -> cmd_config_show ()) $ const ()
 
-let info_config = Cmd.info "config" ~doc:"Configure provider and model settings"
+let info_config_show = Cmd.info "show" ~doc:"Print current configuration"
+
+let cmd_config_set () = Par_code_config.run_wizard ()
+
+let term_config_set =
+  let open Term in
+  const (fun () -> cmd_config_set ()) $ const ()
+
+let info_config_set = Cmd.info "set" ~doc:"Run configuration wizard"
+
+let cmd_config_group =
+  Cmd.group ~default:term_config_set
+    (Cmd.info "config" ~doc:"Configure provider and model settings")
+    [ Cmd.v info_config_show term_config_show;
+      Cmd.v info_config_set term_config_set; ]
 
 let cmd_upgrade check_opt to_opt uninstall_opt purge_opt =
   if purge_opt && not uninstall_opt then begin
@@ -374,7 +391,7 @@ let cmd =
   Cmd.group ~default:term_chat
     (Cmd.info "par" ~version:Par_code_version.version_info
        ~doc:"Interactive coding agent built on the PAR SDK — run 'par' to start the REPL, 'par config' to configure, 'par ask \"question\"' for one-shot")
-    [ Cmd.v info_config term_config;
+    [ cmd_config_group;
       Cmd.v info_ask term_ask;
       Cmd.v info_upgrade term_upgrade;
       cmd_memory; ]
