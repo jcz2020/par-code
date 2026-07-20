@@ -341,8 +341,37 @@ let row_to_memory (stmt : Sqlite3.stmt) : memory =
     with _ -> []
   in
   let source = match source_of_string source_str with Some s -> s | None -> `Manual in
-  { id = ext_id; project_id = scope; kind; content; summary;
-    citations; created_at; updated_at; last_used_at; usage_count; source }
+    { id = ext_id; project_id = scope; kind; content; summary;
+      citations; created_at; updated_at; last_used_at; usage_count; source }
+
+(* -- fetch_usage_stats: supplementary query for recall results ------------- *)
+
+let fetch_usage_stats (db : Sqlite3.db) (ids : string list) =
+  match ids with
+  | [] -> []
+  | _ ->
+    let placeholders = String.concat ", " (List.map (fun _ -> "?") ids) in
+    let sql = Printf.sprintf
+      "SELECT ext_id, last_used_at, usage_count FROM memory_entries WHERE ext_id IN (%s)"
+      placeholders in
+    try
+      let stmt = Sqlite3.prepare db sql in
+      List.iteri (fun i id ->
+        ignore (Sqlite3.bind stmt (i + 1) (Sqlite3.Data.TEXT id))
+      ) ids;
+      let result = ref [] in
+      while Sqlite3.step stmt = Sqlite3.Rc.ROW do
+        let ext_id = Sqlite3.column_text stmt 0 in
+        let last_used =
+          if Sqlite3.column_is_null stmt 1 then None
+          else Some (Sqlite3.column_double stmt 1)
+        in
+        let usage_count = Sqlite3.column_int stmt 2 in
+        result := (ext_id, (last_used, usage_count)) :: !result
+      done;
+      ignore (Sqlite3.finalize stmt);
+      !result
+    with _ -> []
 
 let collect_rows t sql bind_fn =
   wrap_sqlite_error (fun () ->
@@ -382,7 +411,14 @@ let recall t ~project_id ~query ?(limit = 5) () =
     map_memory_error (Sqlite_memory.search t.mem
       ~scope:project_id ~limit query)
   in
-  Ok (List.map memory_of_object results)
+  let memories = List.map memory_of_object results in
+  let usage_map = fetch_usage_stats t.db (List.map (fun m -> m.id) memories) in
+  let patched = List.map (fun m ->
+    match List.assoc_opt m.id usage_map with
+    | Some (last_used, count) -> { m with last_used_at = last_used; usage_count = count }
+    | None -> m
+  ) memories in
+  Ok patched
 
 let forget t ~id =
   map_memory_error (Sqlite_memory.delete t.mem id)
@@ -397,18 +433,6 @@ let list t ~project_id ?(limit = 50) () =
     let _ = Sqlite3.bind_text stmt 1 project_id in
     let _ = Sqlite3.bind_int stmt 2 limit in
     ())
-
-let bump_usage t ~id =
-  try
-    let stmt = Sqlite3.prepare t.db
-      "UPDATE memory_entries SET usage_count = usage_count + 1, \
-       last_used_at = ? WHERE ext_id = ?" in
-    let _ = Sqlite3.bind_double stmt 1 (Unix.gettimeofday ()) in
-    let _ = Sqlite3.bind_text stmt 2 id in
-    let _ = Sqlite3.step stmt in
-    let _ = Sqlite3.finalize stmt in
-    ()
-  with _ -> ()
 
 (* -- render_index (kind-grouped, uses raw SQL for usage_count) ----------- *)
 

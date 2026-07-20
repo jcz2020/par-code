@@ -161,18 +161,13 @@ let project_isolation () =
     | Ok _  -> Alcotest.fail "beta list wrong count"
     | Error (`Db_error msg) -> failf "list beta: %s" msg)
 
-let bump_usage_increments () =
-  with_temp_db (fun ~tmpdir:_ db ->
-    let project_id = "test-project" in
-    let id = add_mem db ~project_id ~kind:Preference
-               ~content:"prefer dark mode" ~summary:"dark mode" in
-    Par_code_memory.bump_usage db ~id;
-    Par_code_memory.bump_usage db ~id;
-    match Par_code_memory.list db ~project_id () with
-    | Ok [m] ->
-      Alcotest.(check int) "usage_count = 2" 2 m.Par_code_memory.usage_count
-    | Ok _  -> Alcotest.fail "list returned wrong count"
-    | Error (`Db_error msg) -> failf "list failed: %s" msg)
+let set_usage_count raw ~id ~count =
+  let stmt = Sqlite3.prepare raw
+    "UPDATE memory_entries SET usage_count = ? WHERE ext_id = ?" in
+  ignore (Sqlite3.bind stmt 1 (Sqlite3.Data.INT (Int64.of_int count)));
+  ignore (Sqlite3.bind_text stmt 2 id);
+  ignore (Sqlite3.step stmt);
+  ignore (Sqlite3.finalize stmt)
 
 let prune_stale_semantics () =
   with_temp_db (fun ~tmpdir db ->
@@ -181,7 +176,9 @@ let prune_stale_semantics () =
                  ~content:"old unused memory" ~summary:"old unused" in
     let id_b = add_mem db ~project_id ~kind:Gotcha
                  ~content:"old used memory" ~summary:"old used" in
-    Par_code_memory.bump_usage db ~id:id_b;
+    let raw = open_raw_db tmpdir in
+    set_usage_count raw ~id:id_b ~count:5;
+    ignore (Sqlite3.db_close raw);
     let _id_c = add_mem db ~project_id ~kind:Gotcha
                   ~content:"recent unused memory" ~summary:"recent unused" in
     let old_ts = Unix.gettimeofday () -. (10.0 *. 86400.0) in
@@ -324,6 +321,58 @@ let search_history_empty_db () =
     | Ok _  -> Alcotest.fail "search_history returned results on empty db"
     | Error (`Db_error msg) -> failf "search_history: %s" msg)
 
+let test_recall_returns_usage_fields () =
+  with_temp_db (fun ~tmpdir:_ db ->
+    let project_id = "test-project" in
+    let id = add_mem db ~project_id ~kind:Insight
+               ~content:"recall usage test memory" ~summary:"usage recall test" in
+    let raw = Par_code_memory.raw_db db in
+    set_usage_count raw ~id ~count:7;
+    let set_ts = Sqlite3.prepare raw
+      "UPDATE memory_entries SET last_used_at = ? WHERE ext_id = ?" in
+    ignore (Sqlite3.bind_double set_ts 1 1234567890.0);
+    ignore (Sqlite3.bind_text set_ts 2 id);
+    ignore (Sqlite3.step set_ts);
+    ignore (Sqlite3.finalize set_ts);
+    match Par_code_memory.recall db ~project_id ~query:"recall usage" () with
+    | Ok [m] ->
+      Alcotest.(check bool) "usage_count > 0" true (m.Par_code_memory.usage_count > 0);
+      (match m.Par_code_memory.last_used_at with
+       | Some ts -> Alcotest.(check bool) "last_used_at set" true (ts > 0.0)
+       | None -> Alcotest.fail "last_used_at is None after recall")
+    | Ok _  -> Alcotest.fail "recall returned wrong count"
+    | Error (`Db_error msg) -> failf "recall failed: %s" msg)
+
+let test_recall_safe_with_sql_metachar_ids () =
+  with_temp_db (fun ~tmpdir:_ db ->
+    let project_id = "test-project" in
+    let id = add_mem db ~project_id ~kind:Gotcha
+               ~content:"adversarial id test memory" ~summary:"adversarial test" in
+    let raw = Par_code_memory.raw_db db in
+    let adversarial_id = "'; DROP TABLE memory_entries; --" in
+    let stmt = Sqlite3.prepare raw
+      "UPDATE memory_entries SET ext_id = ? WHERE ext_id = ?" in
+    ignore (Sqlite3.bind_text stmt 1 adversarial_id);
+    ignore (Sqlite3.bind_text stmt 2 id);
+    ignore (Sqlite3.step stmt);
+    ignore (Sqlite3.finalize stmt);
+    let set_ts = Sqlite3.prepare raw
+      "UPDATE memory_entries SET last_used_at = ?, usage_count = ? WHERE ext_id = ?" in
+    ignore (Sqlite3.bind_double set_ts 1 9999999.0);
+    ignore (Sqlite3.bind set_ts 2 (Sqlite3.Data.INT 42L));
+    ignore (Sqlite3.bind_text set_ts 3 adversarial_id);
+    ignore (Sqlite3.step set_ts);
+    ignore (Sqlite3.finalize set_ts);
+    match Par_code_memory.recall db ~project_id ~query:"adversarial id" () with
+    | Ok [m] ->
+      Alcotest.(check string) "id preserved" adversarial_id m.Par_code_memory.id;
+      Alcotest.(check bool) "usage_count > 0" true (m.Par_code_memory.usage_count > 0);
+      (match m.Par_code_memory.last_used_at with
+       | Some ts -> Alcotest.(check bool) "last_used_at set" true (ts > 0.0)
+       | None -> Alcotest.fail "last_used_at is None")
+    | Ok _  -> Alcotest.fail "recall returned wrong count"
+    | Error (`Db_error msg) -> failf "recall with metachar id failed: %s" msg)
+
 let test_raw_db () =
   with_temp_db (fun ~tmpdir:_ db ->
     let raw = Par_code_memory.raw_db db in
@@ -340,7 +389,6 @@ let () =
         Alcotest.test_case "recall_limit"   `Quick recall_respects_limit;
       ];
       "isolation", [ Alcotest.test_case "project" `Quick project_isolation ];
-      "usage",     [ Alcotest.test_case "bump"    `Quick bump_usage_increments ];
       "prune",     [ Alcotest.test_case "stale_semantics" `Quick prune_stale_semantics ];
       "render",    [ Alcotest.test_case "line_cap" `Quick render_index_line_cap ];
       "raw_db",    [ Alcotest.test_case "accessor" `Quick test_raw_db ];
@@ -350,5 +398,9 @@ let () =
         Alcotest.test_case "respects_limit"          `Quick search_history_respects_limit;
         Alcotest.test_case "fts_backfill"            `Quick conversations_fts_backfill;
         Alcotest.test_case "empty_db"                `Quick search_history_empty_db;
+      ];
+      "recall_usage", [
+        Alcotest.test_case "returns_usage_fields"    `Quick test_recall_returns_usage_fields;
+        Alcotest.test_case "safe_with_metachar_ids"  `Quick test_recall_safe_with_sql_metachar_ids;
       ];
     ]

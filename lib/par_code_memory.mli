@@ -47,8 +47,6 @@ val list : t -> project_id:string -> ?limit:int -> unit ->
 val recall : t -> project_id:string -> query:string -> ?limit:int -> unit ->
              (memory list, [> `Db_error of string]) result
 
-val bump_usage : t -> id:string -> unit
-
 val render_index : t -> project_id:string -> string
 
 val export_markdown : t -> project_id:string -> string
