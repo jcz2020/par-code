@@ -474,6 +474,7 @@ let maybe_check_version () =
     end
 
 let () =
+  Mirage_crypto_rng_unix.use_default ();
   if not (Unix.isatty Unix.stdout) then Unix.putenv "TERM" "dumb";
   maybe_check_version ();
   exit (Cmd.eval cmd)
