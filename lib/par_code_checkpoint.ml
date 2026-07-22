@@ -1,5 +1,8 @@
 open Par
 
+let ui_error msg = Par_code_ui.render_error (Par_code_ui.create_backend ()) msg
+let ui_notice msg = Par_code_ui.render_notice (Par_code_ui.create_backend ()) msg
+
 let checkpoint_writer_agent_id = "checkpoint-writer"
 
 (* v0.4.1 Pillar B: keep the LAST n chars of a long transcript, not the first.
@@ -91,8 +94,8 @@ let create_schema db =
   List.iter (fun sql ->
     try ignore (Sqlite3.exec db sql)
     with
-    | Sqlite3.Error msg -> Printf.eprintf "[checkpoint schema: %s]\n%!" msg
-    | Sqlite3.SqliteError msg -> Printf.eprintf "[checkpoint schema: %s]\n%!" msg
+    | Sqlite3.Error msg -> ui_error (Printf.sprintf "[checkpoint schema: %s]" msg)
+    | Sqlite3.SqliteError msg -> ui_error (Printf.sprintf "[checkpoint schema: %s]" msg)
   ) stmts
 
 let extract_text_from_blocks (blocks : Types.content_block list) : string =
@@ -368,11 +371,11 @@ let run_checkpoint ~rt mem_db ~session_id ~project_id conv ~turn_number =
             ~message:transcript ()
     with
     | Error (err, _) ->
-      Printf.eprintf "[checkpoint failed: %s]\n%!" (error_to_string err)
+      ui_error (Printf.sprintf "[checkpoint failed: %s]" (error_to_string err))
     | Ok result ->
       (match parse_checkpoint_response result.Types.text with
        | None ->
-         Printf.eprintf "[checkpoint failed: unparseable JSON]\n%!"
+          ui_error "[checkpoint failed: unparseable JSON]"
        | Some entry ->
          let entry =
            { entry with turn_number; timestamp = Unix.gettimeofday () }
@@ -382,11 +385,11 @@ let run_checkpoint ~rt mem_db ~session_id ~project_id conv ~turn_number =
             so both trigger extraction here. No separate wiring needed. *)
          (match store_checkpoint mem_db ~session_id ~project_id entry with
           | Ok () ->
-            Printf.eprintf "[checkpoint stored at turn %d]\n%!" turn_number;
+            ui_notice (Printf.sprintf "[checkpoint stored at turn %d]" turn_number);
             Par_code_extractor.run_extraction rt mem_db
               ~project_id conv
           | Error (`Db_error e) ->
-            Printf.eprintf "[checkpoint store failed: %s]\n%!" e))
+            ui_error (Printf.sprintf "[checkpoint store failed: %s]" e)))
 
 let maybe_checkpoint ~rt mem_db ~in_flight ~session_id ~project_id conv
     ~turn_number ~enabled ~interval =
@@ -432,7 +435,7 @@ let maybe_checkpoint ~rt mem_db ~in_flight ~session_id ~project_id conv
         with exn ->
           (* Body raised (network, cancellation, PAR SDK exn). in_flight was
              reset by finally; log and let the fiber die quietly. *)
-          Printf.eprintf "[checkpoint crashed: %s]\n%!" (Printexc.to_string exn))
+          ui_error (Printf.sprintf "[checkpoint crashed: %s]" (Printexc.to_string exn)))
     in
     (* Caveat 5: do NOT await the fiber — fire-and-forget. Awaiting would
        re-introduce the synchronous stall v0.4.1 eliminates. The unit-typed

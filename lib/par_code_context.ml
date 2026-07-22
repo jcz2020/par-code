@@ -9,6 +9,8 @@
 
 open Par.Types
 
+let ui_notice msg = Par_code_ui.render_notice (Par_code_ui.create_backend ()) msg
+
 (* -------------------------------------------------------------------------- *)
 (* Token estimation                                                          *)
 (* -------------------------------------------------------------------------- *)
@@ -95,5 +97,5 @@ let compact (conv : conversation) ~budget_tokens ~summary
       { conv with messages = first :: summary_msg :: recent }
 
 let compaction_notice ~turn ~before_tokens ~after_tokens : unit =
-  Printf.eprintf "[context compacted at turn %d — ~%dk → ~%dk tokens]\n%!"
-    turn (before_tokens / 1000) (after_tokens / 1000)
+  ui_notice (Printf.sprintf "[context compacted at turn %d — ~%dk → ~%dk tokens]"
+    turn (before_tokens / 1000) (after_tokens / 1000))

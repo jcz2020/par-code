@@ -9,6 +9,12 @@
 
 open Par
 
+let ui = lazy (Par_code_ui.create_backend ())
+let ui_render_error msg = Par_code_ui.render_error (Lazy.force ui) msg
+let ui_render_warning msg = Par_code_ui.render_warning (Lazy.force ui) msg
+let ui_render_notice msg = Par_code_ui.render_notice (Lazy.force ui) msg
+let ui_render msg = Par_code_ui.render (Lazy.force ui) msg
+
 let error_to_string (e : Types.error_category) =
   match e with
   | Types.Timeout -> "Timeout"
@@ -26,7 +32,7 @@ let make_persistence_service (cfg : Par_code_config.config) =
   let retention = cfg.Par_code_config.event_retention_days *. 24. *. 60. *. 60. in
   match Sqlite_persistence.create ~retention_ttl:retention path with
   | Error e ->
-    Printf.eprintf "Error opening SQLite database (%s): %s\n%!" path (error_to_string e);
+    ui_render_error (Printf.sprintf "Error opening SQLite database (%s): %s" path (error_to_string e));
     exit 1
   | Ok t ->
     { Types.
@@ -55,7 +61,7 @@ let make_llm_service (tag : Par_code_config.provider_tag) api_key api_base
     let cfg = Openai { api_key; base_url; organization = None; embedding_model = None; prompt_cache_key = None } in
     match Openai_provider.create cfg with
     | Error e ->
-      Printf.eprintf "Error creating OpenAI provider: %s\n%!" (error_to_string e);
+      ui_render_error (Printf.sprintf "Error creating OpenAI provider: %s" (error_to_string e));
       exit 1
     | Ok t ->
       Openai_provider.set_network t net_gen;
@@ -74,14 +80,14 @@ let make_llm_service (tag : Par_code_config.provider_tag) api_key api_base
   | `Custom _ ->
     (match api_base with
      | None ->
-       Printf.eprintf "Error: custom provider requires --api-base\n%!";
+       ui_render_error "Error: custom provider requires --api-base";
        exit 1
      | _ -> wrap_openai ())
   | `Anthropic ->
     let cfg = Anthropic { api_key; base_url = api_base } in
     (match Anthropic_provider.create cfg with
      | Error e ->
-       Printf.eprintf "Error creating Anthropic provider: %s\n%!" (error_to_string e);
+       ui_render_error (Printf.sprintf "Error creating Anthropic provider: %s" (error_to_string e));
        exit 1
      | Ok t ->
        Anthropic_provider.set_network t net_gen;
@@ -104,7 +110,7 @@ let make_embedding_service (tag : Par_code_config.provider_tag) api_key api_base
     { embed_fn = (fun _msgs -> Error Embedding_unsupported);
       close_fn = ignore }
   | `Custom _ ->
-    Printf.eprintf "Error: custom provider embeddings not supported\n%!";
+    ui_render_error "Error: custom provider embeddings not supported";
     exit 1
   | (`Openai | `Ollama) as t ->
     let base_url =
@@ -116,7 +122,7 @@ let make_embedding_service (tag : Par_code_config.provider_tag) api_key api_base
                        embedding_model; prompt_cache_key = None } in
     (match Openai_provider.create cfg with
      | Error e ->
-       Printf.eprintf "Error creating embedding provider: %s\n%!" (error_to_string e);
+       ui_render_error (Printf.sprintf "Error creating embedding provider: %s" (error_to_string e));
        exit 1
      | Ok t ->
        Openai_provider.set_network t net_gen;
@@ -155,7 +161,7 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
       net in
   match Runtime.create ~persistence:pers ~llm ~embeddings ~config:runtime_config switch with
   | Error e ->
-    Printf.eprintf "Error creating runtime: %s\n%!" (error_to_string e);
+    ui_render_error (Printf.sprintf "Error creating runtime: %s" (error_to_string e));
     exit 1
   | Ok rt ->
     (* Open the memory database for project memory (v0.3.0). *)
@@ -171,7 +177,7 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
     let mem_db = match Par_code_memory.open_db ?embedding_fn:memory_embedding_fn ~dimension:cfg.Par_code_config.embedding_dimension () with
       | Ok t -> Some t
       | Error (`Db_error msg) ->
-        Printf.eprintf "Warning: memory DB unavailable: %s\n%!" msg;
+        ui_render_warning (Printf.sprintf "Warning: memory DB unavailable: %s" msg);
         None
     in
     (match mem_db with
@@ -190,8 +196,8 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
          () with
        | Ok _ -> ()
        | Error e ->
-         Printf.eprintf "Failed to register tool %s: %s\n%!"
-           tb.descriptor.Types.name (error_to_string e);
+         ui_render_error (Printf.sprintf "Failed to register tool %s: %s"
+           tb.descriptor.Types.name (error_to_string e));
          exit 1)
     ) tools;
     let descriptors = ref (List.map (fun (tb : Types.tool_binding) -> tb.descriptor) tools) in
@@ -210,8 +216,8 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
             () with
           | Ok _ -> ()
           | Error e ->
-            Printf.eprintf "Warning: failed to register memory tool %s: %s\n%!"
-              tb.descriptor.Types.name (error_to_string e))
+            ui_render_warning (Printf.sprintf "Warning: failed to register memory tool %s: %s"
+              tb.descriptor.Types.name (error_to_string e)))
        ) mem_tools;
        let mem_descriptors = List.map (fun (tb : Types.tool_binding) -> tb.descriptor) mem_tools in
        descriptors := mem_descriptors @ !descriptors
@@ -223,7 +229,7 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
        rt with
      | Ok _ -> ()
      | Error e ->
-       Printf.eprintf "Warning: bash tool not installed: %s\n%!" (error_to_string e));
+       ui_render_warning (Printf.sprintf "Warning: bash tool not installed: %s" (error_to_string e)));
     let model_cfg = Par_code_config.to_model_config cfg in
     let base_prompt = cfg.Par_code_config.system_prompt in
     (match Runtime.make_agent
@@ -234,12 +240,12 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
        ~max_iterations:cfg.Par_code_config.max_iterations
        () with
      | Error e ->
-       Printf.eprintf "Agent validation failed: %s\n%!" (error_to_string e);
+       ui_render_error (Printf.sprintf "Agent validation failed: %s" (error_to_string e));
        exit 1
      | Ok agent ->
        (match Runtime.register_agent rt agent with
         | Error e ->
-          Printf.eprintf "Error registering agent: %s\n%!" (error_to_string e);
+          ui_render_error (Printf.sprintf "Error registering agent: %s" (error_to_string e));
           exit 1
          | Ok () -> ()));
     (* Register the memory-extractor agent (v0.3.1). Tools=[] — pure generation. *)
@@ -251,10 +257,10 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
        ~max_iterations:1
        () with
      | Error e ->
-       Printf.eprintf "Warning: extractor agent not registered: %s\n%!" (error_to_string e)
+       ui_render_warning (Printf.sprintf "Warning: extractor agent not registered: %s" (error_to_string e))
         | Ok extractor ->
         (match Runtime.register_agent rt extractor with
-         | Error e -> Printf.eprintf "Warning: extractor agent registration failed: %s\n%!" (error_to_string e)
+         | Error e -> ui_render_warning (Printf.sprintf "Warning: extractor agent registration failed: %s" (error_to_string e))
          | Ok () -> ()));
     (match Runtime.make_agent
        ~id:Par_code_checkpoint.checkpoint_writer_agent_id
@@ -264,10 +270,10 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
        ~max_iterations:1
        () with
     | Error e ->
-      Printf.eprintf "Warning: checkpoint-writer agent not registered: %s\n%!" (error_to_string e)
+      ui_render_warning (Printf.sprintf "Warning: checkpoint-writer agent not registered: %s" (error_to_string e))
     | Ok ckpt_agent ->
       (match Runtime.register_agent rt ckpt_agent with
-       | Error e -> Printf.eprintf "Warning: checkpoint-writer agent registration failed: %s\n%!" (error_to_string e)
+       | Error e -> ui_render_warning (Printf.sprintf "Warning: checkpoint-writer agent registration failed: %s" (error_to_string e))
        | Ok () -> ()));
     Runtime.set_tool_description_overrides rt [
       "bash", "Execute a system command (e.g. git, npm, docker, make, systemctl). \
@@ -314,8 +320,7 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
            in
            if is_safe then true
            else begin
-             Printf.eprintf "\n⚠ bash: %s [y/N] " full_cmd;
-             flush stderr;
+             ui_render (Par_code_ui.textf ~style:(Par_code_ui.style ~fg:Yellow ~bold:true ()) "\n⚠ bash: %s [y/N] " full_cmd);
              match input_line stdin with
              | line when String.lowercase_ascii (String.trim line) = "y" -> true
              | exception _ -> false
@@ -323,7 +328,7 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
            end)) Runtime.default_bash_confirm);
     Runtime.register_tool_call_hook rt
       (fun (ctx : Hook.tool_call_context) ->
-        Printf.eprintf "  [%s]\n%!" ctx.Hook.tool_name;
+        ui_render_notice (Printf.sprintf "  [%s]" ctx.Hook.tool_name);
         Hook.Allow);
     List.iter (fun (desc : Types.skill_descriptor) ->
       ignore (Runtime.register_skill rt desc : (Types.skill_binding, _) result)

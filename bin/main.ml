@@ -1,5 +1,7 @@
 open Cmdliner
 
+let ui = Par_code_ui.create_backend ()
+
 let cmd_chat
     provider_opt api_key_opt api_base_opt model_opt
     persistence_opt db_uri_opt temp_opt prompt_opt max_iter_opt
@@ -52,7 +54,7 @@ let cmd_ask
       ()
   in
   if question = "" then begin
-    Printf.eprintf "Usage: par ask <question>\n%!";
+    Par_code_ui.render_error ui "Usage: par ask <question>";
     exit 1
   end;
   Par_code_setup.setup_runtime cfg ~f:(fun rt mem_db ->
@@ -73,7 +75,8 @@ let info_ask = Cmd.info "ask" ~doc:"Ask a single question and print the answer"
 let cmd_config_show () =
   match Par_code_config.load () with
   | Some cfg -> Par_code_config.show cfg
-  | None -> Printf.eprintf "No config found. Run `par config` to create one.\n%!"
+  | None ->
+    Par_code_ui.render_notice ui "No config found. Run `par config` to create one."
 
 let term_config_show =
   let open Term in
@@ -97,19 +100,31 @@ let cmd_config_group =
 
 let cmd_upgrade check_opt to_opt uninstall_opt purge_opt =
   if purge_opt && not uninstall_opt then begin
-    Printf.eprintf "Error: --purge requires --uninstall\n%!";
+    Par_code_ui.render_error ui "--purge requires --uninstall";
     exit 2
   end;
   if uninstall_opt then begin
     let dir = Par_code_config.config_dir () in
     if purge_opt then begin
       if Unix.isatty Unix.stdin then begin
-        Printf.eprintf "This will delete ALL of %s including config and sessions. Continue? [y/N] " dir;
-        match String.lowercase_ascii (String.trim (input_line stdin)) with
+        let prompt =
+          Par_code_ui.textf
+            "This will delete ALL of %s including config and sessions. Continue? [y/N] "
+            dir
+        in
+        let answer =
+          match Par_code_ui.read_line ui ~prompt with
+          | Some s -> String.lowercase_ascii (String.trim s)
+          | None -> ""
+        in
+        match answer with
         | "y" | "yes" -> ()
-        | _ -> Printf.eprintf "Aborted.\n%!"; exit 1
+        | _ ->
+          Par_code_ui.render_notice ui "Aborted.";
+          exit 1
       end else begin
-        Printf.eprintf "Error: --purge requires interactive terminal (stdin must be a tty)\n%!";
+        Par_code_ui.render_error ui
+          "--purge requires interactive terminal (stdin must be a tty)";
         exit 2
       end
     end;
@@ -126,26 +141,36 @@ let cmd_upgrade check_opt to_opt uninstall_opt purge_opt =
           end else Sys.remove p
       in rm_rf dir
     end;
-    Printf.printf "Uninstalled.\n%!"; exit 0
+    Par_code_ui.render_success ui "Uninstalled.";
+    exit 0
   end;
   if check_opt then begin
     let cur = Par_code_upgrade.current_version () in
     (match Par_code_upgrade.fetch_latest_tag ~timeout:2.0 () with
      | Error `Offline ->
-       Printf.printf "current: %s\noffline — could not check latest\n%!" cur;
+       Par_code_ui.render_notice ui (Printf.sprintf "current: %s" cur);
+       Par_code_ui.render_notice ui "offline — could not check latest";
        exit 1
      | Error (`Http msg) ->
-       Printf.eprintf "Error checking latest: %s\n%!" msg;
+       Par_code_ui.render_error ui (Printf.sprintf "Error checking latest: %s" msg);
        exit 1
      | Ok latest ->
-       Printf.printf "current: %s\nlatest:  %s\n%!" cur latest;
+       Par_code_ui.render_notice ui (Printf.sprintf "current: %s" cur);
+       Par_code_ui.render_notice ui (Printf.sprintf "latest:  %s" latest);
        exit (if cur = latest then 0 else 1))
   end;
   match Par_code_upgrade.perform_upgrade ?target:to_opt () with
-  | Ok new_ver -> Printf.printf "Upgraded to %s\n%!" new_ver
-  | Error (`Download_failed msg) -> Printf.eprintf "Upgrade failed (download): %s\n%!" msg; exit 1
-  | Error `Checksum_mismatch -> Printf.eprintf "Upgrade failed: checksum mismatch\n%!"; exit 1
-  | Error (`Smoke_test_failed msg) -> Printf.eprintf "Upgrade failed (smoke test): %s\n%!" msg; exit 1
+  | Ok new_ver ->
+    Par_code_ui.render_success ui (Printf.sprintf "Upgraded to %s" new_ver)
+  | Error (`Download_failed msg) ->
+    Par_code_ui.render_error ui (Printf.sprintf "Upgrade failed (download): %s" msg);
+    exit 1
+  | Error `Checksum_mismatch ->
+    Par_code_ui.render_error ui "Upgrade failed: checksum mismatch";
+    exit 1
+  | Error (`Smoke_test_failed msg) ->
+    Par_code_ui.render_error ui (Printf.sprintf "Upgrade failed (smoke test): %s" msg);
+    exit 1
 
 let term_upgrade =
   let open Term in
@@ -167,7 +192,7 @@ let parse_kind = function
 let with_memory_db f =
   match Par_code_memory.open_db () with
   | Error (`Db_error msg) ->
-    Printf.eprintf "Error opening memory database: %s\n%!" msg;
+    Par_code_ui.render_error ui (Printf.sprintf "Error opening memory database: %s" msg);
     exit 1
   | Ok mem_db ->
     Fun.protect ~finally:(fun () -> Par_code_memory.close mem_db) (fun () -> f mem_db)
@@ -184,30 +209,35 @@ let format_timestamp ts =
   Printf.sprintf "%04d-%02d-%02d"
     (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
 
-let print_memory_header () =
-  Printf.printf "%-12s %-12s %-40s %s\n" "ID" "KIND" "SUMMARY" "UPDATED";
-  Printf.printf "%s\n" (String.make 75 '-')
+let truncate_summary s =
+  if String.length s > 40
+  then String.sub s 0 37 ^ "..."
+  else s
 
-let print_memory_row (m : Par_code_memory.memory) =
-  let short_id = String.sub m.id 0 (min 8 (String.length m.id)) in
-  let summary = if String.length m.summary > 40
-    then String.sub m.summary 0 37 ^ "..."
-    else m.summary in
-  Printf.printf "%-12s %-12s %-40s %s\n"
-    short_id (format_kind m.kind) summary (format_timestamp m.updated_at)
+let render_memory_table (memories : Par_code_memory.memory list) =
+  let rows =
+    List.map (fun (m : Par_code_memory.memory) ->
+      [ String.sub m.id 0 (min 8 (String.length m.id));
+        format_kind m.kind;
+        truncate_summary m.summary;
+        format_timestamp m.updated_at ]
+    ) memories
+  in
+  Par_code_ui.render_table ui
+    ~headers:["ID"; "KIND"; "SUMMARY"; "UPDATED"]
+    ~rows
 
 let cmd_memory_list limit =
   with_memory_db (fun mem_db ->
     let project_id = Par_code_memory.resolve_project_id () in
     match Par_code_memory.list mem_db ~project_id ~limit () with
     | Error (`Db_error msg) ->
-      Printf.eprintf "Error listing memories: %s\n%!" msg;
+      Par_code_ui.render_error ui (Printf.sprintf "Error listing memories: %s" msg);
       exit 1
     | Ok [] ->
-      Printf.printf "No memories found for this project.\n%!";
+      Par_code_ui.render_notice ui "No memories found for this project."
     | Ok memories ->
-      print_memory_header ();
-      List.iter print_memory_row memories)
+      render_memory_table memories)
 
 let cmd_memory_list_term =
   let open Term in
@@ -218,23 +248,25 @@ let info_memory_list = Cmd.info "list" ~doc:"List all memories for this project"
 let cmd_memory_add kind_str_opt summary_opt content_opt =
   match kind_str_opt, summary_opt, content_opt with
   | None, _, _ | _, None, _ | _, _, None ->
-    Printf.eprintf "Error: --kind, --summary, and --content are all required\n%!";
+    Par_code_ui.render_error ui
+      "--kind, --summary, and --content are all required";
     exit 1
   | Some kind_str, Some summary, Some content ->
-    match parse_kind kind_str with
-    | Error msg ->
-      Printf.eprintf "Error: %s\n%!" msg;
-      exit 1
-    | Ok kind ->
-      with_memory_db (fun mem_db ->
-        let project_id = Par_code_memory.resolve_project_id () in
-        match Par_code_memory.add mem_db ~project_id ~kind ~content ~summary
-                ~citations:[] ~source:`Manual with
-        | Error (`Db_error msg) ->
-          Printf.eprintf "Error adding memory: %s\n%!" msg;
-          exit 1
-        | Ok id ->
-          Printf.printf "Added memory #%s\n%!" id)
+    (match parse_kind kind_str with
+     | Error msg ->
+       Par_code_ui.render_error ui msg;
+       exit 1
+     | Ok kind ->
+       with_memory_db (fun mem_db ->
+         let project_id = Par_code_memory.resolve_project_id () in
+         match Par_code_memory.add mem_db ~project_id ~kind ~content ~summary
+                 ~citations:[] ~source:`Manual with
+         | Error (`Db_error msg) ->
+           Par_code_ui.render_error ui
+             (Printf.sprintf "Error adding memory: %s" msg);
+           exit 1
+         | Ok id ->
+           Par_code_ui.render_success ui (Printf.sprintf "Added memory #%s" id)))
 
 let cmd_memory_add_term =
   let open Term in
@@ -248,10 +280,10 @@ let cmd_memory_forget id =
   with_memory_db (fun mem_db ->
     match Par_code_memory.forget mem_db ~id with
     | Error (`Db_error msg) ->
-      Printf.eprintf "Error forgetting memory: %s\n%!" msg;
+      Par_code_ui.render_error ui (Printf.sprintf "Error forgetting memory: %s" msg);
       exit 1
     | Ok () ->
-      Printf.printf "Forgot memory #%s\n%!" id)
+      Par_code_ui.render_success ui (Printf.sprintf "Forgot memory #%s" id))
 
 let cmd_memory_forget_term =
   let open Term in
@@ -264,29 +296,45 @@ let cmd_memory_show id =
     let project_id = Par_code_memory.resolve_project_id () in
     match Par_code_memory.list mem_db ~project_id ~limit:10000 () with
     | Error (`Db_error msg) ->
-      Printf.eprintf "Error listing memories: %s\n%!" msg;
+      Par_code_ui.render_error ui (Printf.sprintf "Error listing memories: %s" msg);
       exit 1
     | Ok memories ->
-      match List.find_opt (fun (m : Par_code_memory.memory) -> m.id = id) memories with
-      | None ->
-        Printf.eprintf "Error: memory #%s not found\n%!" id;
-        exit 1
-      | Some m ->
-        Printf.printf "ID:         %s\n" m.id;
-        Printf.printf "Kind:       %s\n" (format_kind m.kind);
-        Printf.printf "Summary:    %s\n" m.summary;
-        Printf.printf "Content:    %s\n" m.content;
-        (match m.citations with
-         | [] -> ()
-         | cits -> Printf.printf "Citations:  %s\n" (String.concat ", " cits));
-        Printf.printf "Created:    %s\n" (format_timestamp m.created_at);
-        Printf.printf "Updated:    %s\n" (format_timestamp m.updated_at);
-        (match m.last_used_at with
-         | None -> ()
-         | Some ts -> Printf.printf "Last used:  %s\n" (format_timestamp ts));
-        Printf.printf "Used:       %d times\n" m.usage_count;
-        Printf.printf "Source:     %s\n%!"
-          (match m.source with `Manual -> "manual" | `Agent -> "agent" | `Import -> "import"))
+      (match List.find_opt (fun (m : Par_code_memory.memory) -> m.id = id) memories with
+       | None ->
+         Par_code_ui.render_error ui (Printf.sprintf "memory #%s not found" id);
+         exit 1
+       | Some m ->
+         let citations_line =
+           match m.citations with
+           | [] -> []
+           | cits -> [ Par_code_ui.textf "Citations:  %s" (String.concat ", " cits) ]
+         in
+         let last_used_line =
+           match m.last_used_at with
+           | None -> []
+           | Some ts -> [ Par_code_ui.textf "Last used:  %s" (format_timestamp ts) ]
+         in
+         let source_str =
+           match m.source with
+           | `Manual -> "manual"
+           | `Agent -> "agent"
+           | `Import -> "import"
+         in
+         let image =
+           Par_code_ui.vcat (
+             [ Par_code_ui.textf "ID:         %s" m.id;
+               Par_code_ui.textf "Kind:       %s" (format_kind m.kind);
+               Par_code_ui.textf "Summary:    %s" m.summary;
+               Par_code_ui.textf "Content:    %s" m.content ]
+             @ citations_line
+             @ [ Par_code_ui.textf "Created:    %s" (format_timestamp m.created_at);
+                 Par_code_ui.textf "Updated:    %s" (format_timestamp m.updated_at) ]
+             @ last_used_line
+             @ [ Par_code_ui.textf "Used:       %d times" m.usage_count;
+                 Par_code_ui.textf "Source:     %s" source_str ]
+           )
+         in
+         Par_code_ui.render_line ui image))
 
 let cmd_memory_show_term =
   let open Term in
@@ -299,14 +347,14 @@ let cmd_memory_export output =
     let project_id = Par_code_memory.resolve_project_id () in
     let md = Par_code_memory.export_markdown mem_db ~project_id in
     if md = "" then
-      Printf.printf "No memories to export.\n%!"
+      Par_code_ui.render_notice ui "No memories to export."
     else if output = "stdout" then
-      Printf.printf "%s%!" md
+      Par_code_ui.render ui (Par_code_ui.text md)
     else begin
       let oc = open_out output in
       output_string oc md;
       close_out oc;
-      Printf.printf "Exported to %s\n%!" output
+      Par_code_ui.render_success ui (Printf.sprintf "Exported to %s" output)
     end)
 
 let cmd_memory_export_term =
@@ -320,10 +368,10 @@ let cmd_memory_prune older_than_days =
     let project_id = Par_code_memory.resolve_project_id () in
     match Par_code_memory.prune_stale mem_db ~project_id ~older_than_days with
     | Error (`Db_error msg) ->
-      Printf.eprintf "Error pruning memories: %s\n%!" msg;
+      Par_code_ui.render_error ui (Printf.sprintf "Error pruning memories: %s" msg);
       exit 1
     | Ok count ->
-      Printf.printf "Pruned %d stale memories\n%!" count)
+      Par_code_ui.render_notice ui (Printf.sprintf "Pruned %d stale memories" count))
 
 let cmd_memory_prune_term =
   let open Term in
@@ -336,13 +384,12 @@ let cmd_memory_search query =
     let project_id = Par_code_memory.resolve_project_id () in
     match Par_code_memory.recall mem_db ~project_id ~query ~limit:10 () with
     | Error (`Db_error msg) ->
-      Printf.eprintf "Error searching memories: %s\n%!" msg;
+      Par_code_ui.render_error ui (Printf.sprintf "Error searching memories: %s" msg);
       exit 1
     | Ok [] ->
-      Printf.printf "No memories matched your query.\n%!";
+      Par_code_ui.render_notice ui "No memories matched your query."
     | Ok memories ->
-      print_memory_header ();
-      List.iter print_memory_row memories)
+      render_memory_table memories)
 
 let cmd_memory_search_term =
   let open Term in
@@ -354,20 +401,22 @@ let cmd_memory_search_history query =
   with_memory_db (fun mem_db ->
     match Par_code_memory.search_history mem_db ~query ~limit:10 () with
     | Error (`Db_error msg) ->
-      Printf.eprintf "Error searching history: %s\n%!" msg;
+      Par_code_ui.render_error ui (Printf.sprintf "Error searching history: %s" msg);
       exit 1
     | Ok [] ->
-      Printf.printf "No history matched your query.\n%!";
+      Par_code_ui.render_notice ui "No history matched your query."
     | Ok hits ->
-      Printf.printf "%-24s %-40s %-10s %s\n" "SESSION_ID" "SNIPPET" "UPDATED" "TURNS";
-      Printf.printf "%s\n" (String.make 90 '-');
-      List.iter (fun (h : Par_code_memory.history_hit) ->
-        let snippet = if String.length h.snippet > 40
-          then String.sub h.snippet 0 37 ^ "..."
-          else h.snippet in
-        Printf.printf "%-24s %-40s %-10s %d\n"
-          h.session_id snippet (format_timestamp h.updated_at) h.turn_count
-      ) hits)
+      let rows =
+        List.map (fun (h : Par_code_memory.history_hit) ->
+          [ h.session_id;
+            truncate_summary h.snippet;
+            format_timestamp h.updated_at;
+            string_of_int h.turn_count ]
+        ) hits
+      in
+      Par_code_ui.render_table ui
+        ~headers:["SESSION_ID"; "SNIPPET"; "UPDATED"; "TURNS"]
+        ~rows)
 
 let cmd_memory_search_history_term =
   let open Term in
@@ -416,7 +465,10 @@ let maybe_check_version () =
          let cur = Par_code_upgrade.current_version () in
          (match Par_code_upgrade.fetch_latest_tag ~timeout:2.0 () with
           | Ok latest when latest <> cur ->
-            Printf.eprintf "info: par %s is available (current: %s). Run 'par upgrade'.\n%!" latest cur
+            Par_code_ui.render_notice ui
+              (Printf.sprintf
+                 "info: par %s is available (current: %s). Run 'par upgrade'."
+                 latest cur)
           | Ok _ | Error _ -> ())
        with _ -> ())
     end

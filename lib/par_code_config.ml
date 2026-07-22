@@ -265,8 +265,10 @@ let require_config () =
   match load () with
   | Some cfg -> cfg
   | None ->
-    Printf.eprintf "No config found at %s.\nRun `par config` first.\n%!"
-      (config_path ());
+    let ui = Par_code_ui.create_backend () in
+    Par_code_ui.render_error ui
+      (Printf.sprintf "No config found at %s.\nRun `par config` first."
+         (config_path ()));
     exit 1
 
 let mask_api_key key =
@@ -278,59 +280,66 @@ let mask_api_key key =
     (String.sub key 0 4)
     (String.sub key (len - 4) 4)
 
-let show (cfg : config) =
-  Printf.printf "par-code configuration:\n";
-  Printf.printf "  provider:                %s\n" cfg.provider;
-  Printf.printf "  api_key:                 %s\n" (mask_api_key cfg.api_key);
-  Printf.printf "  api_base:                %s\n" (match cfg.api_base with Some s -> s | None -> "<default>");
-  Printf.printf "  model:                   %s\n" cfg.model;
-  Printf.printf "  persistence:             %s\n" cfg.persistence;
-  Printf.printf "  db_uri:                  %s\n" (match cfg.db_uri with Some s -> s | None -> "<default>");
-  Printf.printf "  temperature:             %.2f\n" cfg.temperature;
-  Printf.printf "  max_iterations:          %d\n" cfg.max_iterations;
-  Printf.printf "  max_tokens:              %s\n" (match cfg.max_tokens with Some n -> string_of_int n | None -> "<unlimited>");
-  Printf.printf "  top_p:                   %s\n" (match cfg.top_p with Some f -> Printf.sprintf "%.4f" f | None -> "<default>");
-  Printf.printf "  parallel_tool_execution: %b\n" cfg.parallel_tool_execution;
-  Printf.printf "  event_retention_days:    %.1f\n" cfg.event_retention_days;
-  Printf.printf "  auto_extract:            %b\n" cfg.auto_extract;
-  Printf.printf "  embedding_base_url:      %s\n" (match cfg.embedding_base_url with Some s -> s | None -> "<default>");
-  Printf.printf "  embedding_model:         %s\n" (match cfg.embedding_model with Some s -> s | None -> "<default>");
-  Printf.printf "  embedding_dimension:     %d\n" cfg.embedding_dimension;
-  Printf.printf "  checkpoint_enabled:      %b\n" cfg.checkpoint_enabled;
-  Printf.printf "  checkpoint_interval:     %d\n" cfg.checkpoint_interval;
-  Printf.printf "  context_budget_tokens:   %d\n" cfg.context_budget_tokens;
-  Printf.printf "  system_prompt:           %s\n" (if cfg.system_prompt = default.system_prompt then "<default>" else "<custom>")
+let show ?(ui=Par_code_ui.create_backend ()) (cfg : config) =
+  let open Par_code_ui in
+  let line label value = textf "  %-24s %s" label value in
+  let image = vcat [
+    text "par-code configuration:";
+    line "provider:" cfg.provider;
+    line "api_key:" (mask_api_key cfg.api_key);
+    line "api_base:" (match cfg.api_base with Some s -> s | None -> "<default>");
+    line "model:" cfg.model;
+    line "persistence:" cfg.persistence;
+    line "db_uri:" (match cfg.db_uri with Some s -> s | None -> "<default>");
+    line "temperature:" (Printf.sprintf "%.2f" cfg.temperature);
+    line "max_iterations:" (string_of_int cfg.max_iterations);
+    line "max_tokens:" (match cfg.max_tokens with Some n -> string_of_int n | None -> "<unlimited>");
+    line "top_p:" (match cfg.top_p with Some f -> Printf.sprintf "%.4f" f | None -> "<default>");
+    line "parallel_tool_execution:" (string_of_bool cfg.parallel_tool_execution);
+    line "event_retention_days:" (Printf.sprintf "%.1f" cfg.event_retention_days);
+    line "auto_extract:" (string_of_bool cfg.auto_extract);
+    line "embedding_base_url:" (match cfg.embedding_base_url with Some s -> s | None -> "<default>");
+    line "embedding_model:" (match cfg.embedding_model with Some s -> s | None -> "<default>");
+    line "embedding_dimension:" (string_of_int cfg.embedding_dimension);
+    line "checkpoint_enabled:" (string_of_bool cfg.checkpoint_enabled);
+    line "checkpoint_interval:" (string_of_int cfg.checkpoint_interval);
+    line "context_budget_tokens:" (string_of_int cfg.context_budget_tokens);
+    line "system_prompt:" (if cfg.system_prompt = default.system_prompt then "<default>" else "<custom>");
+  ] in
+  render_line ui image
 
-let prompt_line label default =
-  let prompt = match default with
+let prompt_line ui label default =
+  let prompt_str = match default with
     | Some d -> Printf.sprintf "%s [%s]: " label d
     | None -> Printf.sprintf "%s: " label
   in
-  Printf.printf "%s%!" prompt;
-  match input_line stdin with
-  | line when String.trim line <> "" -> String.trim line
-  | exception End_of_file -> Option.value default ~default:""
-  | _ -> Option.value default ~default:""
+  match Par_code_ui.read_line ui ~prompt:(Par_code_ui.text prompt_str) with
+  | Some line when String.trim line <> "" -> String.trim line
+  | Some _ -> Option.value default ~default:""
+  | None -> Option.value default ~default:""
 
-let run_wizard () =
+let run_wizard ?(ui=Par_code_ui.create_backend ()) () =
+  let open Par_code_ui in
   let existing = load () in
   (match existing with
    | Some cfg ->
-     Printf.printf "Current config (%s):\n" (config_path ());
-     Printf.printf "  Provider:    %s\n" cfg.provider;
-     Printf.printf "  Model:       %s\n" cfg.model;
-     Printf.printf "  API Base:    %s\n" (match cfg.api_base with Some u -> u | None -> "(default)");
-     Printf.printf "  Temperature: %.1f\n" cfg.temperature;
-     Printf.printf "  Max iter:    %d\n" cfg.max_iterations;
-     Printf.printf "\nEnter new values or press Enter to keep current.\n\n%!"
+     render_line ui (textf "Current config (%s):" (config_path ()));
+     render_line ui (textf "  Provider:    %s" cfg.provider);
+     render_line ui (textf "  Model:       %s" cfg.model);
+     render_line ui (textf "  API Base:    %s" (match cfg.api_base with Some u -> u | None -> "(default)"));
+     render_line ui (textf "  Temperature: %.1f" cfg.temperature);
+     render_line ui (textf "  Max iter:    %d" cfg.max_iterations);
+     render_line ui (text "\nEnter new values or press Enter to keep current.");
+     render_line ui empty
    | None ->
-     Printf.printf "Welcome to par! First-time setup.\n\n%!");
+     render_line ui (text "Welcome to par! First-time setup.");
+     render_line ui empty);
 
   let prov_default = match existing with Some c -> Some c.provider | None -> Some default.provider in
-  let provider = prompt_line "Provider (openai/anthropic/ollama/+custom-name)" prov_default in
+  let provider = prompt_line ui "Provider (openai/anthropic/ollama/+custom-name)" prov_default in
 
   let api_key_default = match existing with Some c when c.api_key <> "" -> Some c.api_key | _ -> None in
-  let api_key = prompt_line "API Key" api_key_default in
+  let api_key = prompt_line ui "API Key" api_key_default in
 
   let api_base =
     let hint = match String.lowercase_ascii provider with
@@ -339,108 +348,104 @@ let run_wizard () =
       | _ -> "https://api.openai.com/v1"
     in
     let prev = match existing with Some c -> c.api_base | None -> None in
-    Printf.printf "API Base URL (default: %s)%s: %!" hint
-      (match prev with Some b -> Printf.sprintf " [%s]" b | None -> "");
-    match input_line stdin with
-    | line when String.trim line <> "" -> Some (String.trim line)
-    | exception End_of_file -> prev
-    | _ -> prev
+    let prompt_str = Printf.sprintf "API Base URL (default: %s)%s: " hint
+      (match prev with Some b -> Printf.sprintf " [%s]" b | None -> "")
+    in
+    match read_line ui ~prompt:(text prompt_str) with
+    | Some line when String.trim line <> "" -> Some (String.trim line)
+    | Some _ -> prev
+    | None -> prev
   in
 
   let model_default = match existing with Some c -> Some c.model | None -> Some default.model in
-  let model = prompt_line "Model name" model_default in
+  let model = prompt_line ui "Model name" model_default in
 
   let temp_default =
     match existing with Some c -> Printf.sprintf "%.1f" c.temperature | None -> Printf.sprintf "%.1f" default.temperature
   in
-  let temp_str = prompt_line "Temperature" (Some temp_default) in
+  let temp_str = prompt_line ui "Temperature" (Some temp_default) in
   let temperature = match float_of_string_opt temp_str with Some f -> f | None -> default.temperature in
 
   let max_iter_default =
     match existing with Some c -> Some (string_of_int c.max_iterations) | None -> Some "50"
   in
-  let max_iter_str = prompt_line "Max ReAct iterations" max_iter_default in
+  let max_iter_str = prompt_line ui "Max ReAct iterations" max_iter_default in
   let max_iterations = match int_of_string_opt max_iter_str with Some n when n > 0 -> n | _ -> 50 in
 
-  Printf.printf "\n--- Advanced options ---\n%!";
+  render_line ui (text "\n--- Advanced options ---");
 
   let max_tokens =
-    let s = prompt_line "max_tokens (blank = unlimited)" None in
+    let s = prompt_line ui "max_tokens (blank = unlimited)" None in
     match s with
     | "" -> None
     | s -> (try Some (int_of_string s) with _ ->
-        Printf.eprintf "Invalid int, using unlimited\n%!"; None)
+        render_warning ui "Invalid int, using unlimited"; None)
   in
 
   let top_p =
-    let s = prompt_line "top_p (blank = provider default)" None in
+    let s = prompt_line ui "top_p (blank = provider default)" None in
     match s with
     | "" -> None
     | s -> (try Some (float_of_string s) with _ ->
-        Printf.eprintf "Invalid float, using default\n%!"; None)
+        render_warning ui "Invalid float, using default"; None)
   in
 
   let auto_extract =
-    Printf.printf "Enable auto memory extraction at session exit? [Y/n]: %!";
-    match input_line stdin with
-    | line when String.lowercase_ascii (String.trim line) = "n" -> false
-    | exception End_of_file -> true
-    | _ -> true
+    match read_line ui ~prompt:(text "Enable auto memory extraction at session exit? [Y/n]: ") with
+    | Some line when String.lowercase_ascii (String.trim line) = "n" -> false
+    | Some _ -> true
+    | None -> true
   in
 
   let checkpoint_enabled =
-    Printf.printf "Enable session checkpointing? [Y/n]: %!";
-    match input_line stdin with
-    | line when String.lowercase_ascii (String.trim line) = "n" -> false
-    | exception End_of_file -> true
-    | _ -> true
+    match read_line ui ~prompt:(text "Enable session checkpointing? [Y/n]: ") with
+    | Some line when String.lowercase_ascii (String.trim line) = "n" -> false
+    | Some _ -> true
+    | None -> true
   in
 
   let checkpoint_interval =
-    let s = prompt_line "checkpoint_interval (turns, default 10)" (Some "10") in
+    let s = prompt_line ui "checkpoint_interval (turns, default 10)" (Some "10") in
     (try max 1 (int_of_string s) with _ -> 10)
   in
 
   let context_budget_tokens =
-    let s = prompt_line "context_budget_tokens (default 100000)" (Some "100000") in
+    let s = prompt_line ui "context_budget_tokens (default 100000)" (Some "100000") in
     (try max 1000 (int_of_string s) with _ -> 100000)
   in
 
-  Printf.printf "\nEmbedding API (for semantic memory search).\n%!";
-  Printf.printf "  Uses your chat provider by default. Configure separately if your\n%!";
-  Printf.printf "  provider doesn't support /embeddings or uses a different dimension.\n%!";
+  render_line ui (text "\nEmbedding API (for semantic memory search).");
+  render_line ui (text "  Uses your chat provider by default. Configure separately if your");
+  render_line ui (text "  provider doesn't support /embeddings or uses a different dimension.");
   let sep_embed =
-    Printf.printf "Configure separate embedding API? [y/N]: %!";
-    match input_line stdin with
-    | line when String.lowercase_ascii (String.trim line) = "y" -> true
-    | exception End_of_file -> false
-    | _ -> false
+    match read_line ui ~prompt:(text "Configure separate embedding API? [y/N]: ") with
+    | Some line when String.lowercase_ascii (String.trim line) = "y" -> true
+    | Some _ -> false
+    | None -> false
   in
   let embedding_base_url, embedding_model, embedding_dimension =
     if sep_embed then begin
       let emb_base =
         let hint = "https://api.openai.com/v1" in
-        Printf.printf "Embedding API Base URL (default: %s): %!" hint;
-        match input_line stdin with
-        | line when String.trim line <> "" -> Some (String.trim line)
-        | exception End_of_file -> Some hint
-        | _ -> Some hint
+        let prompt_str = Printf.sprintf "Embedding API Base URL (default: %s): " hint in
+        match read_line ui ~prompt:(text prompt_str) with
+        | Some line when String.trim line <> "" -> Some (String.trim line)
+        | Some _ -> Some hint
+        | None -> Some hint
       in
       let emb_model =
-        Printf.printf "Embedding model name (default: text-embedding-3-small): %!";
-        match input_line stdin with
-        | line when String.trim line <> "" -> Some (String.trim line)
-        | exception End_of_file -> None
-        | _ -> None
+        match read_line ui ~prompt:(text "Embedding model name (default: text-embedding-3-small): ") with
+        | Some line when String.trim line <> "" -> Some (String.trim line)
+        | Some _ -> None
+        | None -> None
       in
       let emb_dim =
-        Printf.printf "Embedding dimension [1536]: %!";
-        match input_line stdin with
-        | line when String.trim line <> "" ->
+        match read_line ui ~prompt:(text "Embedding dimension [1536]: ") with
+        | Some line when String.trim line <> "" ->
           (match int_of_string_opt (String.trim line) with
            Some n -> n | None -> 1536)
-        | exception End_of_file -> 1536
-        | _ -> 1536
+        | Some _ -> 1536
+        | None -> 1536
       in
       (emb_base, emb_model, emb_dim)
     end else
@@ -459,4 +464,4 @@ let run_wizard () =
     checkpoint_enabled; checkpoint_interval; context_budget_tokens;
   } in
   save cfg;
-  Printf.printf "\nSaved config to %s\n%!" (config_path ())
+  render_notice ui (Printf.sprintf "\nSaved config to %s" (config_path ()))

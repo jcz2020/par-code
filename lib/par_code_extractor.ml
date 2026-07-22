@@ -9,6 +9,10 @@
 
 open Par
 
+let ui_error msg = Par_code_ui.render_error (Par_code_ui.create_backend ()) msg
+let ui_warning msg = Par_code_ui.render_warning (Par_code_ui.create_backend ()) msg
+let ui_notice msg = Par_code_ui.render_notice (Par_code_ui.create_backend ()) msg
+
 (* -------------------------------------------------------------------------- *)
 (* Agent configuration                                                       *)
 (* -------------------------------------------------------------------------- *)
@@ -140,7 +144,7 @@ let parse_extraction_result (json : Yojson.Safe.t) : extraction_result option =
       match kind_of_string_opt kind_str with
       | Some kind -> Some { kind; content; summary; citations }
       | None ->
-        Printf.eprintf "Warning: unknown memory kind %S, skipping\n%!" kind_str;
+        ui_warning (Printf.sprintf "Warning: unknown memory kind %S, skipping" kind_str);
         None
     end
   | _ -> None
@@ -179,10 +183,10 @@ let parse_extraction_response (text : string) : extraction_result list =
     | `List items ->
       List.filter_map parse_extraction_result items
     | _ ->
-      Printf.eprintf "Warning: extraction response is not a JSON array, skipping.\n%!";
+      ui_warning "Warning: extraction response is not a JSON array, skipping.";
       []
     | exception Yojson.Json_error msg ->
-      Printf.eprintf "Warning: failed to parse extraction JSON: %s\n%!" msg;
+      ui_warning (Printf.sprintf "Warning: failed to parse extraction JSON: %s" msg);
       []
 
 (* -------------------------------------------------------------------------- *)
@@ -227,11 +231,11 @@ let run_extraction (rt : Runtime.runtime) (mem_db : Par_code_memory.t)
   let transcript = serialize_transcript conv in
   if transcript = "" then ()
   else begin
-    Printf.eprintf "[extracting memories...]\n%!";
+    ui_notice "[extracting memories...]";
     match Runtime.invoke_generate rt ~agent_id:extractor_agent_id ~save:false ~update_current:false ~message:transcript () with
     | Error (e, _) ->
-      Printf.eprintf "Warning: memory extraction failed: %s\n%!"
-        (error_to_string e)
+      ui_error (Printf.sprintf "Warning: memory extraction failed: %s"
+        (error_to_string e))
     | Ok result ->
       let extractions = parse_extraction_response result.Types.text in
       let new_count = ref 0 in
@@ -244,8 +248,8 @@ let run_extraction (rt : Runtime.runtime) (mem_db : Par_code_memory.t)
                   ~citations ~source:`Agent with
            | Ok _ -> incr new_count
            | Error (`Db_error msg) ->
-             Printf.eprintf "Warning: failed to store memory: %s\n%!" msg)
+              ui_warning (Printf.sprintf "Warning: failed to store memory: %s" msg))
       ) extractions;
-      Printf.eprintf "Extracted %d memories (%d duplicates skipped).\n%!"
-        !new_count !dup_count
+      ui_notice (Printf.sprintf "Extracted %d memories (%d duplicates skipped)."
+        !new_count !dup_count)
   end

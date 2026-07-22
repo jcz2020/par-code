@@ -11,6 +11,8 @@
 
 open Par_memory
 
+let ui_notice msg = Par_code_ui.render_notice (Par_code_ui.create_backend ()) msg
+
 type t = {
   mem : Sqlite_memory.t;
   db : Sqlite3.db;
@@ -240,8 +242,8 @@ let open_db ?embedding_fn ?(dimension = 1536) () =
   let needs_drop = old_memories <> [] in
   if needs_drop then begin
     drop_old_memory_schema migration_db;
-    Printf.eprintf "[migration] %d memories to migrate from v0.3.x schema\n%!"
-      (List.length old_memories)
+    ui_notice (Printf.sprintf "[migration] %d memories to migrate from v0.3.x schema"
+      (List.length old_memories))
   end;
   let _ = Sqlite3.db_close migration_db in
   let create_result =
@@ -257,8 +259,8 @@ let open_db ?embedding_fn ?(dimension = 1536) () =
     create_conversations_fts db;
     if needs_drop then begin
       reinsert_migrated db old_memories;
-      Printf.eprintf "[migration] %d memories migrated successfully\n%!"
-        (List.length old_memories)
+      ui_notice (Printf.sprintf "[migration] %d memories migrated successfully"
+        (List.length old_memories))
     end;
     Ok t
 
