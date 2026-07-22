@@ -63,16 +63,28 @@ let tls_wrapper uri raw_flow =
 let make_client net = Cohttp_eio.Client.make ~https:(Some tls_wrapper) net
 
 let http_get ~net ~sw ~headers url =
-  let uri = Uri.of_string url in
-  let client = make_client net in
-  let hdrs = Cohttp.Header.of_list headers in
-  let resp, resp_body =
-    Cohttp_eio.Client.call ~sw ~headers:hdrs client `GET uri in
-  let status = Cohttp.Code.code_of_status (Http.Response.status resp) in
-  let etag = Cohttp.Header.get (Http.Response.headers resp) "etag" in
-  let body = Eio.Buf_read.parse_exn
-    ~max_size:(50 * 1024 * 1024) Eio.Buf_read.take_all resp_body in
-  (status, etag, body)
+  let rec follow redirects_left url =
+    let uri = Uri.of_string url in
+    let client = make_client net in
+    let hdrs = Cohttp.Header.of_list headers in
+    let resp, resp_body =
+      Cohttp_eio.Client.call ~sw ~headers:hdrs client `GET uri in
+    let status = Cohttp.Code.code_of_status (Http.Response.status resp) in
+    match status, redirects_left with
+    | (301 | 302 | 303 | 307 | 308), n when n > 0 ->
+      (match Cohttp.Header.get (Http.Response.headers resp) "location" with
+       | Some location -> follow (n - 1) location
+       | None ->
+         let body = Eio.Buf_read.parse_exn
+           ~max_size:(50 * 1024 * 1024) Eio.Buf_read.take_all resp_body in
+         (status, Cohttp.Header.get (Http.Response.headers resp) "etag", body))
+    | _ ->
+      let etag = Cohttp.Header.get (Http.Response.headers resp) "etag" in
+      let body = Eio.Buf_read.parse_exn
+        ~max_size:(50 * 1024 * 1024) Eio.Buf_read.take_all resp_body in
+      (status, etag, body)
+  in
+  follow 5 url
 
 let fetch_latest_tag_core ~net ~sw ?(timeout=2.0) () =
   let _timeout = timeout in
