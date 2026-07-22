@@ -1,5 +1,71 @@
 # Decisions
 
+## [2026-07-21] v0.4.5: UI abstraction layer — composable styled images
+
+**变更前**: par-code used `Printf.printf`/`Printf.eprintf` directly throughout
+lib/ and bin/ (175 call sites across 8 files). No structured rendering — LLM
+streaming output was plain text, tool events were single-line `→ X ✓`,
+markdown was unrendered. PAR SDK chunk variants (Tool_call_start,
+Tool_call_delta, Usage_update) and event variants (Tool_progress,
+Bash_invoked, Bash_completed) were silently discarded via `_ -> ()`.
+
+**变更后**: New `lib/par_code_ui.ml` module provides a composable styled image
+abstraction. Business code builds `Ui.image` values via primitives (`text`,
+`textf`, composition operators `<|>`/`<->`, layout `hpad`/`vpad`/`hsnap`).
+Backend abstraction renders images to terminal via ANSI escape codes.
+13 high-level `render_*` functions handle common patterns (errors, warnings,
+LLM chunks, tool events, tables, cost summaries). All 175 printf sites
+migrated. All PAR SDK chunk/event variants now rendered.
+
+**原因**: User feedback identified two concerns: (1) current output is visually
+rough (no colors, no markdown rendering, no structured tool cards), (2)
+continuing to add features on top of printf-based rendering would increase
+future TUI refactor cost. The abstraction layer solves both: immediate visual
+improvement via ANSI + structured layout, and future-proof API that maps 1:1
+to Notty and Matrix/Mosaic TUI backends.
+
+**影响范围**: 2 new modules (par_code_ui.ml/mli, par_code_ui_markdown.ml/mli),
+7 modified files (all lib/ + bin/), 2 new test files (73 new tests).
+Zero new external dependencies.
+
+**回退方式**: Each file's printf→Ui migration is a pure output-mechanism swap.
+Reverting to printf requires restoring the old code (the logic is unchanged,
+only the output calls differ). The Ui module itself is a pure addition.
+
+**已知限制**: Streaming markdown handles single-line constructs only. No syntax
+highlighting. Basic table rendering (no wrapping). Future TUI backend (v0.14.0)
+will add Mosaic/Matrix as an alternative render target.
+
+## [2026-07-21] v0.4.5: streaming markdown state machine
+
+**变更前**: LLM streaming output was rendered as plain text via
+`Printf.printf "%s%!" text`. No markdown parsing — headings, bold, code
+blocks, etc. appeared as literal markdown syntax in the terminal.
+
+**变更后**: `lib/par_code_ui_markdown.ml` implements a streaming markdown
+parser. Line-based state machine buffers incomplete lines, parses complete
+lines for inline formatting (bold, italic, code, links), and handles block
+constructs (headings, code fences, lists, quotes). Output is ANSI-styled text.
+Round-trip property verified: feeding a document in arbitrary chunks produces
+identical output to feeding it whole.
+
+**原因**: Markdown rendering is the #1 visual improvement for LLM output.
+Streaming (incremental) parsing is required because LLM output arrives token
+by token, not as a complete document. No OCaml streaming markdown library
+exists (omd is stale alpha, cmarkit is for complete documents). In-house
+state machine based on streaming-markdown.js pattern.
+
+**影响范围**: `lib/par_code_ui_markdown.ml` (318 lines) + `.mli` (41 lines),
+`test/test_par_code_ui_markdown.ml` (37 tests including 3 round-trip property tests).
+
+**回退方式**: Disable markdown rendering by routing Text_delta chunks directly
+to `output_string` instead of through the markdown state machine. The module
+is a pure addition.
+
+**已知限制**: Single-line constructs only (no multi-line bold). Hand-rolled
+parser (no regex lib) — handles common cases but may miss edge cases in
+Complex CommonMark. Strikethrough deferred (terminal support varies).
+
 ## [2026-07-20] v0.4.3: per-session token accumulator for `/cost` command
 
 **变更前**: par-code's REPL had no way to show token usage. PAR SDK's

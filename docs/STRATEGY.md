@@ -1,6 +1,6 @@
 # par-code Strategy
 
-> **Last updated**: 2026-07-20 (v0.4.3)
+> **Last updated**: 2026-07-21 (v0.4.5)
 > **Status**: Active
 > **Owner**: PAR-Code Contributors
 >
@@ -181,6 +181,10 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
   config wizard prompts for 6 previously-hidden options, memory `recall`
   supplementary SQL fetch to recover `usage_count`/`last_used_at` dropped by
   PAR SDK `Memory_object.t` type limitation. Dead `bump_usage` removed.
+- **v0.4.5 ✅ shipped** — UI abstraction layer. `Ui.*` module with composable
+  styled images, streaming markdown state machine, 13 high-level render
+  functions. All 175 printf migrated. PAR SDK signals restored. 73 new tests.
+  Zero new deps. Future TUI backend (v0.14.0 Mosaic/Matrix) path confirmed.
 - v0.4.0+ — plan mode, subagents, autonomy, reasoning,
   self-improvement, compose mode, ecosystem, code intelligence, safety, polish
   → v1.0
@@ -224,6 +228,8 @@ per global rules) lives in `docs/DECISIONS.md`. Strategic-level entries:
 | 2026-07-20 | v0.4.3: per-session token accumulator for `/cost` REPL command (PAR SDK `Metrics.counters` only tracks operational counts, not tokens; par-code accumulates `Types.usage_stats` from each `Runtime.invoke` Ok branch) | Active |
 | 2026-07-20 | v0.4.3: PAR SDK feedback filed — `Memory_object.t` lacks `last_used_at`/`usage_count` fields even though DB schema has the columns and `Sqlite_memory.search_fts` internally bumps them; par-code side workaround via supplementary parameterized SQL fetch in `recall` | Active |
 | 2026-07-20 | v0.4.3 shipped — UX quick patch: `/cost` + `par config show` + 6 wizard prompts + memory recall usage-field fix + dead `bump_usage` removal (63 tests, Oracle-reviewed) | Active |
+| 2026-07-21 | v0.4.5: UI abstraction layer — composable styled images, ANSI colors, backend with TTY detection; all 175 printf migrated; future TUI path to Mosaic/Matrix confirmed | Active |
+| 2026-07-21 | v0.4.5: streaming markdown state machine — line-based incremental parser; round-trip property verified; zero OCaml reference impl existed | Active |
 
 ## 10. Revision Protocol
 

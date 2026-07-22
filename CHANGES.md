@@ -1,5 +1,67 @@
 # CHANGES
 
+## v0.4.5 — UI abstraction layer + streaming markdown
+
+> A foundational rendering API (`Ui.*`) that decouples business code from
+> terminal output. All 175 `printf` sites migrated to structured `Ui.render_*`
+> calls. Streaming markdown state machine renders LLM output with ANSI colors
+> as it arrives. Discarded PAR SDK signals (tool_call chunks, usage_update,
+> bash events) now rendered. Designed for future TUI backend migration
+> (v0.14.0 Mosaic/Matrix) without business code changes.
+
+### Added
+- **`lib/par_code_ui.ml`** (511 lines): UI abstraction layer with composable
+  styled images, ANSI color generation (16/256/RGB), backend with TTY/NO_COLOR
+  detection, 13 high-level render functions (`render_error`, `render_warning`,
+  `render_llm_chunk`, `render_tool_event`, `render_cost`, `render_table`, etc.)
+- **`lib/par_code_ui_markdown.ml`** (318 lines): streaming markdown-to-ANSI
+  renderer. Line-based state machine handles headings, code blocks, bold,
+  italic, inline code, links. Round-trip property: chunked input produces
+  identical output to whole input.
+- **Signal restoration**: `stream_print_chunk` now handles all 5
+  `llm_response_chunk` variants (was: only Text_delta, rest discarded).
+  `make_tool_event_callback` now handles Tool_progress, Bash_invoked,
+  Bash_completed (was: discarded via `_ -> ()`).
+- **73 new tests**: 36 UI tests (composition laws, dimensions, style, layout,
+  backend) + 37 markdown tests (basic rendering, code blocks, partial chunks,
+  round-trip property, edge cases, lists, headings).
+
+### Changed
+- **175 printf sites migrated**: all `Printf.printf`/`Printf.eprintf` in lib/
+  and bin/ replaced with `Ui.render_*` calls. Zero `Printf.printf` remaining
+  in production code.
+- **Config wizard**: `input_line stdin` → `Ui.read_line` (flushes stdout first;
+  future TUI backends can replace with modal input).
+- **Memory recall** (from v0.4.3): usage fields workaround continues to work
+  through new UI layer.
+
+### Architecture
+- **Composable image type**: `Ui.image` is an immutable styled text rectangle.
+  Composition operators `<|>` (horizontal) and `<->` (vertical) mirror Notty's
+  and Matrix's Image APIs. Future TUI backend swap requires zero business code
+  changes — only the `render` function's internals change.
+- **Backend abstraction**: `Ui.backend` holds terminal state (size, color
+  support, markdown parser state). Auto-detects TTY via `Unix.isatty`,
+  respects `NO_COLOR` env var (https://no-color.org) and `TERM=dumb`.
+- **Zero new dependencies**: pure ANSI escape codes (no external color lib),
+  hand-rolled markdown parser (no regex lib), in-house image type.
+- **Future TUI path**: spike confirmed Mosaic/Matrix (Invariant HQ, 2025-2026)
+  has Eio-native TUI with x-agent streaming example. `Ui.image` maps 1:1 to
+  both Notty's `I.image` and Matrix's `Image.t`.
+
+### Known Limitations
+- Streaming markdown parser handles single-line constructs only (no multi-line
+  bold). This is a deliberate simplification — each line is parsed independently.
+- No syntax highlighting in code blocks (deferred to v0.5.0+ — needs cmarkit AST).
+- No `cmarkit` dependency in v0.4.5 (in-house SM only; final-render AST deferred).
+- `Ui.render_table` is basic fixed-width columns (no wrapping).
+
+### Upgrade urgency
+**Medium.** All changes are additive (new module) or output-mechanism swaps
+(printf → Ui). No breaking API changes. Users get colored output + structured
+tool cards + markdown rendering. Existing scripts that parse par-code output
+may see ANSI escape codes if stdout is a TTY.
+
 ## v0.4.3 — UX quick patch: cost visibility, config inspection, memory fix
 
 > Four targeted improvements addressing daily-friction points found during
