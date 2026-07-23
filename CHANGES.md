@@ -56,6 +56,21 @@
 - No `cmarkit` dependency in v0.4.5 (in-house SM only; final-render AST deferred).
 - `Ui.render_table` is basic fixed-width columns (no wrapping).
 
+### Hotfixes (post-release, same tag)
+- **RNG initialization** (`fix(upgrade): initialize Mirage_crypto_rng at startup`):
+  `par upgrade` crashed with "The default generator is not yet initialized"
+  because `Mirage_crypto_rng_unix.use_default ()` was only called in
+  `setup_runtime` (REPL/ask path), not in the upgrade path which does HTTPS
+  directly. Fixed by moving the call to program startup in `bin/main.ml`,
+  covering all code paths. Also silently fixed `maybe_check_version ()`
+  (startup version check) which was swallowing the same error.
+- **HTTP redirect following** (`fix(upgrade): follow HTTP 301/302/303/307/308 redirects`):
+  `par upgrade` failed with "HTTP 302" because `http_get` only accepted
+  HTTP 200. GitHub release downloads return 302 redirect to
+  `objects.githubusercontent.com`. Fixed by adding redirect-following logic
+  (up to 5 hops) to `http_get`. Pre-existing latent bug, exposed after the
+  RNG fix allowed the code to reach the HTTP request.
+
 ### Upgrade urgency
 **Medium.** All changes are additive (new module) or output-mechanism swaps
 (printf → Ui). No breaking API changes. Users get colored output + structured
