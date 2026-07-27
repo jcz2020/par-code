@@ -39,6 +39,8 @@ RUN dnf config-manager --set-enabled powertools || true && \
       gcc gcc-c++ make patch m4 perl git curl tar gzip unzip bzip2 diffutils \
       gmp-devel \
       zlib-devel \
+      kernel-headers \
+      liburing-devel \
       patchelf bubblewrap \
     && dnf clean all
 
