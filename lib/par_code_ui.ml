@@ -459,8 +459,12 @@ let render_banner backend ~version =
     (textf "par %s — type a message, /help for commands." version
        ~style:(style ~bold:true ()))
 
-let render_prompt backend =
-  render backend (text "par> " ~style:(style ~fg:Green ~bold:true ()))
+let render_prompt backend mode =
+  let prefix = match mode with
+    | Par_code_mode.Plan -> "(plan) "
+    | Par_code_mode.Build -> "(build) "
+  in
+  render backend (text (prefix ^ "par> ") ~style:(style ~fg:Green ~bold:true ()))
 
 let render_help backend =
   let item cmd desc = textf "  %-12s %s\n" cmd desc in
@@ -471,6 +475,8 @@ let render_help backend =
       item "/session" "Show session info";
       item "/health" "Show runtime health";
       item "/cost" "Show session token usage";
+      item "/plan" "Switch to plan mode (read-only; produces a plan file)";
+      item "/build" "Switch to build mode (full tool access; saves current plan)";
       item "/reset" "Reset conversation";
       item "/checkpoint" "Force a session checkpoint";
       item "/checkpoints" "List session checkpoints";

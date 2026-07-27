@@ -84,13 +84,27 @@ let term_config_show =
 
 let info_config_show = Cmd.info "show" ~doc:"Print current configuration"
 
-let cmd_config_set () = Par_code_config.run_wizard ()
+let cmd_config_set field_opt value_opt =
+  match field_opt, value_opt with
+  | Some field, Some value ->
+    let _cfg = Par_code_config.update_field ~field ~value in
+    Par_code_ui.render_notice ui (Printf.sprintf "Set %s = %s" field value)
+  | None, None ->
+    Par_code_config.run_wizard ()
+  | Some _, None ->
+    Par_code_ui.render_error ui "Usage: par config set <field> <value>";
+    exit 1
+  | None, Some _ ->
+    Par_code_ui.render_error ui "Usage: par config set <field> <value>";
+    exit 1
 
 let term_config_set =
   let open Term in
-  const (fun () -> cmd_config_set ()) $ const ()
+  const cmd_config_set
+    $ Arg.(value & pos 0 (some string) None & info [] ~docv:"FIELD" ~doc:"Config field name")
+    $ Arg.(value & pos 1 (some string) None & info [] ~docv:"VALUE" ~doc:"Value to set")
 
-let info_config_set = Cmd.info "set" ~doc:"Run configuration wizard"
+let info_config_set = Cmd.info "set" ~doc:"Set a config field or run configuration wizard"
 
 let cmd_config_group =
   Cmd.group ~default:term_config_set

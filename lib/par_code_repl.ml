@@ -148,11 +148,25 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
      on every exit path (Ok/Error/exn) via Fun.protect. *)
   let in_flight_checkpoint = ref false in
   let cost = ref empty_cost in
+  let last_plan_path : string option ref = ref None in
   let loaded_cfg = Par_code_config.load () in
   let ckpt_enabled = match loaded_cfg with Some c -> c.Par_code_config.checkpoint_enabled | None -> true in
   let ckpt_interval = match loaded_cfg with Some c -> c.Par_code_config.checkpoint_interval | None -> 10 in
   let ctx_budget = match loaded_cfg with Some c -> c.Par_code_config.context_budget_tokens | None -> 100000 in
   let env_no_ckpt = match Sys.getenv_opt "PAR_NO_CHECKPOINT" with Some "1" | Some "true" -> true | _ -> false in
+  (match resume with
+   | No_prior ->
+     (match loaded_cfg with
+      | Some c -> Par_code_mode.current := c.Par_code_config.default_mode
+      | None -> ())
+   | Resume_most_recent | Resume_of _ ->
+     (match Par_code_mode.load_mode_from_disk () with
+      | Some m -> Par_code_mode.current := m
+      | None ->
+        (match loaded_cfg with
+         | Some c -> Par_code_mode.current := c.Par_code_config.default_mode
+         | None -> ())));
+  at_exit Par_code_mode.save_current_mode_to_disk;
   (* Session brief on resume *)
   (match !conv with
    | Some _ ->
@@ -173,7 +187,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
     Par_code_ui.render_notice ui "\n[Interrupted \xe2\x80\x94 session saved]";
     exit 130));
   let rec loop () =
-    Par_code_ui.render_prompt ui;
+    Par_code_ui.render_prompt ui !Par_code_mode.current;
     match input_line stdin with
     | exception End_of_file ->
       let _ = Runtime.save_conversation rt ?conversation:!conv () in
@@ -242,6 +256,31 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
               metrics;
             } in
             Par_code_ui.render_cost ui summary
+          | "/plan" ->
+            let prev = Par_code_mode.switch Plan in
+            if prev = Plan then
+              Par_code_ui.render_notice ui "Already in plan mode."
+            else
+              Par_code_ui.render_success ui "Switched to PLAN mode. Agent will investigate and produce a plan. Use /build to start implementing.";
+            loop ()
+
+          | "/build" ->
+            let prev = Par_code_mode.switch Build in
+            if prev = Build then
+              Par_code_ui.render_notice ui "Already in build mode."
+            else begin
+               (match !conv with
+                | Some c ->
+                  (match Par_code_plan_tools.persist_plan_file c with
+                   | Some path ->
+                     last_plan_path := Some path;
+                     Par_code_ui.render_notice ui (Printf.sprintf "Plan saved to %s" path)
+                   | None ->
+                     Par_code_ui.render_warning ui "Could not save plan file (no assistant message or write error).")
+                | None -> ());
+              Par_code_ui.render_success ui "Switched to BUILD mode."
+            end;
+            loop ()
           | _ -> Par_code_ui.render_error ui (Printf.sprintf "Unknown command: %s (try /help)" cmd));
          loop ()
        end else begin
@@ -267,46 +306,62 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
                 end
               | None -> ());
              let memory_appendix =
-               let mem_app = build_memory_appendix mem_db in
-               match !is_first_turn, !first_turn_appendix with
-               | true, Some brief ->
-                 is_first_turn := false;
-                 (match mem_app with Some ma -> Some (brief ^ ma) | None -> Some brief)
-               | _ -> mem_app
-             in
-             (match Runtime.invoke rt
-               ~agent_id:Par_code_setup.agent_id
-               ~message:trimmed
-               ?conversation:!conv
-               ~on_tool_event
-               ~on_chunk:(Some (stream_print_chunk ui))
-               ~enable_handoff:true
-               ?system_prompt_appendix:memory_appendix
-               () with
-            | Error (e, recovered_conv) ->
-               conv := Some recovered_conv;
-               Par_code_ui.flush_markdown ui;
-               Par_code_ui.render_error ui (Par_code_setup.error_to_string e);
-               let _ = Runtime.save_conversation rt ?conversation:!conv () in ()
-             | Ok { Types.response = resp; conversation = returned_conv } ->
-               conv := Some returned_conv;
-               Par_code_ui.render_line ui Par_code_ui.empty;
-               cost := add_usage !cost resp.Types.usage;
-               let _ = Runtime.save_conversation rt ?conversation:!conv () in ();
-               incr turn_count;
-               if !session_id = None then begin
-                 (try session_id := Some (Runtime.get_session_id rt) with _ -> ())
-               end;
-                if not env_no_ckpt && ckpt_enabled then begin
-                  (match mem_db, !conv, !session_id with
-                   | Some t, Some c, Some sid ->
-                     let pid = Par_code_memory.resolve_project_id () in
-                     Par_code_checkpoint.maybe_checkpoint ~rt t
-                       ~in_flight:in_flight_checkpoint
-                       ~session_id:sid ~project_id:pid c
-                       ~turn_number:!turn_count ~enabled:ckpt_enabled ~interval:ckpt_interval
-                   | _ -> ())
-                end)
+                let mem_app = build_memory_appendix mem_db in
+                match !is_first_turn, !first_turn_appendix with
+                | true, Some brief ->
+                  is_first_turn := false;
+                  (match mem_app with Some ma -> Some (brief ^ ma) | None -> Some brief)
+                | _ -> mem_app
+              in
+              let plan_appendix = match !last_plan_path with
+                | Some path ->
+                  Some (Printf.sprintf
+                    "\n\n## Plan Reference\n\nYour plan was saved to `%s`.\nRead it with `read_file` before implementing."
+                    path)
+                | None -> None
+              in
+              let combined_appendix = match memory_appendix, plan_appendix with
+                | None, None -> None
+                | Some m, None -> Some m
+                | None, Some p -> Some p
+                | Some m, Some p -> Some (m ^ p)
+              in
+              let invoke_result = Runtime.invoke rt
+                ~agent_id:(Par_code_mode.agent_id_for !Par_code_mode.current)
+                ~message:trimmed
+                ?conversation:!conv
+                ~on_tool_event
+                ~on_chunk:(Some (stream_print_chunk ui))
+                ~enable_handoff:true
+                ?system_prompt_appendix:combined_appendix
+                ()
+              in
+              last_plan_path := None;
+              (match invoke_result with
+              | Error (e, recovered_conv) ->
+                 conv := Some recovered_conv;
+                 Par_code_ui.flush_markdown ui;
+                 Par_code_ui.render_error ui (Par_code_setup.error_to_string e);
+                 let _ = Runtime.save_conversation rt ?conversation:!conv () in ()
+              | Ok { Types.response = resp; conversation = returned_conv } ->
+                conv := Some returned_conv;
+                Par_code_ui.render_line ui Par_code_ui.empty;
+                cost := add_usage !cost resp.Types.usage;
+                let _ = Runtime.save_conversation rt ?conversation:!conv () in ();
+                incr turn_count;
+                if !session_id = None then begin
+                  (try session_id := Some (Runtime.get_session_id rt) with _ -> ())
+                end;
+                 if not env_no_ckpt && ckpt_enabled then begin
+                   (match mem_db, !conv, !session_id with
+                    | Some t, Some c, Some sid ->
+                      let pid = Par_code_memory.resolve_project_id () in
+                      Par_code_checkpoint.maybe_checkpoint ~rt t
+                        ~in_flight:in_flight_checkpoint
+                        ~session_id:sid ~project_id:pid c
+                        ~turn_number:!turn_count ~enabled:ckpt_enabled ~interval:ckpt_interval
+                    | _ -> ())
+                 end)
          with ex ->
            Par_code_ui.render_error ui (Printf.sprintf "\n[error] %s" (Printexc.to_string ex)));
         loop ()

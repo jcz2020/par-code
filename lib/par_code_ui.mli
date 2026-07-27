@@ -161,7 +161,7 @@ type cost_summary = {
 val render_cost : backend -> cost_summary -> unit
 val render_session_info : backend -> agent_id:string -> session_id:string -> turn_count:int -> unit
 val render_banner : backend -> version:string -> unit
-val render_prompt : backend -> unit
+val render_prompt : backend -> Par_code_mode.mode -> unit
 val render_help : backend -> unit
 
 (** Simple fixed-width column table renderer. *)

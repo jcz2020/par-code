@@ -222,6 +222,25 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
        let mem_descriptors = List.map (fun (tb : Types.tool_binding) -> tb.descriptor) mem_tools in
        descriptors := mem_descriptors @ !descriptors
      | None -> ());
+    (* Plan mode tools: agent-invocable mode switching (v0.5.0) *)
+    let plan_tools = [Par_code_plan_tools.plan_enter_tool; Par_code_plan_tools.plan_exit_tool] in
+    List.iter (fun (tb : Types.tool_binding) ->
+      (match Runtime.register_tool rt
+         ~name:tb.descriptor.Types.name
+         ~description:tb.descriptor.Types.description
+         ~input_schema:tb.descriptor.Types.input_schema
+         ~handler:tb.handler
+         ?permission:(match tb.descriptor.Types.permission with Types.Allow -> None | p -> Some p)
+         ?timeout:tb.descriptor.Types.timeout
+         ?concurrency_limit:tb.descriptor.Types.concurrency_limit
+         () with
+       | Ok _ -> ()
+       | Error e ->
+         ui_render_warning (Printf.sprintf "Warning: failed to register plan tool %s: %s"
+           tb.descriptor.Types.name (error_to_string e)))
+    ) plan_tools;
+    let plan_descriptors = List.map (fun (tb : Types.tool_binding) -> tb.descriptor) plan_tools in
+    descriptors := plan_descriptors @ !descriptors;
     (match Runtime.install_bash_tool
        ~process_mgr:(Eio.Stdenv.process_mgr env)
        ~clock:(Eio.Stdenv.clock env)
@@ -274,6 +293,63 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
     | Ok ckpt_agent ->
       (match Runtime.register_agent rt ckpt_agent with
        | Error e -> ui_render_warning (Printf.sprintf "Warning: checkpoint-writer agent registration failed: %s" (error_to_string e))
+       | Ok () -> ()));
+    (* Planner agent: read-only tool subset, used in Plan mode (v0.5.0) *)
+    let planner_descriptors =
+      let plan_exit_name = Par_code_plan_tools.plan_exit_tool.descriptor.Types.name in
+      List.filter (fun (td : Types.tool_descriptor) ->
+        List.mem td.name
+          [ "read_file"; "grep"; "find_files"; "list_directory";
+            "recall_memory"; "search_history" ]
+        || td.name = plan_exit_name
+      ) !descriptors
+    in
+    let planner_prompt =
+      {|You are "planner", the read-only planning agent for par-code.
+
+You are operating in PLAN MODE. Your job is to investigate the user's request
+and produce a plan. You CANNOT write, edit, or run bash — those tools are not
+available to you.
+
+Your output should be a markdown plan with these sections:
+
+## Goal
+<one-paragraph restatement of what the user wants>
+
+## Approach
+<the strategy you propose, with rationale>
+
+## Files to Touch
+<bulleted list of file paths, with brief notes on what changes each needs>
+
+## Risks
+<bulleted list of things that could go wrong, edge cases, unknowns>
+
+## Open Questions
+<bulleted list of decisions that need user input before/during implementation>
+
+## Steps
+<numbered list of implementation steps in suggested execution order>
+
+Investigate thoroughly using read_file, grep, find_files, list_directory,
+recall_memory, search_history. Ask clarifying questions if the request is
+ambiguous.
+
+When your plan is complete, call the `plan_exit` tool to hand off to build mode.|}
+    in
+    (match Runtime.make_agent
+       ~id:Par_code_mode.planner_agent_id
+       ~system_prompt:(Types.stable_prompt planner_prompt)
+       ~model:model_cfg
+       ~tools:planner_descriptors
+       ~max_iterations:cfg.Par_code_config.max_iterations
+       ()
+     with
+    | Error e ->
+      ui_render_warning (Printf.sprintf "Warning: planner agent not registered: %s" (error_to_string e))
+    | Ok planner ->
+      (match Runtime.register_agent rt planner with
+       | Error e -> ui_render_warning (Printf.sprintf "Warning: planner agent registration failed: %s" (error_to_string e))
        | Ok () -> ()));
     Runtime.set_tool_description_overrides rt [
       "bash", "Execute a system command (e.g. git, npm, docker, make, systemctl). \

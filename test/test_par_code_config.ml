@@ -126,6 +126,46 @@ let test_show_custom_system_prompt () =
   let output = capture_stdout (fun () -> show cfg) in
   Alcotest.(check bool) "shows <custom> for non-default prompt" true (string_contains output "<custom>")
 
+(* ── default_mode ────────────────────────────────────────────────────── *)
+
+let test_default_mode_is_build () =
+  Alcotest.(check bool) "default mode is Build" true
+    (default.default_mode = Par_code_mode.Build)
+
+let test_json_roundtrip_default_mode_plan () =
+  let cfg = { default with default_mode = Par_code_mode.Plan } in
+  let json = to_json cfg in
+  match of_json json with
+  | Error msg -> Alcotest.fail (Printf.sprintf "of_json failed: %s" msg)
+  | Ok loaded ->
+    Alcotest.(check bool) "default_mode roundtrip is Plan" true
+      (loaded.default_mode = Par_code_mode.Plan)
+
+let test_json_legacy_no_default_mode () =
+  (* Simulate a v0.4.x config file that has no default_mode field *)
+  let json_str = {|{"provider":"openai","api_key":"sk-test","model":"gpt-4o","persistence":"sqlite","temperature":0.7,"system_prompt":"hello","max_iterations":50,"parallel_tool_execution":true,"event_retention_days":7.0,"auto_extract":true,"embedding_dimension":1536,"checkpoint_enabled":true,"checkpoint_interval":10,"context_budget_tokens":100000}|} in
+  let json = Yojson.Safe.from_string json_str in
+  match of_json json with
+  | Error msg -> Alcotest.fail (Printf.sprintf "of_json failed: %s" msg)
+  | Ok loaded ->
+    Alcotest.(check bool) "legacy config defaults to Build" true
+      (loaded.default_mode = Par_code_mode.Build)
+
+let test_json_legacy_plan_value () =
+  let json_str = {|{"provider":"openai","api_key":"","model":"gpt-4o","persistence":"sqlite","temperature":0.7,"system_prompt":"hello","max_iterations":50,"parallel_tool_execution":true,"event_retention_days":7.0,"auto_extract":true,"embedding_dimension":1536,"checkpoint_enabled":true,"checkpoint_interval":10,"context_budget_tokens":100000,"default_mode":"plan"}|} in
+  let json = Yojson.Safe.from_string json_str in
+  match of_json json with
+  | Error msg -> Alcotest.fail (Printf.sprintf "of_json failed: %s" msg)
+  | Ok loaded ->
+    Alcotest.(check bool) "explicit plan in JSON → Plan" true
+      (loaded.default_mode = Par_code_mode.Plan)
+
+let test_show_default_mode () =
+  let cfg = { default with api_key = "x"; default_mode = Par_code_mode.Plan } in
+  let output = capture_stdout (fun () -> show cfg) in
+  Alcotest.(check bool) "shows default_mode" true (string_contains output "default_mode:");
+  Alcotest.(check bool) "shows plan" true (string_contains output "plan")
+
 (* ── Test runner ──────────────────────────────────────────────────────── *)
 
 let () =
@@ -143,8 +183,15 @@ let () =
         Alcotest.test_case "optional_missing"   `Quick test_json_optional_fields_missing;
         Alcotest.test_case "defaults_fallback"  `Quick test_json_defaults_fallback;
       ];
+      "default_mode", [
+        Alcotest.test_case "default_is_build"           `Quick test_default_mode_is_build;
+        Alcotest.test_case "roundtrip_plan"             `Quick test_json_roundtrip_default_mode_plan;
+        Alcotest.test_case "legacy_no_field"            `Quick test_json_legacy_no_default_mode;
+        Alcotest.test_case "legacy_plan_value"          `Quick test_json_legacy_plan_value;
+      ];
       "show", [
         Alcotest.test_case "output"              `Quick test_show_output;
         Alcotest.test_case "custom_system_prompt" `Quick test_show_custom_system_prompt;
+        Alcotest.test_case "default_mode"        `Quick test_show_default_mode;
       ];
     ]

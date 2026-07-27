@@ -30,6 +30,7 @@ type config = {
   checkpoint_enabled : bool;
   checkpoint_interval : int;
   context_budget_tokens : int;
+  default_mode : Par_code_mode.mode;
 }
 
 let default_system_prompt = {|
@@ -106,6 +107,7 @@ let default = {
   checkpoint_enabled = true;
   checkpoint_interval = 10;
   context_budget_tokens = 100000;
+  default_mode = Par_code_mode.Build;
 }
 
 let config_dir () =
@@ -143,6 +145,7 @@ let to_json (cfg : config) : Yojson.Safe.t =
     ("checkpoint_enabled", `Bool cfg.checkpoint_enabled);
     ("checkpoint_interval", `Int cfg.checkpoint_interval);
     ("context_budget_tokens", `Int cfg.context_budget_tokens);
+    ("default_mode", `String (Par_code_mode.label cfg.default_mode));
   ]
 
 let of_json (json : Yojson.Safe.t) : (config, string) result =
@@ -155,6 +158,12 @@ let of_json (json : Yojson.Safe.t) : (config, string) result =
     let get_oi f = match json |> member f with `Int n -> Some n | _ -> None in
     let get_of f = match json |> member f with `Float x -> Some x | _ -> None in
     let get_b f d = match json |> member f |> to_bool_option with Some b -> b | None -> d in
+    let get_mode f d =
+      match json |> member f |> to_string_option with
+      | Some s when String.lowercase_ascii s = "plan" -> Par_code_mode.Plan
+      | Some s when String.lowercase_ascii s = "build" -> Par_code_mode.Build
+      | _ -> d
+    in
     Ok {
       provider = get_s "provider";
       api_key = get_s "api_key";
@@ -178,6 +187,7 @@ let of_json (json : Yojson.Safe.t) : (config, string) result =
       checkpoint_enabled = get_b "checkpoint_enabled" default.checkpoint_enabled;
       checkpoint_interval = get_i "checkpoint_interval" default.checkpoint_interval;
       context_budget_tokens = get_i "context_budget_tokens" default.context_budget_tokens;
+      default_mode = get_mode "default_mode" default.default_mode;
     }
   with exn -> Error (Printexc.to_string exn)
 
@@ -237,7 +247,8 @@ let merge
     ?(embedding_base_url = None) ?(embedding_model = None)
     ?(embedding_dimension = None)
     ?(checkpoint_enabled = None) ?(checkpoint_interval = None)
-    ?(context_budget_tokens = None) () =
+    ?(context_budget_tokens = None)
+    ?(default_mode = None) () =
   {
     provider = Option.value provider ~default:cfg.provider;
     api_key = Option.value api_key ~default:cfg.api_key;
@@ -259,6 +270,7 @@ let merge
     checkpoint_enabled = Option.value checkpoint_enabled ~default:cfg.checkpoint_enabled;
     checkpoint_interval = Option.value checkpoint_interval ~default:cfg.checkpoint_interval;
     context_budget_tokens = Option.value context_budget_tokens ~default:cfg.context_budget_tokens;
+    default_mode = (match default_mode with Some m -> m | None -> cfg.default_mode);
   }
 
 let require_config () =
@@ -279,6 +291,26 @@ let mask_api_key key =
   else Printf.sprintf "%s****%s"
     (String.sub key 0 4)
     (String.sub key (len - 4) 4)
+
+let update_field ~field ~value =
+  let cfg = match load () with Some c -> c | None -> default in
+  let updated = match String.lowercase_ascii field with
+    | "default_mode" ->
+      let mode = match String.lowercase_ascii (String.trim value) with
+        | "plan" -> Par_code_mode.Plan
+        | "build" -> Par_code_mode.Build
+        | other ->
+          Printf.eprintf "Invalid mode '%s'. Use 'plan' or 'build'.\n" other;
+          exit 1
+      in
+      { cfg with default_mode = mode }
+    | other ->
+      Printf.eprintf "Unknown config field '%s'.\n" other;
+      Printf.eprintf "Supported fields: default_mode\n";
+      exit 1
+  in
+  save updated;
+  updated
 
 let show ?(ui=Par_code_ui.create_backend ()) (cfg : config) =
   let open Par_code_ui in
@@ -304,6 +336,7 @@ let show ?(ui=Par_code_ui.create_backend ()) (cfg : config) =
     line "checkpoint_enabled:" (string_of_bool cfg.checkpoint_enabled);
     line "checkpoint_interval:" (string_of_int cfg.checkpoint_interval);
     line "context_budget_tokens:" (string_of_int cfg.context_budget_tokens);
+    line "default_mode:" (Par_code_mode.label cfg.default_mode);
     line "system_prompt:" (if cfg.system_prompt = default.system_prompt then "<default>" else "<custom>");
   ] in
   render_line ui image
@@ -414,6 +447,17 @@ let run_wizard ?(ui=Par_code_ui.create_backend ()) () =
     (try max 1000 (int_of_string s) with _ -> 100000)
   in
 
+  let default_mode =
+    let dm_default = match existing with
+      | Some c -> Some (Par_code_mode.label c.default_mode)
+      | None -> Some (Par_code_mode.label default.default_mode)
+    in
+    let s = prompt_line ui "Default REPL mode on startup (build/plan)" dm_default in
+    match String.lowercase_ascii (String.trim s) with
+    | "plan" -> Par_code_mode.Plan
+    | _ -> Par_code_mode.Build
+  in
+
   render_line ui (text "\nEmbedding API (for semantic memory search).");
   render_line ui (text "  Uses your chat provider by default. Configure separately if your");
   render_line ui (text "  provider doesn't support /embeddings or uses a different dimension.");
@@ -462,6 +506,7 @@ let run_wizard ?(ui=Par_code_ui.create_backend ()) () =
     auto_extract;
     embedding_base_url; embedding_model; embedding_dimension;
     checkpoint_enabled; checkpoint_interval; context_budget_tokens;
+    default_mode;
   } in
   save cfg;
   render_notice ui (Printf.sprintf "\nSaved config to %s" (config_path ()))
