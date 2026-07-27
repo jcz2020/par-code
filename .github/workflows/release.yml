@@ -72,6 +72,7 @@ jobs:
   # Job 2: Linux arm64 — build on native ARM runner for Raspberry Pi / Graviton
   # =========================================================================
   build-linux-arm64:
+    if: false  # Deferred to v0.5.1: uring.2.15.0 (eio dep via PAR SDK) fails on ARM64 AlmaLinux 8
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
@@ -152,7 +153,7 @@ jobs:
   # Job 4: Coordinate — assemble release assets + publish GitHub Release
   # =========================================================================
   coordinate:
-    needs: [build-linux, build-linux-arm64, build-macos]
+    needs: [build-linux, build-macos]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
