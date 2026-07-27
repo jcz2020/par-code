@@ -85,8 +85,14 @@ RUN opam init --disable-sandboxing -y --bare --no-setup && \
     eval $(opam env --switch=default)
 
 # Pin the PAR SDK (not yet on the public opam repository).
+# Tolerate exit code 31: opam returns it when the pin succeeds but the
+# switch state metadata is "out of sync" (packages are actually installed
+# and usable; the warning is about opam's internal tracking). This happens
+# intermittently on fresh ARM64 builds where no Docker layer cache exists.
 RUN eval $(opam env --switch=default) && \
-    opam pin add par https://github.com/jcz2020/par.git -y
+    opam pin add par https://github.com/jcz2020/par.git -y; \
+    rc=$?; \
+    if [ "$rc" -ne 0 ] && [ "$rc" -ne 31 ]; then exit "$rc"; fi
 
 # Copy par-code source into the build context.
 COPY . /src/par-code
