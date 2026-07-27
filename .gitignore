@@ -19,5 +19,8 @@ _opam/
 .dolt/
 *.db
 
+# par-code runtime artifacts (plans, session mode, local state)
+.par/
+
 # Generated version module
 lib/par_code_version.ml

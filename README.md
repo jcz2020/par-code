@@ -9,7 +9,7 @@ CLI conventions and drives the full PAR surface — ReAct loop, tool dispatch,
 type-safe bash, MCP client, skills, workflows, streaming — to both ship a
 useful agent and prove out the PAR SDK in anger.
 
-**Status:** `v0.4.5` — UI abstraction layer + streaming markdown. All output now goes through `Ui.render_*` with ANSI colors, structured tool cards, and live markdown rendering. Designed for future TUI backend migration. Pre-built binaries with a
+**Status:** `v0.5.0` — Plan Mode. Read-only planner agent + `/plan` `/build` mode switching + plan file persistence + `plan_enter`/`plan_exit` agent tools. Pre-built binaries with a
 one-line installer (`curl | bash`) for Linux x86_64/arm64 + macOS arm64, plus `par upgrade`
 self-update. No OCaml or opam needed for end users.
 
@@ -261,6 +261,47 @@ In addition to the session-end extraction (v0.3.1), memories are now extracted
 mid-session at each checkpoint cycle. Facts discovered during a long session
 appear in the memory index without waiting for the session to end.
 
+## Plan Mode
+
+par-code v0.5.0 introduces Plan Mode, a read-only planning mode that runs
+before code changes. In Plan Mode, the agent investigates your codebase and
+produces a structured plan before touching any files.
+
+### Switching modes
+
+```
+/plan         Switch to plan mode (read-only)
+/build        Switch to build mode (full tool access; saves current plan)
+```
+
+The REPL prompt shows the current mode: `(plan) par> ` or `(build) par> `.
+
+### What the planner can do
+
+In Plan Mode, the agent has access only to read-only tools: `read_file`,
+`grep`, `find_files`, `list_directory`, `recall_memory`, `search_history`.
+Write, edit, and bash are not available, so the LLM never sees their schemas.
+
+The planner produces a markdown plan with sections: Goal, Approach, Files to
+Touch, Risks, Open Questions, Steps.
+
+### Plan persistence
+
+When switching from Plan to Build (`/build`), the planner's last output is
+saved to `.par/plans/<ISO8601-timestamp>.md`. On the next build-mode turn,
+the agent is told the plan file path so it can read it before implementing.
+
+### Agent-invocable switching
+
+The agent can also switch modes itself by calling the `plan_enter` or
+`plan_exit` tools, useful for smooth handoffs ("Plan ready, switching to
+build").
+
+### Default mode
+
+The default mode is `build` (backward-compatible with v0.4.x). Configure via
+`par config` wizard or `par config set default_mode plan`.
+
 ## Roadmap
 
 Each release ships **one** user-facing capability — a thin, demonstrable slice.
@@ -281,7 +322,7 @@ Version numbers stay minimal (no 1.0 until core parity is earned).
 | **v0.4.2** ✅ | Critical fix — multi-turn conversations now correctly preserve assistant responses in `conversation.history`. PAR SDK 0.7.8 engine bug (silently dropped the terminal assistant message) was affecting v0.4.0 and v0.4.1; this release rebuilds against the fixed PAR SDK. *"The agent remembers what it just said."* |
 | **v0.4.3** ✅ | UX quick patch — `/cost` slash command (per-session token accumulator + operational metrics); `par config show` subcommand (prints all 19 fields with masked api_key); config wizard now prompts for 6 previously-hidden options (max_tokens, top_p, auto_extract, checkpoint_*, context_budget_tokens); memory `recall` no longer drops `usage_count`/`last_used_at` fields. Dead `bump_usage` removed. *"Daily-friction fixes — see what your session costs, inspect config without entering the wizard."* |
 | **v0.4.5** ✅ | UI abstraction layer — `Ui.*` rendering API with composable styled images; streaming markdown state machine; all 175 printf sites migrated; PAR SDK signals (tool_call chunks, usage_update, bash events) now rendered; 73 new tests. Zero new dependencies. *"Output that's structured, colored, and markdown-aware — and ready for a future TUI swap."* |
-| **v0.5.0** | Plan mode — read-only plan agent, build/plan switching, plan_enter/plan_exit. *"It plans before it touches code."* |
+| **v0.5.0** ✅ | Plan mode — read-only planner agent + `/plan` `/build` mode switching + plan file persistence + `plan_enter`/`plan_exit` agent tools. *"It plans before it touches code."* |
 | **v0.6.0** | Subagent delegation — general/explore subagents, actor tool, task tree. *"It spawns helpers to explore and work in parallel."* |
 | **v0.7.0** | Goal-driven autonomy — `/goal` + independent judge model + doom-loop detection. *"It won't declare done until the goal is truly met."* |
 | **v0.8.0** | Best-of-N reasoning — max-mode (parallel candidates + judge selection). *"It tries several approaches and picks the best."* |

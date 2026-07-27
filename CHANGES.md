@@ -1,5 +1,52 @@
 # CHANGES
 
+## v0.5.0 — Plan Mode
+
+> **Status**: Shipped. 187 tests passing across 11 suites.
+
+A read-only planning mode that runs before code changes. The agent
+investigates the codebase and produces a structured markdown plan before
+touching any files.
+
+### Added
+- **`lib/par_code_mode.ml`**: Mode state module (`type mode = Plan | Build`),
+  `switch`, `agent_id_for`, `label`. Single source of truth for current mode.
+- **`lib/par_code_plan_tools.ml`**: Two LLM-callable tools (`plan_enter`,
+  `plan_exit`) for agent-initiated mode switching. `persist_plan_file`
+  function extracts the planner's last assistant message and writes it to
+  `.par/plans/<ISO8601>.md`.
+- **Planner agent**: Registered alongside the main `"par"` agent with a
+  read-only tool subset (`read_file`, `grep`, `find_files`, `list_directory`,
+  `recall_memory`, `search_history`, `plan_exit`). Distinct system prompt
+  guides structured markdown plan output (Goal/Approach/Files/Risks/Steps).
+- **`/plan` and `/build` slash commands**: User-driven mode switching.
+  `/build` persists the plan file and injects the path into the next
+  build-mode turn's system prompt appendix.
+- **`default_mode` config field**: Defaults to `build` (backward compat);
+  configurable via wizard or `par config set default_mode plan`.
+- **REPL prompt mode indicator**: Renders `(plan) par> ` or `(build) par> `.
+
+### Changed
+- `Runtime.invoke` in the REPL now uses
+  `Par_code_mode.agent_id_for !current` instead of hardcoded `"par"`,
+  enabling mode-driven agent dispatch.
+- `par_code_ui.render_prompt` now requires a `~mode` parameter.
+- Plan-file appendix combines with memory appendix in
+  `?system_prompt_appendix` on the first build turn after `/build`.
+
+### Architecture
+- **Two-agent design**: The planner is a separate registered PAR SDK agent
+  with its own tool list. Per-agent tool isolation is the SDK's intended
+  primitive, so the LLM never sees write tool schemas in Plan Mode.
+- **Module-level mutable ref** (`Par_code_mode.current`): documented
+  limitation. Assumes single-runtime-per-process. Acceptable for v0.5.0.
+- **File-based plan persistence**: `.par/plans/<timestamp>.md` archive
+  format. No DB schema changes. Plans survive sessions, are
+  version-controllable.
+- **D4 scope compromise**: Plan output is free-form markdown guided by
+  system prompt (no `submit_plan` tool). Retirement plan: v0.6.0 evaluates
+  whether subagent coordination needs structured plan fields.
+
 ## v0.4.5 — UI abstraction layer + streaming markdown
 
 > A foundational rendering API (`Ui.*`) that decouples business code from

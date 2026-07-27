@@ -1,5 +1,94 @@
 # Decisions
 
+## [2026-07-27] v0.5.0 Plan Mode Architecture
+
+**变更前**: par-code had a single "par" agent that both investigated and
+modified code. No mode separation; the agent could write/edit/bash at any
+time.
+
+**变更后**: Two registered agents, "par" (build, all tools) and "planner"
+(read-only subset: read_file/grep/find_files/list_directory/recall_memory/
+search_history/plan_exit). Mode switch = swap `~agent_id` in
+`Runtime.invoke`. Conversation shared across both agents. Plan output
+persisted to `.par/plans/<ISO8601>.md`. `plan_enter`/`plan_exit` tools let
+the agent self-switch.
+
+**原因**: Plan mode (research, plan, execute) is the v0.5.0 capability.
+Per-agent tool isolation is PAR SDK's intended primitive, so the LLM only
+sees tools registered on the current agent. Two-agent design also sets up
+v0.6.0 subagent delegation.
+
+**影响范围**: New files `lib/par_code_mode.ml/mli`, `lib/par_code_plan_tools.ml`.
+Modified: `par_code_setup.ml` (planner registration + tool registration),
+`par_code_repl.ml` (mode-aware dispatch + slash commands + appendix),
+`par_code_ui.ml/mli` (render_prompt mode param), `par_code_config.ml`
+(default_mode field), `bin/main.ml` (config set subcommand).
+
+**回退方式**: Set `default_mode: build` in config (already default). The
+plan mode code paths are dormant unless the user types `/plan` or the agent
+calls `plan_enter`. Removing v0.5.0 = delete the new files + revert the
+modified files.
+
+**已知限制**:
+1. Module-level mutable ref (`Par_code_mode.current`) — single-runtime
+   assumption. Documented in `.mli`.
+2. D4 scope compromise: plan output is free-form markdown (no `submit_plan`
+   tool). Retirement plan: v0.6.0 evaluates structured plan fields.
+3. Plan/Build conversation history is shared — planner sees past builder
+   tool calls, builder sees past planner analysis. Integration tested but
+   may require prompt engineering for edge cases.
+
+## [2026-07-27] PAR SDK Feedback: First-class mode concept
+
+**Tag**: PAR SDK Feedback
+
+**变更前**: par-code v0.5.0 simulates "modes" (Plan/Build) by swapping
+`~agent_id` in `Runtime.invoke` and maintaining a module-level mutable
+ref `Par_code_mode.current`.
+
+**变更后**: No PAR SDK change. par-code works around the gap.
+
+**原因**: PAR SDK has no first-class `current_mode` field on Runtime or
+invoke_context. The workaround is functional but adds par-code-side state
+management that PAR SDK could own.
+
+**影响范围**: par-code only. Future PAR SDK evolution.
+
+**回退方式**: N/A (no PAR SDK change to revert).
+
+**已知限制**:
+- Priority: low (v0.5.0 ships without it)
+- Re-evaluation trigger: if v0.6.0+ adds more modes (debug, review,
+  refactor), the agent-swap pattern becomes unwieldy. At that point,
+  request PAR SDK to add `mode : string` field on invoke_context or
+  runtime.
+- Would enable: mode-aware hooks (instead of agent-swap), mode-transition
+  events, cross-session mode persistence in SDK.
+
+## [2026-07-27] PAR SDK Feedback: Plan/task primitive
+
+**Tag**: PAR SDK Feedback
+
+**变更前**: par-code v0.5.0 stores plans as markdown files in
+`.par/plans/<timestamp>.md`. No PAR SDK primitive for plan artifacts.
+
+**变更后**: No PAR SDK change. Plans are app-level.
+
+**原因**: PAR SDK has no "task" or "plan" artifact type. Plans are
+conversation content + files.
+
+**影响范围**: par-code only. Future PAR SDK evolution.
+
+**回退方式**: N/A.
+
+**已知限制**:
+- Priority: medium (v0.6.0 will feel the gap)
+- Re-evaluation trigger: v0.6.0 subagent coordination needs structured
+  plan handoff between builder and delegated planner subagent. At that
+  point, request PAR SDK to add a `Task` or `Plan` artifact type.
+- Would enable: cross-agent plan sharing, plan status tracking
+  (not-started / in-progress / complete), plan-based tool filtering.
+
 ## [2026-07-21] v0.4.5: UI abstraction layer — composable styled images
 
 **变更前**: par-code used `Printf.printf`/`Printf.eprintf` directly throughout

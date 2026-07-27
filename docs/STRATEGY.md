@@ -185,6 +185,9 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
   styled images, streaming markdown state machine, 13 high-level render
   functions. All 175 printf migrated. PAR SDK signals restored. 73 new tests.
   Zero new deps. Future TUI backend (v0.14.0 Mosaic/Matrix) path confirmed.
+- **v0.5.0 ✅ shipped** — Plan Mode: read-only planner agent,
+  `/plan` `/build` mode switching, plan file persistence, `plan_enter`/
+  `plan_exit` agent tools. 187 tests passing.
 - v0.4.0+ — plan mode, subagents, autonomy, reasoning,
   self-improvement, compose mode, ecosystem, code intelligence, safety, polish
   → v1.0
@@ -230,6 +233,9 @@ per global rules) lives in `docs/DECISIONS.md`. Strategic-level entries:
 | 2026-07-20 | v0.4.3 shipped — UX quick patch: `/cost` + `par config show` + 6 wizard prompts + memory recall usage-field fix + dead `bump_usage` removal (63 tests, Oracle-reviewed) | Active |
 | 2026-07-21 | v0.4.5: UI abstraction layer — composable styled images, ANSI colors, backend with TTY detection; all 175 printf migrated; future TUI path to Mosaic/Matrix confirmed | Active |
 | 2026-07-21 | v0.4.5: streaming markdown state machine — line-based incremental parser; round-trip property verified; zero OCaml reference impl existed | Active |
+| 2026-07-27 | v0.5.0: Plan Mode architecture — two registered agents (planner + par) with per-agent tool isolation; mode switch = swap agent_id in Runtime.invoke; file-based plan persistence; default Build mode | Active |
+| 2026-07-27 | v0.5.0: PAR SDK feedback filed — first-class mode concept missing (currently par-code simulates via agent_id swap + module-level mutable ref). Priority: low. Re-evaluation trigger: if v0.6.0+ adds more modes. | Active |
+| 2026-07-27 | v0.5.0: PAR SDK feedback filed — no plan/task primitive (plans stored as markdown files, not queryable). Priority: medium. Re-evaluation trigger: v0.6.0 subagent coordination needs structured plan handoff. | Active |
 
 ## 10. Revision Protocol
 
