@@ -16,11 +16,6 @@ open Par
 
 (* -- Helpers -------------------------------------------------------------- *)
 
-(** Build an [Error] handler result with the given category and message. *)
-let tool_error ~category ~message () =
-  let open Types in
-  Error { category; message; retryable = false; metadata = [] }
-
 (* -- Tool schemas --------------------------------------------------------- *)
 
 let plan_enter_input_schema : Yojson.Safe.t =
@@ -153,3 +148,124 @@ let persist_plan_file (conv : Types.conversation) : string option =
         (fun () -> output_string oc text);
       Some path
     with Sys_error _ -> None
+
+(* -- Plan file management -------------------------------------------------- *)
+
+type plan_entry = { filename : string; size : int; timestamp : float option }
+
+(** [parse_plan_timestamp filename] extracts a UTC Unix timestamp from a plan
+    filename like ["2026-07-27T14-30-00Z.md"].  Returns [None] if the name
+    doesn't match the expected format. *)
+let parse_plan_timestamp (filename : string) : float option =
+  let name =
+    if Filename.check_suffix filename ".md" then
+      Filename.chop_suffix filename ".md"
+    else filename
+  in
+  try
+    Scanf.sscanf name "%04d-%02d-%02dT%02d-%02d-%02dZ"
+      (fun year mon day hour min sec ->
+        (* Fliegel-Van Flandern algorithm: Gregorian date → Julian Day Number.
+           See: https://aa.usno.navy.mil/faq/JD_formula *)
+        let y, m =
+          if mon <= 2 then (year - 1, mon + 12)
+          else (year, mon)
+        in
+        let a = y / 100 in
+        let b = 2 - a + (a / 4) in
+        let jdn =
+          truncate (365.25 *. float_of_int (y + 4716))
+          + truncate (30.6001 *. float_of_int (m + 1))
+          + day + b - 1524
+        in
+        let ts = (float_of_int jdn -. 2440588.0) *. 86400.0
+                 +. float_of_int hour *. 3600.0
+                 +. float_of_int min *. 60.0
+                 +. float_of_int sec
+        in
+        ts)
+    |> Option.some
+  with _ -> None
+
+(** [list_plans ~limit] returns up to [limit] plan entries from [.par/plans/],
+    sorted newest-first by parsed timestamp.  Returns [Ok []] when the
+    directory does not exist. *)
+let list_plans ~(limit : int) : (plan_entry list, [> `Plan_error of string]) result =
+  try
+    let plans_dir = ".par/plans" in
+    if not (Sys.file_exists plans_dir) then Ok []
+    else
+      let files = Sys.readdir plans_dir in
+      let entries =
+        Array.to_list files
+        |> List.filter (fun f -> Filename.check_suffix f ".md")
+        |> List.map (fun f ->
+          let path = Filename.concat plans_dir f in
+          let size = (Unix.stat path).Unix.st_size in
+          let timestamp = parse_plan_timestamp f in
+          { filename = f; size; timestamp })
+        |> List.sort (fun a b ->
+          match (a.timestamp, b.timestamp) with
+          | Some ta, Some tb -> Float.compare tb ta  (* newest first *)
+          | None, Some _ -> 1   (* undated files sort last *)
+          | Some _, None -> -1
+          | None, None -> 0)
+      in
+      let rec take n = function
+        | [] -> []
+        | _ when n <= 0 -> []
+        | x :: xs -> x :: take (n - 1) xs
+      in
+      Ok (take limit entries)
+  with
+  | Sys_error msg -> Error (`Plan_error msg)
+  | exn -> Error (`Plan_error (Printexc.to_string exn))
+
+(** [show_plan filename] reads and returns the content of a plan file.
+    Looks in [.par/plans/]; if the name has no [.md] suffix, tries appending it. *)
+let show_plan (filename : string) : (string, [> `Plan_error of string]) result =
+  try
+    let plans_dir = ".par/plans" in
+    let path0 = Filename.concat plans_dir filename in
+    let path =
+      if Sys.file_exists path0 then path0
+      else if not (Filename.check_suffix filename ".md") then
+        let with_ext = Filename.concat plans_dir (filename ^ ".md") in
+        if Sys.file_exists with_ext then with_ext
+        else path0  (* will trigger Sys_error below *)
+      else path0
+    in
+    let ic = open_in path in
+    Fun.protect ~finally:(fun () -> close_in ic)
+      (fun () ->
+        let len = in_channel_length ic in
+        Ok (really_input_string ic len))
+  with
+  | Sys_error msg -> Error (`Plan_error msg)
+  | exn -> Error (`Plan_error (Printexc.to_string exn))
+
+(** [prune_plans ~older_than_days] deletes plan files whose parsed timestamp is
+    more than [older_than_days] days in the past.  Returns the count of deleted
+    files.  Files without a parseable timestamp are left untouched. *)
+let prune_plans ~(older_than_days : int) : (int, [> `Plan_error of string]) result =
+  try
+    let plans_dir = ".par/plans" in
+    if not (Sys.file_exists plans_dir) then Ok 0
+    else
+      let now = Unix.gettimeofday () in
+      let cutoff = now -. (float_of_int older_than_days *. 86400.0) in
+      let files = Sys.readdir plans_dir in
+      let count = ref 0 in
+      Array.iter (fun f ->
+        if Filename.check_suffix f ".md" then
+          match parse_plan_timestamp f with
+          | Some ts when ts < cutoff ->
+            let path = Filename.concat plans_dir f in
+            Sys.remove path;
+            incr count
+          | _ -> ()
+      ) files;
+      Ok !count
+  with
+  | Sys_error msg -> Error (`Plan_error msg)
+  | exn -> Error (`Plan_error (Printexc.to_string exn))

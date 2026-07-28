@@ -241,8 +241,28 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
     ) plan_tools;
     let plan_descriptors = List.map (fun (tb : Types.tool_binding) -> tb.descriptor) plan_tools in
     descriptors := plan_descriptors @ !descriptors;
+    (* Git tools: read-only git status/log for planner (v0.5.1) *)
+    let process_mgr = Eio.Stdenv.process_mgr env in
+    let git_tools = Par_code_git_tools.tools ~process_mgr in
+    List.iter (fun (tb : Types.tool_binding) ->
+      (match Runtime.register_tool rt
+         ~name:tb.descriptor.Types.name
+         ~description:tb.descriptor.Types.description
+         ~input_schema:tb.descriptor.Types.input_schema
+         ~handler:tb.handler
+         ?permission:(match tb.descriptor.Types.permission with Types.Allow -> None | p -> Some p)
+         ?timeout:tb.descriptor.Types.timeout
+         ?concurrency_limit:tb.descriptor.Types.concurrency_limit
+         () with
+        | Ok _ -> ()
+        | Error e ->
+          ui_render_warning (Printf.sprintf "Warning: failed to register git tool %s: %s"
+            tb.descriptor.Types.name (error_to_string e)))
+    ) git_tools;
+    let git_descriptors = List.map (fun (tb : Types.tool_binding) -> tb.descriptor) git_tools in
+    descriptors := git_descriptors @ !descriptors;
     (match Runtime.install_bash_tool
-       ~process_mgr:(Eio.Stdenv.process_mgr env)
+       ~process_mgr
        ~clock:(Eio.Stdenv.clock env)
        ~fs:(Eio.Stdenv.fs env)
        rt with
@@ -300,7 +320,7 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
       List.filter (fun (td : Types.tool_descriptor) ->
         List.mem td.name
           [ "read_file"; "grep"; "find_files"; "list_directory";
-            "recall_memory"; "search_history" ]
+            "recall_memory"; "search_history"; "git_status"; "git_log" ]
         || td.name = plan_exit_name
       ) !descriptors
     in
@@ -332,8 +352,8 @@ Your output should be a markdown plan with these sections:
 <numbered list of implementation steps in suggested execution order>
 
 Investigate thoroughly using read_file, grep, find_files, list_directory,
-recall_memory, search_history. Ask clarifying questions if the request is
-ambiguous.
+recall_memory, search_history, git_status, git_log. Ask clarifying questions
+if the request is ambiguous.
 
 When your plan is complete, call the `plan_exit` tool to hand off to build mode.|}
     in

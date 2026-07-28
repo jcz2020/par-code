@@ -1,5 +1,58 @@
 # Decisions
 
+## [2026-07-29] v0.5.1 shipped — Plan CLI + Git Tools
+
+**变更前**：v0.5.0 shipped Plan Mode but deferred 4 items to §17: `par plan
+list/show/prune` CLI subcommands and dedicated `git_status`/`git_log`
+read-only tools for the planner agent. The planner had no way to inspect
+git state (its tool filter excluded bash), and saved plans accumulated in
+`.par/plans/` with no management interface.
+
+**变更后**：v0.5.1 ships. Version bumped to 0.5.1 in dune-project +
+par_code.opam + test assertion. Tag v0.5.1 pushed; Release workflow builds
+Linux x64/arm64 + macOS arm64. Four items delivered:
+1. `par plan list` (default for bare `par plan`) — lists `.par/plans/*.md`
+   with filename, size, parsed creation timestamp (newest-first).
+2. `par plan show <file>` — reads plan content, auto-appends `.md`.
+3. `par plan prune --older-than <days>` — deletes old plans by filename
+   timestamp (not mtime).
+4. `git_status` + `git_log` — read-only tool bindings using `Eio.Process`
+   with `tok.switch` for fiber safety. Planner filter updated from 6→8
+   read-only tools.
+
+New files: `lib/par_code_git_tools.ml/mli`, `lib/par_code_plan_tools.mli`.
+Modified: `par_code_plan_tools.ml` (+list/show/prune/parse_plan_timestamp),
+`par_code_setup.ml` (git tool registration + planner filter + prompt),
+`bin/cli_args.ml` + `bin/main.ml` (plan subcommands + is_chat_mode).
+Tests: 13 plan tools + 10 git tools = 23 new tests (211 total).
+
+**原因**：Collects v0.5.0's deferred items into a focused patch release.
+Plan CLI makes the accumulated `.par/plans/` directory manageable. Git
+tools give the planner visibility into working-tree state and commit
+history — essential for producing accurate plans. Both are small,
+self-contained features that round out the Plan Mode UX.
+
+**影响范围**：14 files (10 modified, 4 new). Zero PAR SDK changes.
+Zero new dependencies (eio already in lib/dune). Users: `curl install.sh
+| bash` now installs v0.5.1; existing v0.5.0 users get offered the
+upgrade via startup version check.
+
+**回退方式**：Git tag and GitHub Release are permanent. Code state can
+be reverted via `git revert`. The plan CLI and git tools are pure
+additions — removing them doesn't affect v0.5.0 Plan Mode functionality.
+
+**已知限制**：
+1. `git_log` count parameter not validated/clamped — negative values
+   produce invalid git args, but git exits non-zero and the handler
+   returns a clean error. Read-only, no security impact.
+2. `show_plan` reads outside `.par/plans/` if given a path like
+   `../../etc/passwd` — consistent with `cat` behavior for a local CLI
+   (same-user, no privilege boundary). Defense-in-depth (basename-only)
+   deferred.
+3. `parse_plan_timestamp` uses Fliegel-Van Flandern algorithm — handles
+   all Gregorian dates correctly. The earlier v0.5.1-dev JDN float
+   formula had a +0.5 day offset bug, now fixed.
+
 ## [2026-07-28] v0.5.0 ARM64 build: pin uring 2.7.0 to avoid vendored liburing failure
 
 **变更前**：Docker build for ARM64 AlmaLinux 8 pulled `eio.1.4` (latest from

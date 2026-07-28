@@ -188,6 +188,9 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
 - **v0.5.0 ✅ shipped** — Plan Mode: read-only planner agent,
   `/plan` `/build` mode switching, plan file persistence, `plan_enter`/
   `plan_exit` agent tools. 187 tests passing.
+- **v0.5.1 ✅ shipped** — Plan CLI + git tools: `par plan list/show/prune`
+  subcommands + `git_status`/`git_log` read-only tools for the planner.
+  Fliegel-Van Flandern timestamp parser. 211 tests passing.
 - v0.4.0+ — plan mode, subagents, autonomy, reasoning,
   self-improvement, compose mode, ecosystem, code intelligence, safety, polish
   → v1.0
@@ -238,6 +241,7 @@ per global rules) lives in `docs/DECISIONS.md`. Strategic-level entries:
 | 2026-07-27 | v0.5.0: Plan Mode architecture — two registered agents (planner + par) with per-agent tool isolation; mode switch = swap agent_id in Runtime.invoke; file-based plan persistence; default Build mode | Active |
 | 2026-07-27 | v0.5.0: PAR SDK feedback filed — first-class mode concept missing (currently par-code simulates via agent_id swap + module-level mutable ref). Priority: low. Re-evaluation trigger: if v0.6.0+ adds more modes. | Active |
 | 2026-07-27 | v0.5.0: PAR SDK feedback filed — no plan/task primitive (plans stored as markdown files, not queryable). Priority: medium. Re-evaluation trigger: v0.6.0 subagent coordination needs structured plan handoff. | Active |
+| 2026-07-29 | v0.5.1 shipped — Plan CLI (par plan list/show/prune) + git_status/git_log read-only tools for planner + Fliegel-Van Flandern timestamp parser. 211 tests passing. | Active |
 
 ## 10. Revision Protocol
 

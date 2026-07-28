@@ -1,5 +1,41 @@
 # CHANGES
 
+## v0.5.1 — Plan CLI + Git Tools
+
+> **Status**: Shipped. 211 tests passing across 12 suites.
+
+Collects deferred items from v0.5.0 §17: plan file management CLI and
+read-only git tools for the planner agent.
+
+### Added
+- **`par plan list`**: List saved plan files from `.par/plans/` with
+  filename, size, and parsed creation timestamp. `--limit`/`-n` flag
+  controls max results (default 50). `par plan` (bare) defaults to list.
+- **`par plan show <file>`**: Display a saved plan file. Auto-appends
+  `.md` if omitted.
+- **`par plan prune --older-than <days>`**: Delete plan files older than
+  N days (default 30). Parses timestamp from filename (not mtime).
+- **`git_status` tool**: Read-only tool for the planner agent. Returns
+  current branch and working tree file statuses as structured JSON.
+  Uses `Eio.Process` to spawn `git status --porcelain=v1 -b`.
+- **`git_log` tool**: Read-only tool for the planner agent. Returns
+  recent commit history (hash, message, date) as structured JSON.
+  Accepts optional `count` parameter (default 10). Uses `Eio.Process`.
+- **`lib/par_code_git_tools.ml` + `.mli`**: New module for git tool
+  bindings. `tools ~process_mgr` returns `git_status` and `git_log`
+  `Types.tool_binding` list.
+- **`lib/par_code_plan_tools.mli`**: New public API file exporting
+  `plan_entry` type, `list_plans`, `show_plan`, `prune_plans`,
+  `parse_plan_timestamp`.
+- **Tests**: 13 new plan tools tests (parse/list/show/prune) + 10 new
+  git tools tests (status/log parsing + dotted branch regression). All use temp dirs for isolation.
+
+### Changed
+- Planner agent's tool subset now includes `git_status` and `git_log`
+  (up from 6 to 8 read-only tools).
+- Planner system prompt updated to mention git tools.
+- `is_chat_mode` in `main.ml` recognizes `"plan"` subcommand.
+
 ## v0.5.0 — Plan Mode
 
 > **Status**: Shipped. 187 tests passing across 11 suites.

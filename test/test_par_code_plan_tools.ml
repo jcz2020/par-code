@@ -1,5 +1,7 @@
 open Par
 
+let failf fmt = Printf.ksprintf (fun s -> Alcotest.fail s) fmt
+
 let string_contains s sub =
   let len_s = String.length s in
   let len_sub = String.length sub in
@@ -241,6 +243,196 @@ let test_persist_no_permission_returns_none () =
     )
   )
 
+(* -- parse_plan_timestamp tests ------------------------------------------- *)
+
+let test_parse_valid_timestamp () =
+  match Par_code_plan_tools.parse_plan_timestamp "2026-07-27T14-30-00Z.md" with
+  | Some ts ->
+    (* Exact value from the code's JDN float formula *)
+    Alcotest.(check (float 1.0)) "timestamp value" 1785162600.0 ts
+  | None -> Alcotest.fail "expected Some for valid timestamp"
+
+let test_parse_without_md_extension () =
+  let with_md = Par_code_plan_tools.parse_plan_timestamp "2026-07-27T14-30-00Z.md" in
+  let without_md = Par_code_plan_tools.parse_plan_timestamp "2026-07-27T14-30-00Z" in
+  match (with_md, without_md) with
+  | Some a, Some b ->
+    Alcotest.(check (float 1.0)) "same timestamp" a b
+  | _ -> Alcotest.fail "expected Some for both with and without .md"
+
+let test_parse_invalid_filename () =
+  match Par_code_plan_tools.parse_plan_timestamp "not-a-timestamp.md" with
+  | None -> ()
+  | Some _ -> Alcotest.fail "expected None for invalid filename"
+
+let test_parse_empty_string () =
+  match Par_code_plan_tools.parse_plan_timestamp "" with
+  | None -> ()
+  | Some _ -> Alcotest.fail "expected None for empty string"
+
+(* -- list_plans tests ----------------------------------------------------- *)
+
+let make_plans_dir tmp =
+  let par_dir = Filename.concat tmp ".par" in
+  let plans_dir = Filename.concat par_dir "plans" in
+  (try Unix.mkdir par_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  (try Unix.mkdir plans_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  plans_dir
+
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect ~finally:(fun () -> close_out oc)
+    (fun () -> output_string oc content)
+
+let test_list_plans_empty_dir () =
+  with_temp_dir (fun tmpdir ->
+    let old_cwd = Sys.getcwd () in
+    Sys.chdir tmpdir;
+    Fun.protect ~finally:(fun () -> Sys.chdir old_cwd) (fun () ->
+      match Par_code_plan_tools.list_plans ~limit:10 with
+      | Ok [] -> ()
+      | Ok _  -> Alcotest.fail "expected empty list when .par/plans doesn't exist"
+      | Error (`Plan_error msg) -> failf "list_plans error: %s" msg))
+
+let test_list_plans_with_files () =
+  with_temp_dir (fun tmpdir ->
+    let old_cwd = Sys.getcwd () in
+    Sys.chdir tmpdir;
+    Fun.protect ~finally:(fun () -> Sys.chdir old_cwd) (fun () ->
+      let plans_dir = make_plans_dir tmpdir in
+      write_file (Filename.concat plans_dir "2026-07-25T10-00-00Z.md") "plan A";
+      write_file (Filename.concat plans_dir "2026-07-27T14-30-00Z.md") "plan B";
+      write_file (Filename.concat plans_dir "2026-07-26T12-00-00Z.md") "plan C";
+      match Par_code_plan_tools.list_plans ~limit:10 with
+      | Ok entries ->
+        Alcotest.(check int) "count" 3 (List.length entries);
+        let filenames =
+          List.map (fun (e : Par_code_plan_tools.plan_entry) -> e.filename) entries
+        in
+        Alcotest.(check (list string)) "sorted newest-first"
+          [ "2026-07-27T14-30-00Z.md"
+          ; "2026-07-26T12-00-00Z.md"
+          ; "2026-07-25T10-00-00Z.md"
+          ] filenames;
+        List.iter (fun (e : Par_code_plan_tools.plan_entry) ->
+          Alcotest.(check bool) "size > 0" true (e.size > 0)) entries;
+        List.iter (fun (e : Par_code_plan_tools.plan_entry) ->
+          match e.timestamp with
+          | Some _ -> ()
+          | None -> failf "expected timestamp for %s" e.filename) entries
+      | Error (`Plan_error msg) -> failf "list_plans error: %s" msg))
+
+let test_list_plans_limit () =
+  with_temp_dir (fun tmpdir ->
+    let old_cwd = Sys.getcwd () in
+    Sys.chdir tmpdir;
+    Fun.protect ~finally:(fun () -> Sys.chdir old_cwd) (fun () ->
+      let plans_dir = make_plans_dir tmpdir in
+      for i = 1 to 5 do
+        let name = Printf.sprintf "2026-07-%02dT10-00-00Z.md" (20 + i) in
+        write_file (Filename.concat plans_dir name) (Printf.sprintf "plan %d" i)
+      done;
+      match Par_code_plan_tools.list_plans ~limit:2 with
+      | Ok entries ->
+        Alcotest.(check int) "limited to 2" 2 (List.length entries)
+      | Error (`Plan_error msg) -> failf "list_plans error: %s" msg))
+
+(* -- show_plan tests ------------------------------------------------------ *)
+
+let test_show_plan_existing () =
+  with_temp_dir (fun tmpdir ->
+    let old_cwd = Sys.getcwd () in
+    Sys.chdir tmpdir;
+    Fun.protect ~finally:(fun () -> Sys.chdir old_cwd) (fun () ->
+      let plans_dir = make_plans_dir tmpdir in
+      let content = "# My Plan\n\nDo the thing." in
+      write_file (Filename.concat plans_dir "2026-07-27T14-30-00Z.md") content;
+      match Par_code_plan_tools.show_plan "2026-07-27T14-30-00Z.md" with
+      | Ok text -> Alcotest.(check string) "content" content text
+      | Error (`Plan_error msg) -> failf "show_plan error: %s" msg))
+
+let test_show_plan_auto_md () =
+  with_temp_dir (fun tmpdir ->
+    let old_cwd = Sys.getcwd () in
+    Sys.chdir tmpdir;
+    Fun.protect ~finally:(fun () -> Sys.chdir old_cwd) (fun () ->
+      let plans_dir = make_plans_dir tmpdir in
+      let content = "# Auto MD Plan" in
+      write_file (Filename.concat plans_dir "2026-07-27T14-30-00Z.md") content;
+      match Par_code_plan_tools.show_plan "2026-07-27T14-30-00Z" with
+      | Ok text -> Alcotest.(check string) "content" content text
+      | Error (`Plan_error msg) -> failf "show_plan auto .md error: %s" msg))
+
+let test_show_plan_not_found () =
+  with_temp_dir (fun tmpdir ->
+    let old_cwd = Sys.getcwd () in
+    Sys.chdir tmpdir;
+    Fun.protect ~finally:(fun () -> Sys.chdir old_cwd) (fun () ->
+      let _ = make_plans_dir tmpdir in
+      match Par_code_plan_tools.show_plan "nonexistent.md" with
+      | Ok _ -> Alcotest.fail "expected Error for non-existent file"
+      | Error (`Plan_error _) -> ()))
+
+(* -- prune_plans tests ---------------------------------------------------- *)
+
+let test_prune_old_files () =
+  with_temp_dir (fun tmpdir ->
+    let old_cwd = Sys.getcwd () in
+    Sys.chdir tmpdir;
+    Fun.protect ~finally:(fun () -> Sys.chdir old_cwd) (fun () ->
+      let plans_dir = make_plans_dir tmpdir in
+      write_file (Filename.concat plans_dir "2020-01-01T00-00-00Z.md") "old plan";
+      write_file (Filename.concat plans_dir "2026-07-27T14-30-00Z.md") "recent plan";
+      match Par_code_plan_tools.prune_plans ~older_than_days:30 with
+      | Ok n ->
+        Alcotest.(check int) "pruned count" 1 n;
+        Alcotest.(check bool) "old file deleted" false
+          (Sys.file_exists (Filename.concat plans_dir "2020-01-01T00-00-00Z.md"));
+        Alcotest.(check bool) "recent file kept" true
+          (Sys.file_exists (Filename.concat plans_dir "2026-07-27T14-30-00Z.md"))
+      | Error (`Plan_error msg) -> failf "prune_plans error: %s" msg))
+
+let test_prune_keeps_recent () =
+  with_temp_dir (fun tmpdir ->
+    let old_cwd = Sys.getcwd () in
+    Sys.chdir tmpdir;
+    Fun.protect ~finally:(fun () -> Sys.chdir old_cwd) (fun () ->
+      let plans_dir = make_plans_dir tmpdir in
+      write_file (Filename.concat plans_dir "2026-07-27T14-30-00Z.md") "recent A";
+      write_file (Filename.concat plans_dir "2026-07-26T10-00-00Z.md") "recent B";
+      match Par_code_plan_tools.prune_plans ~older_than_days:365 with
+      | Ok n ->
+        Alcotest.(check int) "none pruned" 0 n;
+        Alcotest.(check bool) "file A exists" true
+          (Sys.file_exists (Filename.concat plans_dir "2026-07-27T14-30-00Z.md"));
+        Alcotest.(check bool) "file B exists" true
+          (Sys.file_exists (Filename.concat plans_dir "2026-07-26T10-00-00Z.md"))
+      | Error (`Plan_error msg) -> failf "prune_plans error: %s" msg))
+
+let test_prune_no_files () =
+  with_temp_dir (fun tmpdir ->
+    let old_cwd = Sys.getcwd () in
+    Sys.chdir tmpdir;
+    Fun.protect ~finally:(fun () -> Sys.chdir old_cwd) (fun () ->
+      let _ = make_plans_dir tmpdir in
+      match Par_code_plan_tools.prune_plans ~older_than_days:30 with
+      | Ok n -> Alcotest.(check int) "empty dir prune" 0 n
+      | Error (`Plan_error msg) -> failf "prune_plans error: %s" msg))
+
+let test_prune_undated_file () =
+  with_temp_dir (fun tmpdir ->
+    let old_cwd = Sys.getcwd () in
+    Sys.chdir tmpdir;
+    Fun.protect ~finally:(fun () -> Sys.chdir old_cwd) (fun () ->
+      let plans_dir = make_plans_dir tmpdir in
+      write_file (Filename.concat plans_dir "my-plan.md") "undated plan";
+      match Par_code_plan_tools.prune_plans ~older_than_days:0 with
+      | Ok n ->
+        Alcotest.(check int) "undated not pruned" 0 n;
+        Alcotest.(check bool) "undated file kept" true
+          (Sys.file_exists (Filename.concat plans_dir "my-plan.md"))
+      | Error (`Plan_error msg) -> failf "prune_plans error: %s" msg))
+
 (* -- Test registration ---------------------------------------------------- *)
 
 let () =
@@ -263,5 +455,27 @@ let () =
         Alcotest.test_case "filename is iso8601"         `Quick test_persist_filename_is_iso8601;
         Alcotest.test_case "no assistant returns None"   `Quick test_persist_no_assistant_returns_none;
         Alcotest.test_case "no permission returns None"  `Quick test_persist_no_permission_returns_none;
+      ];
+      "parse_plan_timestamp", [
+        Alcotest.test_case "valid_timestamp"       `Quick test_parse_valid_timestamp;
+        Alcotest.test_case "without_md_extension"  `Quick test_parse_without_md_extension;
+        Alcotest.test_case "invalid_filename"      `Quick test_parse_invalid_filename;
+        Alcotest.test_case "empty_string"          `Quick test_parse_empty_string;
+      ];
+      "list_plans", [
+        Alcotest.test_case "empty_dir"   `Quick test_list_plans_empty_dir;
+        Alcotest.test_case "with_files"  `Quick test_list_plans_with_files;
+        Alcotest.test_case "limit"       `Quick test_list_plans_limit;
+      ];
+      "show_plan", [
+        Alcotest.test_case "existing"    `Quick test_show_plan_existing;
+        Alcotest.test_case "auto_md"     `Quick test_show_plan_auto_md;
+        Alcotest.test_case "not_found"   `Quick test_show_plan_not_found;
+      ];
+      "prune_plans", [
+        Alcotest.test_case "old_files"       `Quick test_prune_old_files;
+        Alcotest.test_case "keeps_recent"    `Quick test_prune_keeps_recent;
+        Alcotest.test_case "no_files"        `Quick test_prune_no_files;
+        Alcotest.test_case "undated_file"    `Quick test_prune_undated_file;
       ];
     ]

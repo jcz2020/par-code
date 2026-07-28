@@ -450,6 +450,70 @@ let cmd_memory =
       Cmd.v info_memory_search cmd_memory_search_term;
       Cmd.v info_memory_search_history cmd_memory_search_history_term; ]
 
+let cmd_plan_list limit =
+  match Par_code_plan_tools.list_plans ~limit with
+  | Error (`Plan_error msg) ->
+    Par_code_ui.render_error ui (Printf.sprintf "Error listing plans: %s" msg);
+    exit 1
+  | Ok [] ->
+    Par_code_ui.render_notice ui "No plans found."
+  | Ok plans ->
+    let rows =
+      List.map (fun (p : Par_code_plan_tools.plan_entry) ->
+        [ p.filename;
+          string_of_int p.size;
+          match p.timestamp with
+          | Some ts -> format_timestamp ts
+          | None -> "—" ]
+      ) plans
+    in
+    Par_code_ui.render_table ui
+      ~headers:["FILE"; "SIZE"; "CREATED"]
+      ~rows
+
+let cmd_plan_list_term =
+  let open Term in
+  const cmd_plan_list $ Cli_args.plan_limit_arg
+
+let info_plan_list = Cmd.info "list" ~doc:"List saved plans"
+
+let cmd_plan_show filename =
+  match Par_code_plan_tools.show_plan filename with
+  | Error (`Plan_error msg) ->
+    Par_code_ui.render_error ui (Printf.sprintf "Error reading plan: %s" msg);
+    exit 1
+  | Ok content ->
+    Par_code_ui.render ui (Par_code_ui.text content)
+
+let cmd_plan_show_term =
+  let open Term in
+  const cmd_plan_show $ Cli_args.plan_file_arg
+
+let info_plan_show = Cmd.info "show" ~doc:"Display a saved plan"
+
+let cmd_plan_prune older_than_days =
+  match Par_code_plan_tools.prune_plans ~older_than_days with
+  | Error (`Plan_error msg) ->
+    Par_code_ui.render_error ui (Printf.sprintf "Error pruning plans: %s" msg);
+    exit 1
+  | Ok 0 ->
+    Par_code_ui.render_notice ui "No plans to prune."
+  | Ok count ->
+    Par_code_ui.render_notice ui (Printf.sprintf "Pruned %d plan(s)" count)
+
+let cmd_plan_prune_term =
+  let open Term in
+  const cmd_plan_prune $ Cli_args.plan_older_than_arg
+
+let info_plan_prune = Cmd.info "prune" ~doc:"Delete old plan files"
+
+let cmd_plan =
+  Cmd.group ~default:cmd_plan_list_term
+    (Cmd.info "plan" ~doc:"Manage saved plans")
+    [ Cmd.v info_plan_list cmd_plan_list_term;
+      Cmd.v info_plan_show cmd_plan_show_term;
+      Cmd.v info_plan_prune cmd_plan_prune_term; ]
+
 let cmd =
   Cmd.group ~default:term_chat
     (Cmd.info "par" ~version:Par_code_version.version_info
@@ -457,7 +521,8 @@ let cmd =
     [ cmd_config_group;
       Cmd.v info_ask term_ask;
       Cmd.v info_upgrade term_upgrade;
-      cmd_memory; ]
+      cmd_memory;
+      cmd_plan; ]
 
 let is_chat_mode () =
   let args = Array.to_list Sys.argv in
@@ -465,7 +530,7 @@ let is_chat_mode () =
     | [] -> true
     | "--help" :: _ | "-h" :: _ -> false
     | "--version" :: _ | "-v" :: _ -> false
-    | "config" :: _ | "ask" :: _ | "upgrade" :: _ | "memory" :: _ -> false
+    | "config" :: _ | "ask" :: _ | "upgrade" :: _ | "memory" :: _ | "plan" :: _ -> false
     | _ :: rest -> scan rest
   in
   match args with _ :: rest -> scan rest | [] -> true

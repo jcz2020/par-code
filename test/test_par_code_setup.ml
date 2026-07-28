@@ -25,6 +25,7 @@ let make_mock_tool name =
 let all_tool_names =
   [ "read_file"; "write_file"; "edit_file"; "grep"; "find_files"; "list_directory";
     "recall_memory"; "search_history";
+    "git_status"; "git_log";
     Par_code_plan_tools.plan_enter_tool.descriptor.Types.name;
     Par_code_plan_tools.plan_exit_tool.descriptor.Types.name ]
 
@@ -73,7 +74,7 @@ let build_planner_descriptors () =
   List.filter_map (fun name ->
     if List.mem name
          [ "read_file"; "grep"; "find_files"; "list_directory";
-           "recall_memory"; "search_history" ]
+           "recall_memory"; "search_history"; "git_status"; "git_log" ]
        || name = plan_exit_name
     then Some { Types.name;
                 description = Printf.sprintf "mock %s tool" name;
@@ -130,11 +131,11 @@ let test_planner_tools_subset_exact () =
       let expected =
         List.sort String.compare
           [ "read_file"; "grep"; "find_files"; "list_directory";
-            "recall_memory"; "search_history"; "plan_exit" ]
+            "recall_memory"; "search_history"; "git_status"; "git_log"; "plan_exit" ]
       in
       let actual = tool_names agent in
-      Alcotest.(check int) "tool count is 7"
-        7 (List.length actual);
+      Alcotest.(check int) "tool count is 9"
+        9 (List.length actual);
       Alcotest.(check (list string)) "exact tool list"
         expected actual)
 

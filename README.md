@@ -9,7 +9,7 @@ CLI conventions and drives the full PAR surface — ReAct loop, tool dispatch,
 type-safe bash, MCP client, skills, workflows, streaming — to both ship a
 useful agent and prove out the PAR SDK in anger.
 
-**Status:** `v0.5.0` — Plan Mode. Read-only planner agent + `/plan` `/build` mode switching + plan file persistence + `plan_enter`/`plan_exit` agent tools. Pre-built binaries with a
+**Status:** `v0.5.1` — Plan CLI + Git Tools. `par plan list/show/prune` subcommands + `git_status`/`git_log` read-only tools for the planner agent. Pre-built binaries with a
 one-line installer (`curl | bash`) for Linux x86_64/arm64 + macOS arm64, plus `par upgrade`
 self-update. No OCaml or opam needed for end users.
 
@@ -279,8 +279,9 @@ The REPL prompt shows the current mode: `(plan) par> ` or `(build) par> `.
 ### What the planner can do
 
 In Plan Mode, the agent has access only to read-only tools: `read_file`,
-`grep`, `find_files`, `list_directory`, `recall_memory`, `search_history`.
-Write, edit, and bash are not available, so the LLM never sees their schemas.
+`grep`, `find_files`, `list_directory`, `recall_memory`, `search_history`,
+`git_status`, `git_log`. Write, edit, and bash are not available, so the LLM
+never sees their schemas.
 
 The planner produces a markdown plan with sections: Goal, Approach, Files to
 Touch, Risks, Open Questions, Steps.
@@ -290,6 +291,16 @@ Touch, Risks, Open Questions, Steps.
 When switching from Plan to Build (`/build`), the planner's last output is
 saved to `.par/plans/<ISO8601-timestamp>.md`. On the next build-mode turn,
 the agent is told the plan file path so it can read it before implementing.
+
+### Managing plans
+
+```sh
+par plan              # list saved plans (same as `par plan list`)
+par plan list         # list saved plans with size and creation date
+par plan show <file>  # display a saved plan (auto-appends .md if omitted)
+par plan prune        # delete plans older than 30 days
+par plan prune --older-than 7  # delete plans older than 7 days
+```
 
 ### Agent-invocable switching
 
@@ -323,6 +334,7 @@ Version numbers stay minimal (no 1.0 until core parity is earned).
 | **v0.4.3** ✅ | UX quick patch — `/cost` slash command (per-session token accumulator + operational metrics); `par config show` subcommand (prints all 19 fields with masked api_key); config wizard now prompts for 6 previously-hidden options (max_tokens, top_p, auto_extract, checkpoint_*, context_budget_tokens); memory `recall` no longer drops `usage_count`/`last_used_at` fields. Dead `bump_usage` removed. *"Daily-friction fixes — see what your session costs, inspect config without entering the wizard."* |
 | **v0.4.5** ✅ | UI abstraction layer — `Ui.*` rendering API with composable styled images; streaming markdown state machine; all 175 printf sites migrated; PAR SDK signals (tool_call chunks, usage_update, bash events) now rendered; 73 new tests. Zero new dependencies. *"Output that's structured, colored, and markdown-aware — and ready for a future TUI swap."* |
 | **v0.5.0** ✅ | Plan mode — read-only planner agent + `/plan` `/build` mode switching + plan file persistence + `plan_enter`/`plan_exit` agent tools. *"It plans before it touches code."* |
+| **v0.5.1** ✅ | Plan CLI + git tools — `par plan list/show/prune` commands + `git_status`/`git_log` read-only tools for the planner agent. *"Manage saved plans; planner sees git state."* |
 | **v0.6.0** | Subagent delegation — general/explore subagents, actor tool, task tree. *"It spawns helpers to explore and work in parallel."* |
 | **v0.7.0** | Goal-driven autonomy — `/goal` + independent judge model + doom-loop detection. *"It won't declare done until the goal is truly met."* |
 | **v0.8.0** | Best-of-N reasoning — max-mode (parallel candidates + judge selection). *"It tries several approaches and picks the best."* |

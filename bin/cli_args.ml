@@ -159,3 +159,23 @@ let memory_output_arg =
   Arg.(value & opt string "stdout" &
     info ["o"; "output"] ~docv:"PATH"
       ~doc:"Output file path (default: stdout)")
+
+(* Plan subcommand args *)
+
+let plan_limit_arg =
+  let open Cmdliner in
+  Arg.(value & opt int 50 &
+    info ["limit"; "n"] ~docv:"N"
+      ~doc:"Maximum number of plans to show (default 50)")
+
+let plan_file_arg =
+  let open Cmdliner in
+  Arg.(required & pos 0 (some string) None &
+    info [] ~docv:"FILE"
+      ~doc:"Plan filename (e.g. 2026-07-27T14-30-00Z.md)")
+
+let plan_older_than_arg =
+  let open Cmdliner in
+  Arg.(value & opt int 30 &
+    info ["older-than"] ~docv:"DAYS"
+      ~doc:"Delete plans older than DAYS days (default 30)")

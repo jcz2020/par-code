@@ -13,10 +13,10 @@ par-code 是一个基于 PAR SDK 的 OCaml 终端编码 agent。用户通过 `pa
 
 ### 当前状态
 
-- **版本**：v0.5.0（见 `dune-project`）
+- **版本**：v0.5.1（见 `dune-project`）
 - **PAR SDK 依赖**：0.7.7+（opam pin from `github.com/jcz2020/par.git`）
 - **opam switch**：`/root/dev/PAR`（OCaml 5.4.1）
-- **已发布**：v0.2.1（安装器）、v0.3.0（项目记忆）、v0.3.1（自动提取）、v0.3.2（arm64）、v0.3.3（PAR SDK 0.7.3 + 混合搜索）、v0.4.0（长会话连续性）、v0.4.1（异步 checkpoint）、v0.4.2（多轮上下文 critical fix）、v0.4.3（UX quick patch：/cost + config show + memory fix）、v0.4.5（UI 抽象层 + streaming markdown）、v0.5.0（Plan Mode：只读 planner + 模式切换 + plan 持久化）
+- **已发布**：v0.2.1（安装器）、v0.3.0（项目记忆）、v0.3.1（自动提取）、v0.3.2（arm64）、v0.3.3（PAR SDK 0.7.3 + 混合搜索）、v0.4.0（长会话连续性）、v0.4.1（异步 checkpoint）、v0.4.2（多轮上下文 critical fix）、v0.4.3（UX quick patch：/cost + config show + memory fix）、v0.4.5（UI 抽象层 + streaming markdown）、v0.5.0（Plan Mode：只读 planner + 模式切换 + plan 持久化）、v0.5.1（Plan CLI + Git Tools：par plan list/show/prune + git_status/git_log）
 
 ### 架构概览
 
@@ -29,7 +29,8 @@ bin/main.ml ── Cmdliner CLI 入口
  │  ├── par ask    → par_code_repl.ml (单次问答)
  │  ├── par config → par_code_config.ml (配置向导)
  │  ├── par upgrade→ par_code_upgrade.ml (自更新)
- │  └── par memory → par_code_memory.ml (记忆管理 CLI)
+ │  ├── par memory → par_code_memory.ml (记忆管理 CLI)
+ │  └── par plan   → par_code_plan_tools.ml (plan 文件管理 CLI)
  │
  ▼
 lib/par_code_setup.ml ── Runtime 引导层
@@ -68,7 +69,10 @@ PAR SDK (Runtime.invoke → ReAct loop → tool dispatch → LLM)
 | `lib/par_code_memory_tools.ml` | 3 个 agent 工具 (recall/remember/search_history) | 加新工具给 LLM 用 |
 | `lib/par_code_mode.ml` | Mode state (Plan/Build) + switch + agent_id_for + label (v0.5.0+) | 改 mode 逻辑、加新 mode |
 | `lib/par_code_mode.mli` | Mode 公共 API (v0.5.0+) | 查 mode 接口签名 |
-| `lib/par_code_plan_tools.ml` | plan_enter/plan_exit tool bindings + persist_plan_file (v0.5.0+) | 改 plan 工具、加新 plan 相关工具 |
+| `lib/par_code_git_tools.ml` | git_status/git_log read-only tool bindings for planner (v0.5.1+) | 改 git 工具、加新 git 相关工具 |
+| `lib/par_code_git_tools.mli` | Git tools 公共 API (v0.5.1+) | 查 git 工具接口签名 |
+| `lib/par_code_plan_tools.ml` | plan_enter/plan_exit tool bindings + persist_plan_file + list_plans/show_plan/prune_plans (v0.5.0+) | 改 plan 工具、加新 plan 相关工具 |
+| `lib/par_code_plan_tools.mli` | Plan tools 公共 API (v0.5.1+) | 查 plan 工具接口签名 |
 | `lib/par_code_repl.ml` | REPL 循环 + 单次问答（Ui.render_* 渲染） | 改交互行为、加 slash 命令 |
 | `lib/par_code_setup.ml` | Runtime 引导：创建 runtime、注册 tools/agents（含 checkpoint-writer）、bash 自动批准 hook、tool 描述覆盖 | 集成新功能到 runtime |
 | `lib/par_code_ui.ml` | UI 抽象层：composable styled images + ANSI + render_* API (v0.4.5+) | 改渲染逻辑、加新的 render_* 函数 |
