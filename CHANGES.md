@@ -11,6 +11,8 @@ touching any files.
 ### Added
 - **`lib/par_code_mode.ml`**: Mode state module (`type mode = Plan | Build`),
   `switch`, `agent_id_for`, `label`. Single source of truth for current mode.
+  Includes `save_current_mode_to_disk` / `load_mode_from_disk` for
+  `--resume` mode persistence via `.par/last_session_mode.txt`.
 - **`lib/par_code_plan_tools.ml`**: Two LLM-callable tools (`plan_enter`,
   `plan_exit`) for agent-initiated mode switching. `persist_plan_file`
   function extracts the planner's last assistant message and writes it to
@@ -22,8 +24,15 @@ touching any files.
 - **`/plan` and `/build` slash commands**: User-driven mode switching.
   `/build` persists the plan file and injects the path into the next
   build-mode turn's system prompt appendix.
+- **`plan_exit` auto-persist**: When the agent calls `plan_exit` during a
+  ReAct invoke, the REPL detects the Plan→Build transition post-invoke and
+  automatically persists the plan file (no need for manual `/build`).
 - **`default_mode` config field**: Defaults to `build` (backward compat);
-  configurable via wizard or `par config set default_mode plan`.
+  configurable via wizard or `par config set default_mode plan`. Read at
+  REPL startup to initialize the session mode.
+- **`--resume` mode restoration**: `par --resume` restores the mode from
+  the previous session via `.par/last_session_mode.txt`. New sessions
+  (without `--resume`) always start at `default_mode`.
 - **REPL prompt mode indicator**: Renders `(plan) par> ` or `(build) par> `.
 
 ### Changed
@@ -33,6 +42,7 @@ touching any files.
 - `par_code_ui.render_prompt` now requires a `~mode` parameter.
 - Plan-file appendix combines with memory appendix in
   `?system_prompt_appendix` on the first build turn after `/build`.
+- `par config set <field> <value>` subcommand added (was wizard-only).
 
 ### Architecture
 - **Two-agent design**: The planner is a separate registered PAR SDK agent
@@ -46,6 +56,16 @@ touching any files.
 - **D4 scope compromise**: Plan output is free-form markdown guided by
   system prompt (no `submit_plan` tool). Retirement plan: v0.6.0 evaluates
   whether subagent coordination needs structured plan fields.
+
+### Build Fixes
+- **ARM64 Linux**: Dockerfile pins `uring 2.7.0` before pinning PAR SDK.
+  Root cause: opam solver picks `eio.1.4` (latest) which requires
+  `uring >= 2.15.0`; `uring.2.15.0` builds vendored liburing that fails to
+  link on ARM64 AlmaLinux 8. Pinning `uring 2.7.0` cascades the solver to
+  `eio.1.3` (which constrains `uring < 2.14.0`). `uring.2.7.0` links
+  against system liburing and works on both x86_64 and ARM64.
+- **ARM64 Linux**: Added `kernel-headers` + `liburing-devel` to Dockerfile
+  dnf install list.
 
 ## v0.4.5 — UI abstraction layer + streaming markdown
 

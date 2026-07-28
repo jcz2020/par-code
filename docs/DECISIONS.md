@@ -1,5 +1,58 @@
 # Decisions
 
+## [2026-07-28] v0.5.0 ARM64 build: pin uring 2.7.0 to avoid vendored liburing failure
+
+**变更前**：Docker build for ARM64 AlmaLinux 8 pulled `eio.1.4` (latest from
+opam), which requires `uring >= 2.15.0`. `uring.2.15.0` builds its own
+vendored liburing from source, which fails to link on ARM64 AlmaLinux 8
+(`collect2: ld returned 1 exit status`). x86_64 was unaffected (possibly
+due to Docker layer cache from prior releases).
+
+**变更后**：Dockerfile pins `uring 2.7.0` before pinning PAR SDK. This
+cascades the opam solver to `eio.1.3` (which constrains
+`uring < 2.14.0`). `uring.2.7.0` does not build vendored liburing — it
+links against the system liburing installed via `liburing-devel`.
+
+**原因**：ARM64 users (Raspberry Pi, AWS Graviton) need pre-built binaries.
+Skipping ARM64 was considered (commit `5969d36`) but reversed after root
+cause analysis. The pin is a par-code-side workaround — no PAR SDK change.
+
+**影响范围**：`scripts/docker/linux-bundle.Dockerfile` only. Affects both
+x86_64 and ARM64 Docker builds (x86_64 unaffected by the pin since it was
+already using a compatible uring version via cache).
+
+**回退方式**：Remove the `opam pin add uring 2.7.0 -y` line from the
+Dockerfile. Upstream fix: when `eio.1.4+` / `uring.2.15.0+` ARM64
+compilation is fixed upstream, the pin becomes unnecessary.
+
+**已知限制**：Pins par-code's Docker builds to `eio.1.3` instead of latest.
+When PAR SDK adds features that require `eio.1.4+`, the pin will need to be
+revisited (either fix the ARM64 liburing build or find an alternative).
+
+## [2026-07-28] v0.5.0 plan_exit auto-persist (post-invoke mode-change detection)
+
+**变更前**：When the planner called `plan_exit` tool to self-switch from
+Plan to Build, no plan file was persisted (the tool handler signature
+`Yojson.t -> cancellation_token -> handler_result` lacks conversation
+access). Only manual `/build` slash command persisted plans.
+
+**变更后**：REPL checks after each `Runtime.invoke`: if mode transitioned
+Plan→Build during the invoke (detected via `mode_before_invoke` capture),
+automatically calls `persist_plan_file` from the returned conversation.
+
+**原因**：Agent self-switching via `plan_exit` is the smooth UX path
+("Plan ready, switching to build"). Losing the plan on this path was
+broken UX.
+
+**影响范围**：`lib/par_code_repl.ml` (14 lines added in the invoke
+result handling section).
+
+**回退方式**：Remove the post-invoke mode-change check block.
+
+**已知限制**：If the invoke returns Error (no conversation update),
+persistence is skipped. The plan content is still in the streamed output
+but not saved to file.
+
 ## [2026-07-27] v0.5.0 Plan Mode Architecture
 
 **变更前**: par-code had a single "par" agent that both investigated and

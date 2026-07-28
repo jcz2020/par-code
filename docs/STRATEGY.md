@@ -233,6 +233,8 @@ per global rules) lives in `docs/DECISIONS.md`. Strategic-level entries:
 | 2026-07-20 | v0.4.3 shipped — UX quick patch: `/cost` + `par config show` + 6 wizard prompts + memory recall usage-field fix + dead `bump_usage` removal (63 tests, Oracle-reviewed) | Active |
 | 2026-07-21 | v0.4.5: UI abstraction layer — composable styled images, ANSI colors, backend with TTY detection; all 175 printf migrated; future TUI path to Mosaic/Matrix confirmed | Active |
 | 2026-07-21 | v0.4.5: streaming markdown state machine — line-based incremental parser; round-trip property verified; zero OCaml reference impl existed | Active |
+| 2026-07-28 | v0.5.0: ARM64 build fix — pin uring 2.7.0 in Dockerfile to cascade solver to eio.1.3 (eio.1.4 requires uring >= 2.15.0 which fails vendored liburing build on ARM64 AlmaLinux 8) | Active |
+| 2026-07-28 | v0.5.0: plan_exit auto-persist — post-invoke mode-change detection persists plan when agent self-switches via plan_exit tool | Active |
 | 2026-07-27 | v0.5.0: Plan Mode architecture — two registered agents (planner + par) with per-agent tool isolation; mode switch = swap agent_id in Runtime.invoke; file-based plan persistence; default Build mode | Active |
 | 2026-07-27 | v0.5.0: PAR SDK feedback filed — first-class mode concept missing (currently par-code simulates via agent_id swap + module-level mutable ref). Priority: low. Re-evaluation trigger: if v0.6.0+ adds more modes. | Active |
 | 2026-07-27 | v0.5.0: PAR SDK feedback filed — no plan/task primitive (plans stored as markdown files, not queryable). Priority: medium. Re-evaluation trigger: v0.6.0 subagent coordination needs structured plan handoff. | Active |
