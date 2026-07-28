@@ -326,6 +326,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
                 | None, Some p -> Some p
                 | Some m, Some p -> Some (m ^ p)
               in
+              let mode_before_invoke = !Par_code_mode.current in
               let invoke_result = Runtime.invoke rt
                 ~agent_id:(Par_code_mode.agent_id_for !Par_code_mode.current)
                 ~message:trimmed
@@ -361,8 +362,19 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
                         ~session_id:sid ~project_id:pid c
                         ~turn_number:!turn_count ~enabled:ckpt_enabled ~interval:ckpt_interval
                     | _ -> ())
-                 end)
-         with ex ->
+                 end);
+              (if mode_before_invoke = Par_code_mode.Plan
+                && !Par_code_mode.current = Par_code_mode.Build then begin
+                 (match !conv with
+                  | Some c ->
+                    (match Par_code_plan_tools.persist_plan_file c with
+                     | Some path ->
+                       last_plan_path := Some path;
+                       Par_code_ui.render_notice ui (Printf.sprintf "Plan saved to %s" path)
+                     | None -> ())
+                  | None -> ())
+               end)
+          with ex ->
            Par_code_ui.render_error ui (Printf.sprintf "\n[error] %s" (Printexc.to_string ex)));
         loop ()
       end
