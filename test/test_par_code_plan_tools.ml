@@ -99,6 +99,7 @@ let test_plan_enter_handler_switches_to_plan () =
       Alcotest.(check string) "mode is plan" "plan" mode
     | Types.Error _ -> Alcotest.fail "expected Success, got Error"
     | Types.Handoff _ -> Alcotest.fail "expected Success, got Handoff"
+    | Types.Approval_required _ -> Alcotest.fail "expected Success, got Approval_required"
   )
 
 let test_plan_enter_handler_returns_previous_mode () =

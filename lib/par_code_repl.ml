@@ -344,7 +344,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
                  Par_code_ui.flush_markdown ui;
                  Par_code_ui.render_error ui (Par_code_setup.error_to_string e);
                  let _ = Runtime.save_conversation rt ?conversation:!conv () in ()
-              | Ok { Types.response = resp; conversation = returned_conv } ->
+              | Ok { Types.response = resp; conversation = returned_conv; _ } ->
                 conv := Some returned_conv;
                 Par_code_ui.render_line ui Par_code_ui.empty;
                 cost := add_usage !cost resp.Types.usage;
@@ -396,6 +396,6 @@ let run_single_shot (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) 
      Par_code_ui.flush_markdown ui;
      Par_code_ui.render_error ui (Par_code_setup.error_to_string e);
      exit 1
-   | Ok { Types.response = _; conversation = conv } ->
+   | Ok { Types.response = _; conversation = conv; _ } ->
      Par_code_ui.render_line ui Par_code_ui.empty;
      let _ = Runtime.save_conversation rt ~conversation:conv () in ())

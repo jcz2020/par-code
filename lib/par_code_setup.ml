@@ -49,7 +49,13 @@ let make_persistence_service (cfg : Par_code_config.config) =
       load_all_workflow_defs_fn = (fun () -> Sqlite_persistence.load_all_workflow_defs t);
       save_conversation_fn = (fun ?scope sid conv -> Sqlite_persistence.save_conversation ?scope t sid conv);
       load_conversation_fn = (fun sid -> Sqlite_persistence.load_conversation t sid);
-      load_most_recent_conversation_fn = (fun ?scope () -> Sqlite_persistence.load_most_recent_conversation ?scope t);
+       load_most_recent_conversation_fn = (fun ?scope () -> Sqlite_persistence.load_most_recent_conversation ?scope t);
+      save_pending_approval_fn = (fun ~run_id ~agent_id ~payload ~expires_at ->
+        Sqlite_persistence.save_pending_approval t ~run_id ~agent_id ~payload ~expires_at);
+      load_pending_approval_fn = (fun ~run_id ->
+        Sqlite_persistence.load_pending_approval t ~run_id);
+      delete_pending_approval_fn = (fun ~run_id ->
+        Sqlite_persistence.delete_pending_approval t ~run_id);
       close_fn = (fun () -> Sqlite_persistence.close t);
     }
 

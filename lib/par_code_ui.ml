@@ -403,8 +403,12 @@ let render_tool_event backend (evt : Par.Types.event) =
   | Cache_strategy_skipped _
   | Cache_breakpoint_dropped _
   | Cache_invalidated_by_skill _
-  | Deprecated_api_called _ ->
-    (* Observability events — no rendering. Could add verbose mode later. *)
+  | Deprecated_api_called _
+  | Approval_rejected _
+  | Approval_modified _
+  | Approval_escalated _
+  | Approval_handler_missing _ ->
+    (* Observability/approval events — no rendering. Could add verbose mode later. *)
     ()
 
 (* D. Cost / Session rendering *)
