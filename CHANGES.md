@@ -40,12 +40,6 @@ touching any files.
   primitive, so the LLM never sees write tool schemas in Plan Mode.
 - **Module-level mutable ref** (`Par_code_mode.current`): documented
   limitation. Assumes single-runtime-per-process. Acceptable for v0.5.0.
-
-### Deferred
-- **Linux ARM64 binary**: deferred to v0.5.1. The `uring.2.15.0` OCaml package
-  (transitive dependency of `eio` via PAR SDK) fails to compile its vendored
-  liburing on ARM64 AlmaLinux 8. This is an upstream issue introduced after
-  v0.4.5's PAR SDK snapshot. ARM64 users should remain on v0.4.5 until v0.5.1.
 - **File-based plan persistence**: `.par/plans/<timestamp>.md` archive
   format. No DB schema changes. Plans survive sessions, are
   version-controllable.

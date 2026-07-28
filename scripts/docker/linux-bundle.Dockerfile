@@ -87,11 +87,11 @@ RUN opam init --disable-sandboxing -y --bare --no-setup && \
     eval $(opam env --switch=default)
 
 # Pin the PAR SDK (not yet on the public opam repository).
-# Tolerate exit code 31: opam returns it when the pin succeeds but the
-# switch state metadata is "out of sync" (packages are actually installed
-# and usable; the warning is about opam's internal tracking). This happens
-# intermittently on fresh ARM64 builds where no Docker layer cache exists.
+# Pin uring to 2.7.0 BEFORE par: eio.1.4+ requires uring >= 2.15.0 which
+# builds vendored liburing that fails on ARM64 AlmaLinux 8. Pinning uring
+# to 2.7.0 cascades the solver to eio.1.3 (which allows uring < 2.14.0).
 RUN eval $(opam env --switch=default) && \
+    opam pin add uring 2.7.0 -y && \
     opam pin add par https://github.com/jcz2020/par.git -y; \
     rc=$?; \
     if [ "$rc" -ne 0 ] && [ "$rc" -ne 31 ]; then exit "$rc"; fi
