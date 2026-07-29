@@ -8,6 +8,14 @@ open Par
 let stream_print_chunk (ui : Par_code_ui.backend) (chunk : Types.llm_response_chunk) =
   Par_code_ui.render_llm_chunk ui chunk
 
+let make_stream_cb ui =
+  let streamed_text = ref false in
+  let cb chunk =
+    (match chunk with Types.Text_delta _ -> streamed_text := true | _ -> ());
+    stream_print_chunk ui chunk
+  in
+  cb, streamed_text
+
 let make_tool_event_callback (ui : Par_code_ui.backend) () =
   let start_times : (string, float) Hashtbl.t = Hashtbl.create 8 in
   fun (evt : Types.event) ->
@@ -327,12 +335,13 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
                 | Some m, Some p -> Some (m ^ p)
               in
               let mode_before_invoke = !Par_code_mode.current in
+              let stream_cb, streamed_text = make_stream_cb ui in
               let invoke_result = Runtime.invoke rt
                 ~agent_id:(Par_code_mode.agent_id_for !Par_code_mode.current)
                 ~message:trimmed
                 ?conversation:!conv
                 ~on_tool_event
-                ~on_chunk:(Some (stream_print_chunk ui))
+                ~on_chunk:(Some stream_cb)
                 ~enable_handoff:true
                 ?system_prompt_appendix:combined_appendix
                 ()
@@ -345,8 +354,15 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
                  Par_code_ui.render_error ui (Par_code_setup.error_to_string e);
                  let _ = Runtime.save_conversation rt ?conversation:!conv () in ()
               | Ok { Types.response = resp; conversation = returned_conv; _ } ->
-                conv := Some returned_conv;
-                Par_code_ui.render_line ui Par_code_ui.empty;
+                 conv := Some returned_conv;
+                 Par_code_ui.flush_markdown ui;
+                 if not !streamed_text then begin
+                   (match resp.Types.text with
+                    | Some text when text <> "" ->
+                      Par_code_ui.render ui (Par_code_ui.text text)
+                    | _ -> ())
+                 end;
+                 Par_code_ui.render_line ui Par_code_ui.empty;
                 cost := add_usage !cost resp.Types.usage;
                 let _ = Runtime.save_conversation rt ?conversation:!conv () in ();
                 incr turn_count;
@@ -384,11 +400,12 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
 let run_single_shot (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~message =
   let ui = Par_code_ui.create_backend () in
   let memory_appendix = build_memory_appendix mem_db in
+  let stream_cb, streamed_text = make_stream_cb ui in
   (match Runtime.invoke rt
      ~agent_id:Par_code_setup.agent_id
      ~message
      ~on_tool_event:(make_tool_event_callback ui ())
-     ~on_chunk:(Some (stream_print_chunk ui))
+     ~on_chunk:(Some stream_cb)
      ~enable_handoff:true
      ?system_prompt_appendix:memory_appendix
      () with
@@ -396,6 +413,13 @@ let run_single_shot (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) 
      Par_code_ui.flush_markdown ui;
      Par_code_ui.render_error ui (Par_code_setup.error_to_string e);
      exit 1
-   | Ok { Types.response = _; conversation = conv; _ } ->
+   | Ok { Types.response = resp; conversation = conv; _ } ->
+     Par_code_ui.flush_markdown ui;
+     if not !streamed_text then begin
+       (match resp.Types.text with
+        | Some text when text <> "" ->
+          Par_code_ui.render ui (Par_code_ui.text text)
+        | _ -> ())
+     end;
      Par_code_ui.render_line ui Par_code_ui.empty;
      let _ = Runtime.save_conversation rt ~conversation:conv () in ())

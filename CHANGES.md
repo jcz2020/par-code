@@ -1,5 +1,21 @@
 # CHANGES
 
+## v0.5.2 — Streaming fallback fix (critical)
+
+> **Status**: Shipped.
+
+Fixes a critical bug where `par` produced no output when the LLM provider's
+streaming didn't deliver parseable chunks (common with some OpenAI-compatible
+providers). The REPL relied entirely on the streaming callback to display
+responses — if streaming failed silently, the response text was discarded.
+
+### Fixed
+- **REPL + `par ask`**: After invoke returns Ok, if no text was streamed
+  (streaming callback received zero `Text_delta` chunks), the response text
+  from `resp.text` is now printed as a fallback. This ensures the user always
+  sees the LLM response even when streaming is broken.
+- Both `run` (REPL loop) and `run_single_shot` (`par ask`) paths fixed.
+
 ## v0.5.1 — Plan CLI + Git Tools
 
 > **Status**: Shipped. 211 tests passing across 12 suites.
