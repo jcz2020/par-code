@@ -1,5 +1,25 @@
 # CHANGES
 
+## v0.5.3 — REPL rendering fixes
+
+> **Status**: Shipped.
+
+Fixes three issues found through real-world MiniMax provider testing.
+
+### Fixed
+- **Tool indicator triple-rendering**: Removed redundant `tool_call_hook` that
+  printed `  [tool_name]` alongside the streaming `Tool_call_start` indicator
+  and the event `Tool_completed` indicator. Now only two indicators per tool
+  call (start + complete).
+- **Bash confirmation stdin contention**: Bash confirmation prompts now read
+  from `/dev/tty` instead of `stdin`, preventing them from swallowing user
+  input intended for the REPL loop. Previously, if the user typed during a
+  long-running bash command, those keystrokes were consumed by the bash
+  confirmation instead of reaching the REPL.
+- **Silent empty responses**: When streaming delivers no text AND `resp.text`
+  is empty/None, a diagnostic warning is now printed instead of silently
+  showing nothing.
+
 ## v0.5.2 — Streaming fallback fix (critical)
 
 > **Status**: Shipped.

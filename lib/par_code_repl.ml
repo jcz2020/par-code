@@ -360,7 +360,9 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
                    (match resp.Types.text with
                     | Some text when text <> "" ->
                       Par_code_ui.render ui (Par_code_ui.text text)
-                    | _ -> ())
+                    | Some _ | None ->
+                      Par_code_ui.render_warning ui
+                        "[no response text received — provider streaming may be broken]")
                  end;
                  Par_code_ui.render_line ui Par_code_ui.empty;
                 cost := add_usage !cost resp.Types.usage;
@@ -413,13 +415,15 @@ let run_single_shot (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) 
      Par_code_ui.flush_markdown ui;
      Par_code_ui.render_error ui (Par_code_setup.error_to_string e);
      exit 1
-   | Ok { Types.response = resp; conversation = conv; _ } ->
-     Par_code_ui.flush_markdown ui;
-     if not !streamed_text then begin
-       (match resp.Types.text with
-        | Some text when text <> "" ->
-          Par_code_ui.render ui (Par_code_ui.text text)
-        | _ -> ())
-     end;
+    | Ok { Types.response = resp; conversation = conv; _ } ->
+      Par_code_ui.flush_markdown ui;
+      if not !streamed_text then begin
+        (match resp.Types.text with
+         | Some text when text <> "" ->
+           Par_code_ui.render ui (Par_code_ui.text text)
+         | Some _ | None ->
+           Par_code_ui.render_warning ui
+             "[no response text received — provider streaming may be broken]")
+      end;
      Par_code_ui.render_line ui Par_code_ui.empty;
      let _ = Runtime.save_conversation rt ~conversation:conv () in ())
