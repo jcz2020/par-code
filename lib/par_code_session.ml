@@ -50,6 +50,15 @@ let load (session_id : string) : (Types.conversation option, string) result =
       Error (Printf.sprintf "load_conversation failed: %s"
         (Par_code_setup.error_to_string e)))
 
+let load_most_recent_scoped () : ((string * Types.conversation) option, string) result =
+  with_persistence (fun db ->
+    let scope = Par_code_memory.resolve_project_id () in
+    match Sqlite_persistence.load_most_recent_conversation ~scope db with
+    | Ok result -> Ok result
+    | Error e ->
+      Error (Printf.sprintf "load_most_recent_conversation failed: %s"
+        (Par_code_setup.error_to_string e)))
+
 let resolve_id (prefix : string) : (string, string) result =
   if String.length prefix >= 36 then
     Ok prefix

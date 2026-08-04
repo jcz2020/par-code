@@ -22,6 +22,10 @@ val list_sessions : limit:int -> (session_info list, string) result
 val load : string -> (Types.conversation option, string) result
 (** Load a full conversation by session ID. Returns [Ok None] if not found. *)
 
+val load_most_recent_scoped : unit -> ((string * Types.conversation) option, string) result
+(** Load the most recent conversation for the current project scope.
+    Returns [Ok None] if no sessions exist for this project. *)
+
 val resolve_id : string -> (string, string) result
 (** Resolve a session ID or unique prefix to a full session ID.
     If [prefix] is >= 36 chars, treated as full UUID.

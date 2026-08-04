@@ -56,12 +56,12 @@ let load_initial_conv (ui : Par_code_ui.backend) (rt : Runtime.runtime) (target 
   match target with
   | No_prior -> None
   | Resume_most_recent ->
-    (match Runtime.load_most_recent_conversation rt with
+    (match Par_code_session.load_most_recent_scoped () with
      | Ok (Some (sid, conv)) ->
        Par_code_ui.render_notice ui (Printf.sprintf "Resumed most recent session: %s" sid);
        Some conv
      | Ok None -> Par_code_ui.render_warning ui "No prior session found."; None
-     | Error e -> Par_code_ui.render_error ui (Printf.sprintf "Failed to load session: %s" (Par_code_setup.error_to_string e)); None)
+     | Error e -> Par_code_ui.render_error ui (Printf.sprintf "Failed to load session: %s" e); None)
   | Resume_of id_or_prefix ->
     (match Par_code_session.resolve_id id_or_prefix with
      | Error msg -> Par_code_ui.render_error ui msg; None
