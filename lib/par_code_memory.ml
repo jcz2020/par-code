@@ -301,8 +301,8 @@ let memory_of_object (obj : Memory_object.memory_object) : memory =
     citations;
     created_at = obj.Memory_object.created_at;
     updated_at = obj.Memory_object.updated_at;
-    last_used_at = None;
-    usage_count = 0;
+    last_used_at = obj.Memory_object.last_used_at;
+    usage_count = obj.Memory_object.usage_count;
     source;
   }
 
@@ -346,35 +346,6 @@ let row_to_memory (stmt : Sqlite3.stmt) : memory =
     { id = ext_id; project_id = scope; kind; content; summary;
       citations; created_at; updated_at; last_used_at; usage_count; source }
 
-(* -- fetch_usage_stats: supplementary query for recall results ------------- *)
-
-let fetch_usage_stats (db : Sqlite3.db) (ids : string list) =
-  match ids with
-  | [] -> []
-  | _ ->
-    let placeholders = String.concat ", " (List.map (fun _ -> "?") ids) in
-    let sql = Printf.sprintf
-      "SELECT ext_id, last_used_at, usage_count FROM memory_entries WHERE ext_id IN (%s)"
-      placeholders in
-    try
-      let stmt = Sqlite3.prepare db sql in
-      List.iteri (fun i id ->
-        ignore (Sqlite3.bind stmt (i + 1) (Sqlite3.Data.TEXT id))
-      ) ids;
-      let result = ref [] in
-      while Sqlite3.step stmt = Sqlite3.Rc.ROW do
-        let ext_id = Sqlite3.column_text stmt 0 in
-        let last_used =
-          if Sqlite3.column_is_null stmt 1 then None
-          else Some (Sqlite3.column_double stmt 1)
-        in
-        let usage_count = Sqlite3.column_int stmt 2 in
-        result := (ext_id, (last_used, usage_count)) :: !result
-      done;
-      ignore (Sqlite3.finalize stmt);
-      !result
-    with _ -> []
-
 let collect_rows t sql bind_fn =
   wrap_sqlite_error (fun () ->
     let stmt = Sqlite3.prepare t.db sql in
@@ -414,13 +385,7 @@ let recall t ~project_id ~query ?(limit = 5) () =
       ~scope:project_id ~limit query)
   in
   let memories = List.map memory_of_object results in
-  let usage_map = fetch_usage_stats t.db (List.map (fun m -> m.id) memories) in
-  let patched = List.map (fun m ->
-    match List.assoc_opt m.id usage_map with
-    | Some (last_used, count) -> { m with last_used_at = last_used; usage_count = count }
-    | None -> m
-  ) memories in
-  Ok patched
+  Ok memories
 
 let forget t ~id =
   map_memory_error (Sqlite_memory.delete t.mem id)
