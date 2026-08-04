@@ -407,7 +407,9 @@ let render_tool_event backend (evt : Par.Types.event) =
   | Approval_rejected _
   | Approval_modified _
   | Approval_escalated _
-  | Approval_handler_missing _ ->
+  | Approval_handler_missing _
+  | Skill_activated _
+  | Skill_deactivated _ ->
     (* Observability/approval events — no rendering. Could add verbose mode later. *)
     ()
 
