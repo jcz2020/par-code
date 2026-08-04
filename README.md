@@ -9,7 +9,7 @@ CLI conventions and drives the full PAR surface — ReAct loop, tool dispatch,
 type-safe bash, MCP client, skills, workflows, streaming — to both ship a
 useful agent and prove out the PAR SDK in anger.
 
-**Status:** `v0.5.1` — Plan CLI + Git Tools. `par plan list/show/prune` subcommands + `git_status`/`git_log` read-only tools for the planner agent. Pre-built binaries with a
+**Status:** `v0.5.4` — Session management. `par session list/show/fork` + partial ID resume + Ctrl+C clean exit. Pre-built binaries with a
 one-line installer (`curl | bash`) for Linux x86_64/arm64 + macOS arm64, plus `par upgrade`
 self-update. No OCaml or opam needed for end users.
 
@@ -335,6 +335,9 @@ Version numbers stay minimal (no 1.0 until core parity is earned).
 | **v0.4.5** ✅ | UI abstraction layer — `Ui.*` rendering API with composable styled images; streaming markdown state machine; all 175 printf sites migrated; PAR SDK signals (tool_call chunks, usage_update, bash events) now rendered; 73 new tests. Zero new dependencies. *"Output that's structured, colored, and markdown-aware — and ready for a future TUI swap."* |
 | **v0.5.0** ✅ | Plan mode — read-only planner agent + `/plan` `/build` mode switching + plan file persistence + `plan_enter`/`plan_exit` agent tools. *"It plans before it touches code."* |
 | **v0.5.1** ✅ | Plan CLI + git tools — `par plan list/show/prune` commands + `git_status`/`git_log` read-only tools for the planner agent. *"Manage saved plans; planner sees git state."* |
+| **v0.5.2** ✅ | Streaming fallback — print `resp.text` when provider streaming delivers no chunks. *"No more silent empty responses."* |
+| **v0.5.3** ✅ | REPL rendering fixes — tool indicator de-duplication + `/dev/tty` bash confirmation + empty response diagnostics. *"Cleaner tool output; bash no longer swallows your input."* |
+| **v0.5.4** ✅ | Session management — `par session list/show/fork` + partial ID resume + Ctrl+C clean exit. *"Browse, fork, and resume sessions without copy-pasting UUIDs."* |
 | **v0.6.0** | Subagent delegation — general/explore subagents, actor tool, task tree. *"It spawns helpers to explore and work in parallel."* |
 | **v0.7.0** | Goal-driven autonomy — `/goal` + independent judge model + doom-loop detection. *"It won't declare done until the goal is truly met."* |
 | **v0.8.0** | Best-of-N reasoning — max-mode (parallel candidates + judge selection). *"It tries several approaches and picks the best."* |

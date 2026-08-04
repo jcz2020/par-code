@@ -1,5 +1,58 @@
 # Decisions
 
+## [2026-08-04] v0.5.2–v0.5.4 shipped — Streaming fix + REPL polish + Session management
+
+**变更前**：v0.5.1 shipped Plan CLI + git tools but had three critical UX issues:
+(1) provider streaming failures caused silent empty responses, (2) tool
+indicator triple-rendering + bash confirmation stdin contention made the REPL
+messy, (3) session resume required copy-pasting 36-char UUIDs with no way to
+list or browse past sessions.
+
+**变更后**：Three patch releases shipped:
+- v0.5.2: Streaming fallback — after invoke returns Ok, if no Text_delta was
+  streamed, print `resp.text` as fallback. If `resp.text` is also empty, print
+  a diagnostic warning instead of silently showing nothing.
+- v0.5.3: Removed redundant `tool_call_hook` (triple→double indicator). Bash
+  confirmation reads `/dev/tty` instead of `stdin` (fixes stdin contention
+  where user input during long bash commands was swallowed). Ctrl+C exits
+  cleanly (`Bye!` + exit 0) instead of crash-like (`Interrupted` + exit 130).
+- v0.5.4: New `par session list/show/fork` CLI commands. Session listing shows
+  ID prefix + auto-generated title (first user message) + last activity +
+  event count. `--continue` accepts partial UUIDs (unique prefix resolution).
+  Session fork copies conversation to new session ID. New module
+  `lib/par_code_session.ml/mli`.
+
+**原因**：These are quality-of-life fixes that make par-code practical for
+daily use. The streaming fallback fixed a show-stopper bug (no response from
+MiniMax provider). The REPL fixes addressed output readability. Session
+management was the #1 UX gap vs competitor tools — users couldn't discover
+or resume past sessions without external tools.
+
+**影响范围**：
+- v0.5.2: `lib/par_code_repl.ml` (streaming callback + fallback print)
+- v0.5.3: `lib/par_code_setup.ml` (removed tool_call_hook + /dev/tty),
+  `lib/par_code_repl.ml` (Ctrl+C clean exit), `lib/par_code_ui.ml` (event
+  match arms)
+- v0.5.4: `lib/par_code_session.ml/mli` (new), `bin/main.ml` (session CLI +
+  is_chat_mode), `bin/cli_args.ml` (session args), `lib/par_code_repl.ml`
+  (partial ID resolution in load_initial_conv)
+
+**回退方式**：Each release is independent. Revert via `git revert <tag>`.
+Session management is pure addition — removing it doesn't affect v0.5.0 Plan
+Mode or v0.5.1 Plan CLI functionality.
+
+**已知限制**：
+1. Session titles are derived from the first user message (truncated to 50
+   chars). No AI-generated titles or manual rename yet.
+2. Partial ID resolution loads up to 200 sessions for prefix matching —
+   adequate for now but could be slow with thousands of sessions.
+3. Fork copies the full conversation but does NOT copy checkpoints or
+   memory associations — the forked session starts fresh for checkpoint
+   tracking.
+4. `--resume` (most recent) still loads across all projects (no scope
+   filter on the Runtime API). Only `par session list` and `--continue`
+   are project-scoped.
+
 ## [2026-07-29] v0.5.1 shipped — Plan CLI + Git Tools
 
 **变更前**：v0.5.0 shipped Plan Mode but deferred 4 items to §17: `par plan

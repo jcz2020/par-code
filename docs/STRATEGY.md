@@ -191,6 +191,13 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
 - **v0.5.1 ✅ shipped** — Plan CLI + git tools: `par plan list/show/prune`
   subcommands + `git_status`/`git_log` read-only tools for the planner.
   Fliegel-Van Flandern timestamp parser. 211 tests passing.
+- **v0.5.2 ✅ shipped** — Streaming fallback: print `resp.text` when provider
+  streaming delivers no chunks. Fixes silent empty responses.
+- **v0.5.3 ✅ shipped** — REPL rendering fixes: tool indicator de-duplication,
+  `/dev/tty` bash confirmation (fixes stdin contention), empty response
+  diagnostics. Ctrl+C clean exit.
+- **v0.5.4 ✅ shipped** — Session management: `par session list/show/fork` CLI
+  commands + partial ID resume + project-scoped listing. 7 new tests.
 - v0.4.0+ — plan mode, subagents, autonomy, reasoning,
   self-improvement, compose mode, ecosystem, code intelligence, safety, polish
   → v1.0
