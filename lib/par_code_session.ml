@@ -94,3 +94,23 @@ let resolve_title (session_id : string) : string =
     else result
   | _ -> "(unavailable)"
 
+let generate_uuid () =
+  let seed = int_of_float (Unix.gettimeofday () *. 1000.0) in
+  let state = Random.State.make [| seed; seed lxor 0xdeadbeef; seed lxor 0xfeedface |] in
+  let gen = Uuidm.v4_gen state in
+  Uuidm.to_string (gen ())
+
+let fork (source_id : string) : (string, string) result =
+  match load source_id with
+  | Error e -> Error e
+  | Ok None -> Error (Printf.sprintf "Session not found: %s" source_id)
+  | Ok (Some conv) ->
+    let new_id = generate_uuid () in
+    let scope = Par_code_memory.resolve_project_id () in
+    with_persistence (fun db ->
+      match Sqlite_persistence.save_conversation ~scope db new_id conv with
+      | Ok () -> Ok new_id
+      | Error e ->
+        Error (Printf.sprintf "save_conversation failed: %s"
+          (Par_code_setup.error_to_string e)))
+

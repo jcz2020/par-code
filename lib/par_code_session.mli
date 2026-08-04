@@ -30,3 +30,7 @@ val resolve_id : string -> (string, string) result
 val resolve_title : string -> string
 (** Extract the first user message from a session as its display title.
     Returns "(unavailable)" if the session cannot be loaded. *)
+
+val fork : string -> (string, string) result
+(** Fork a session: copy its conversation to a new session ID.
+    Returns [Ok new_id] on success. The original session is untouched. *)

@@ -592,11 +592,34 @@ let cmd_session_show_term =
 
 let info_session_show = Cmd.info "show" ~doc:"Show session details by ID or prefix"
 
+let cmd_session_fork id_or_prefix =
+  match Par_code_session.resolve_id id_or_prefix with
+  | Error msg ->
+    Par_code_ui.render_error ui msg;
+    exit 1
+  | Ok sid ->
+    (match Par_code_session.fork sid with
+     | Error msg ->
+       Par_code_ui.render_error ui (Printf.sprintf "Fork failed: %s" msg);
+       exit 1
+     | Ok new_id ->
+       let short_id = String.sub new_id 0 (min 8 (String.length new_id)) in
+       Par_code_ui.render_success ui
+         (Printf.sprintf "Forked session %s → %s" sid short_id);
+       Par_code_ui.render_notice ui "Use 'par --continue <new-id>' to resume the fork.")
+
+let cmd_session_fork_term =
+  let open Term in
+  const cmd_session_fork $ Cli_args.session_id_arg
+
+let info_session_fork = Cmd.info "fork" ~doc:"Create a copy of a session with a new ID"
+
 let cmd_session =
   Cmd.group ~default:cmd_session_list_term
     (Cmd.info "session" ~doc:"List, inspect, and manage saved sessions")
     [ Cmd.v info_session_list cmd_session_list_term;
-      Cmd.v info_session_show cmd_session_show_term; ]
+      Cmd.v info_session_show cmd_session_show_term;
+      Cmd.v info_session_fork cmd_session_fork_term; ]
 
 let cmd =
   Cmd.group ~default:term_chat
