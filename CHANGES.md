@@ -1,5 +1,34 @@
 # CHANGES
 
+## v0.5.4 — Session management
+
+> **Status**: Shipped.
+
+Browse, inspect, fork, and resume saved sessions — session resume is finally
+practical without copy-pasting full UUIDs.
+
+### Added
+- **`par session list`**: Table of sessions for the current project — ID
+  prefix, auto-generated title (first user message), last activity, event
+  count. Bare `par session` defaults to list.
+- **`par session show <id>`**: Display session details. Accepts full UUID or
+  unique prefix.
+- **`par session fork <id>`**: Copy a session's conversation to a new session
+  ID. Original session is untouched. Forked session can be resumed with
+  `par --continue <new-id>`.
+- **`--continue` partial ID matching**: `par --continue abc12345` now resolves
+  to the full UUID if the prefix is unique. No more copy-pasting 36-char UUIDs.
+- **Session scope filtering**: `par session list` only shows sessions for the
+  current project (via `resolve_project_id`).
+- **New module**: `lib/par_code_session.ml/mli` — session listing, loading,
+  partial ID resolution, title extraction, fork.
+- **Tests**: 7 new session tests (format_age + resolve_id).
+
+### Changed
+- `is_chat_mode` in `main.ml` recognizes `"session"` subcommand.
+- `load_initial_conv` in `par_code_repl.ml` uses `Par_code_session.resolve_id`
+  for prefix matching before loading.
+
 ## v0.5.3 — REPL rendering fixes
 
 > **Status**: Shipped.
