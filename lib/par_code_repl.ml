@@ -62,11 +62,16 @@ let load_initial_conv (ui : Par_code_ui.backend) (rt : Runtime.runtime) (target 
        Some conv
      | Ok None -> Par_code_ui.render_warning ui "No prior session found."; None
      | Error e -> Par_code_ui.render_error ui (Printf.sprintf "Failed to load session: %s" (Par_code_setup.error_to_string e)); None)
-  | Resume_of sid ->
-    (match Runtime.load_conversation rt sid with
-     | Ok (Some conv) -> Par_code_ui.render_notice ui (Printf.sprintf "Resumed session: %s" sid); Some conv
-     | Ok None -> Par_code_ui.render_error ui (Printf.sprintf "Session not found: %s" sid); None
-     | Error e -> Par_code_ui.render_error ui (Printf.sprintf "Failed to load session %s: %s" sid (Par_code_setup.error_to_string e)); None)
+  | Resume_of id_or_prefix ->
+    (match Par_code_session.resolve_id id_or_prefix with
+     | Error msg -> Par_code_ui.render_error ui msg; None
+     | Ok sid ->
+       (match Runtime.load_conversation rt sid with
+        | Ok (Some conv) ->
+          Par_code_ui.render_notice ui (Printf.sprintf "Resumed session: %s" sid);
+          Some conv
+        | Ok None -> Par_code_ui.render_error ui (Printf.sprintf "Session not found: %s" sid); None
+        | Error e -> Par_code_ui.render_error ui (Printf.sprintf "Failed to load session %s: %s" sid (Par_code_setup.error_to_string e)); None))
 
 let maybe_extract (ui : Par_code_ui.backend) (rt : Runtime.runtime) (conv : Types.conversation option) =
   let enabled =

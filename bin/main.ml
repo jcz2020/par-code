@@ -1,4 +1,5 @@
 open Cmdliner
+open Par
 
 let ui = Par_code_ui.create_backend ()
 
@@ -514,6 +515,89 @@ let cmd_plan =
       Cmd.v info_plan_show cmd_plan_show_term;
       Cmd.v info_plan_prune cmd_plan_prune_term; ]
 
+(* -- Session management ----------------------------------------------------- *)
+
+let extract_session_title (conv : Types.conversation) : string =
+  let rec first_user_text = function
+    | [] -> ""
+    | m :: rest ->
+      if m.Types.role = Types.User then
+        let buf = Buffer.create 64 in
+        List.iter (function
+          | Types.Text_block { text; _ } ->
+            Buffer.add_string buf text;
+            if Buffer.length buf >= 60 then ()
+          | _ -> ()) m.Types.content_blocks;
+        let raw = Buffer.contents buf in
+        let trimmed = String.trim raw in
+        let max_len = 50 in
+        if String.length trimmed > max_len then
+          String.sub trimmed 0 max_len ^ "..."
+        else if trimmed = "" then "(empty)"
+        else trimmed
+      else first_user_text rest
+  in
+  first_user_text conv.Types.messages
+
+let cmd_session_list limit =
+  match Par_code_session.list_sessions ~limit with
+  | Error msg ->
+    Par_code_ui.render_error ui (Printf.sprintf "Error listing sessions: %s" msg);
+    exit 1
+  | Ok [] ->
+    Par_code_ui.render_notice ui "No sessions found."
+  | Ok sessions ->
+    let rows =
+      List.map (fun s ->
+        let short_id = String.sub s.Par_code_session.id 0 (min 8 (String.length s.Par_code_session.id)) in
+        let title = Par_code_session.resolve_title s.Par_code_session.id in
+        [ short_id;
+          title;
+          Par_code_session.format_age s.Par_code_session.last_event_at;
+          string_of_int s.Par_code_session.event_count ]
+      ) sessions
+    in
+    Par_code_ui.render_table ui
+      ~headers:["ID"; "TITLE"; "LAST ACTIVITY"; "EVENTS"]
+      ~rows
+
+let cmd_session_list_term =
+  let open Term in
+  const cmd_session_list $ Cli_args.session_limit_arg
+
+let info_session_list = Cmd.info "list" ~doc:"List saved sessions"
+
+let cmd_session_show id_or_prefix =
+  match Par_code_session.resolve_id id_or_prefix with
+  | Error msg ->
+    Par_code_ui.render_error ui msg;
+    exit 1
+  | Ok sid ->
+    match Par_code_session.load sid with
+    | Error msg ->
+      Par_code_ui.render_error ui msg;
+      exit 1
+    | Ok (Some conv) ->
+      let title = extract_session_title conv in
+      Par_code_ui.render_notice ui (Printf.sprintf "Session %s" sid);
+      Par_code_ui.render_notice ui (Printf.sprintf "Title: %s" title);
+      Par_code_ui.render ui (Par_code_ui.text "")
+    | Ok None ->
+      Par_code_ui.render_error ui (Printf.sprintf "Session not found: %s" sid);
+      exit 1
+
+let cmd_session_show_term =
+  let open Term in
+  const cmd_session_show $ Cli_args.session_id_arg
+
+let info_session_show = Cmd.info "show" ~doc:"Show session details by ID or prefix"
+
+let cmd_session =
+  Cmd.group ~default:cmd_session_list_term
+    (Cmd.info "session" ~doc:"List, inspect, and manage saved sessions")
+    [ Cmd.v info_session_list cmd_session_list_term;
+      Cmd.v info_session_show cmd_session_show_term; ]
+
 let cmd =
   Cmd.group ~default:term_chat
     (Cmd.info "par" ~version:Par_code_version.version_info
@@ -522,7 +606,8 @@ let cmd =
       Cmd.v info_ask term_ask;
       Cmd.v info_upgrade term_upgrade;
       cmd_memory;
-      cmd_plan; ]
+      cmd_plan;
+      cmd_session; ]
 
 let is_chat_mode () =
   let args = Array.to_list Sys.argv in
@@ -530,7 +615,7 @@ let is_chat_mode () =
     | [] -> true
     | "--help" :: _ | "-h" :: _ -> false
     | "--version" :: _ | "-v" :: _ -> false
-    | "config" :: _ | "ask" :: _ | "upgrade" :: _ | "memory" :: _ | "plan" :: _ -> false
+    | "config" :: _ | "ask" :: _ | "upgrade" :: _ | "memory" :: _ | "plan" :: _ | "session" :: _ -> false
     | _ :: rest -> scan rest
   in
   match args with _ :: rest -> scan rest | [] -> true

@@ -179,3 +179,15 @@ let plan_older_than_arg =
   Arg.(value & opt int 30 &
     info ["older-than"] ~docv:"DAYS"
       ~doc:"Delete plans older than DAYS days (default 30)")
+
+let session_limit_arg =
+  let open Cmdliner in
+  Arg.(value & opt int 20 &
+    info ["limit"; "n"] ~docv:"N"
+      ~doc:"Maximum number of sessions to show (default 20)")
+
+let session_id_arg =
+  let open Cmdliner in
+  Arg.(required & pos 0 (some string) None &
+    info [] ~docv:"ID"
+      ~doc:"Session ID or unique prefix")
