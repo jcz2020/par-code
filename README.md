@@ -5,13 +5,21 @@
 
 `par-code` is a terminal coding assistant (terminal-native, REPL-first) implemented in
 OCaml on top of the **PAR (Programmable Agent Runtime)** SDK. It inherits PAR's
-CLI conventions and drives the full PAR surface — ReAct loop, tool dispatch,
-type-safe bash, MCP client, skills, workflows, streaming — to both ship a
-useful agent and prove out the PAR SDK in anger.
+CLI conventions and drives the **core** PAR surface — ReAct loop, tool dispatch,
+type-safe bash, skills, streaming, persistence — to both ship a useful agent and
+prove out the PAR SDK in anger. (MCP client and Workflow engine are PAR SDK
+primitives par-code does not yet wire — see roadmap items v0.10.0 / v0.11.0.)
 
 **Status:** `v0.5.4` — Session management. `par session list/show/fork` + partial ID resume + Ctrl+C clean exit. Pre-built binaries with a
 one-line installer (`curl | bash`) for Linux x86_64/arm64 + macOS arm64, plus `par upgrade`
 self-update. No OCaml or opam needed for end users.
+
+> ⚠️ **Known regressions in v0.5.4** (audit 2026-08-05): Plan Mode tool filter
+> uses wrong names (planner can only `grep`), session management is
+> non-functional end-to-end (`scope` never written on save), and startup
+> version notice always fires. v0.5.5 hotfix planned; see
+> [DECISIONS.md](docs/DECISIONS.md) `[2026-08-05] v0.5.4 comprehensive audit`
+> entry for details and fix waves.
 
 ---
 
@@ -33,13 +41,13 @@ self-update. No OCaml or opam needed for end users.
 | ReAct engine (`Par.Runtime.invoke`) | Core coding-agent loop |
 | Built-in tools (`Par.Builtin_tools`) | read/write/edit, grep, find, ls |
 | Type-safe bash (`Par.Bash_safe_command`) | Run commands without shell injection |
-| Custom tool registration | Code-specific tools (AST edits, semantic search) |
-| MCP client (`Par.Mcp_client`) | Connect filesystem/git/GitHub MCP servers |
-| Skills (`Par.Skill_registry`) | Package review/refactor/test behaviors |
-| Workflows (`Par.Workflow_engine`) | lint → test → commit pipelines |
+| Custom tool registration | Code-specific tools (memory, plan, git) |
+| Skills (`Par.Skill_registry`) | Builtin skills registered: code-reviewer, summarizer, translator, rag-assistant |
 | Streaming (`invoke_stream`) | Real-time token + tool output |
-| Long generation (`invoke_generate`) | PRDs, docs, large diffs |
+| Long generation (`invoke_generate`) | PRDs, docs, large diffs (also: checkpoint-writer + memory-extractor subagents) |
 | Persistence (`Par.Sqlite_persistence`) | Session history across runs |
+| MCP client (`Par.Mcp_client`) | _Persistence wired; client init deferred — roadmap v0.11.0_ |
+| Workflows (`Par.Workflow_engine`) | _State persistence registered; engine not yet invoked — roadmap v0.10.0_ |
 
 ## Install
 
@@ -337,7 +345,8 @@ Version numbers stay minimal (no 1.0 until core parity is earned).
 | **v0.5.1** ✅ | Plan CLI + git tools — `par plan list/show/prune` commands + `git_status`/`git_log` read-only tools for the planner agent. *"Manage saved plans; planner sees git state."* |
 | **v0.5.2** ✅ | Streaming fallback — print `resp.text` when provider streaming delivers no chunks. *"No more silent empty responses."* |
 | **v0.5.3** ✅ | REPL rendering fixes — tool indicator de-duplication + `/dev/tty` bash confirmation + empty response diagnostics. *"Cleaner tool output; bash no longer swallows your input."* |
-| **v0.5.4** ✅ | Session management — `par session list/show/fork` + partial ID resume + Ctrl+C clean exit. *"Browse, fork, and resume sessions without copy-pasting UUIDs."* |
+| **v0.5.4** ✅ ⚠️ | Session management — `par session list/show/fork` + partial ID resume + Ctrl+C clean exit. _Audit 2026-08-05 found 3 release-blocker regressions; see [DECISIONS.md](docs/DECISIONS.md) for fix plan._ *"Browse, fork, and resume sessions without copy-pasting UUIDs."* |
+| **v0.5.5** | Hotfix — Plan Mode tool-filter name fix + startup version-notice fix + REPL prompt flush + README capabilities correction. Wave 1 (par-code only, ships immediately). Wave 2 (session scope + `/cost` tokens + `<think>` handling) gated on PAR SDK upstream fixes. *"Audit findings resolved; advertised features actually work."* |
 | **v0.6.0** | Subagent delegation — general/explore subagents, actor tool, task tree. *"It spawns helpers to explore and work in parallel."* |
 | **v0.7.0** | Goal-driven autonomy — `/goal` + independent judge model + doom-loop detection. *"It won't declare done until the goal is truly met."* |
 | **v0.8.0** | Best-of-N reasoning — max-mode (parallel candidates + judge selection). *"It tries several approaches and picks the best."* |

@@ -1,6 +1,6 @@
 # par-code Strategy
 
-> **Last updated**: 2026-07-21 (v0.4.5)
+> **Last updated**: 2026-08-05 (post-v0.5.4 audit)
 > **Status**: Active
 > **Owner**: PAR-Code Contributors
 >
@@ -106,6 +106,16 @@ vertical slice. Version numbers stay minimal. Examples:
 - **Production-ready**: not yet (pre-1.0)
 - **Public beta**: v0.2.x — usable for real work, but CLI/API still settling
 - **Internal alpha**: v0.1.x (project skeleton only)
+- **Audit findings (2026-08-05)**: v0.5.4 has 3 release-blocker regressions
+  (Plan Mode tool filter, session scope write, version comparison) and 7
+  critical UX defects. See `docs/DECISIONS.md` `[2026-08-05] v0.5.4
+  comprehensive audit` entry. v0.5.5 hotfix planned in two waves (Wave 1
+  par-code-only ships immediately; Wave 2 gated on PAR SDK upstream fixes).
+  Unit tests (218/218 passing) did not catch the P0s because they encoded
+  the same wrong assumptions as the implementations. **Process implication**:
+  pre-1.0 needs an integration-test harness (tmux/expect-based) that
+  asserts on observed behavior of advertised features, not just internal
+  state.
 
 ## 6. Strategic Non-Goals
 
@@ -198,9 +208,22 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
   diagnostics. Ctrl+C clean exit.
 - **v0.5.4 ✅ shipped** — Session management: `par session list/show/fork` CLI
   commands + partial ID resume + project-scoped listing. 7 new tests.
-- v0.4.0+ — plan mode, subagents, autonomy, reasoning,
-  self-improvement, compose mode, ecosystem, code intelligence, safety, polish
-  → v1.0
+- **v0.5.4 audit (2026-08-05)** ⚠️ — First comprehensive end-to-end audit
+  found 3 P0 release-blocker regressions in v0.5.4's marquee features
+  (Plan Mode tool-filter names wrong, session `scope` never written,
+  startup version notice always fires) + 7 P1 critical UX defects. 218/218
+  unit tests passed but encoded the same wrong assumptions as the
+  implementations. 4 of the 10 findings require PAR SDK upstream fixes
+  (see [2026-08-05] PAR SDK Feedback entry). v0.5.5 hotfix planned in
+  two waves; Wave 1 (par-code-only) ships immediately, Wave 2 gated on
+  PAR SDK. **Process change**: future releases require integration-test
+  harness (tmux/expect) for advertised features.
+- **v0.5.5 (planned)** — Hotfix release. Wave 1 (par-code only):
+  P0 #1 planner tool filter, P0 #3 version compare, P1 #8 prompt flush,
+  P1 #9 README capabilities correction. Wave 2 (after PAR SDK fixes):
+  P0 #2 session scope, P1 #4 `/cost` tokens, P1 #6 `<think>` handling.
+- v0.6.0+ — subagent delegation, autonomy, reasoning, self-improvement,
+  compose mode, ecosystem, code intelligence, safety, polish → v1.0
 
 The roadmap order follows: **usable first (v0.2 foundation) → signature
 capabilities on steepest difficulty curve (v0.3–v0.4 memory/long-context,
@@ -249,6 +272,9 @@ per global rules) lives in `docs/DECISIONS.md`. Strategic-level entries:
 | 2026-07-27 | v0.5.0: PAR SDK feedback filed — first-class mode concept missing (currently par-code simulates via agent_id swap + module-level mutable ref). Priority: low. Re-evaluation trigger: if v0.6.0+ adds more modes. | Active |
 | 2026-07-27 | v0.5.0: PAR SDK feedback filed — no plan/task primitive (plans stored as markdown files, not queryable). Priority: medium. Re-evaluation trigger: v0.6.0 subagent coordination needs structured plan handoff. | Active |
 | 2026-07-29 | v0.5.1 shipped — Plan CLI (par plan list/show/prune) + git_status/git_log read-only tools for planner + Fliegel-Van Flandern timestamp parser. 211 tests passing. | Active |
+| 2026-08-04 | v0.5.2–v0.5.4 shipped — streaming fallback (print resp.text on no-chunks), REPL rendering fixes (tool dedup + /dev/tty bash + empty-response diagnostics + Ctrl+C clean exit), session management (par session list/show/fork + partial ID resume + project-scoped listing) | Active — v0.5.4 has known regressions, see next row |
+| 2026-08-05 | v0.5.4 comprehensive audit — 3 P0 (planner tool filter, session scope write, version compare) + 7 P1 findings; 218/218 unit tests passed but encoded wrong assumptions; v0.5.5 hotfix planned in two waves (Wave 1 par-code-only, Wave 2 gated on PAR SDK); process change: integration-test harness required for future releases | Active |
+| 2026-08-05 | PAR SDK feedback filed — 3 gaps surfaced by audit: (1) Runtime.save_conversation lacks ?scope (blocks P0 #2), (2) openai_provider streaming lacks stream_options.include_usage (blocks /cost accuracy), (3) think_tag_strip middleware not default (blocks CoT-leaking model support). User will direct PAR SDK team before v0.5.5 Wave 2 | Active |
 
 ## 10. Revision Protocol
 

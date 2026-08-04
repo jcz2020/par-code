@@ -1,5 +1,318 @@
 # Decisions
 
+## [2026-08-05] v0.5.4 comprehensive audit — 3 P0 + 7 P1 findings, v0.5.5 hotfix planned
+
+> First full end-to-end audit since project inception. Driven via tmux
+> against `par 0.5.4` (PAR SDK `v0.7.10-62-gb22e17a`) using a chain-of-thought-
+> leaking OpenAI-compatible reasoning model. Full audit report:
+> `.sisyphus/audits/2026-08-05-comprehensive-walkthrough.md` (local,
+> gitignored). Fix soundness verified by deep code-path analysis (file:line
+> evidence in report).
+
+**变更前**：v0.5.4 shipped with three marquee features (session management,
+clean Ctrl+C exit, partial-UUID resume). Unit tests pass 218/218. No
+end-to-end integration testing had ever been performed; the project relied
+on unit tests + manual smoke during release.
+
+**变更后**：Comprehensive audit identified **3 release-blocker defects
+(P0)** and **7 critical UX defects (P1)**. v0.5.5 hotfix planned in two
+waves (see §Wave breakdown below). 4 of the P1s require PAR SDK upstream
+fixes (see [2026-08-05] PAR SDK Feedback entry below). Findings and
+fix strategies:
+
+**P0 #1 — Plan Mode planner tool filter uses wrong names** (release blocker)
+- Symptom: planner agent in Plan Mode can only `grep`; cannot `read`/`find`/`ls`.
+- Root cause: `lib/par_code_setup.ml:326-330` filters on `"read_file"` /
+  `"find_files"` / `"list_directory"` but PAR SDK exposes them as `read` /
+  `find` / `ls` (`/root/dev/PAR/lib/tools/builtin_tools.ml:726,798,880`).
+- README "What the planner can do" section repeats the wrong names.
+- Fix: rename in filter + planner system prompt + README. ~7 LOC, 15 min.
+- Architecturally correct (R1): pure bugfix, no scope compromise.
+
+**P0 #2 — Session management non-functional end-to-end (scope never written)**
+- Symptom: `par session list`, `par -r`, `par --continue <prefix>` all return
+  empty despite 40 conversations in DB.
+- Root cause: write side (`par_code_repl.ml:198,206,253,360,374,434`) calls
+  `Runtime.save_conversation rt ?conversation:!conv ()` without `~scope`;
+  read side (`par_code_session.ml:31`) filters by `scope`. All 40 DB rows
+  have `scope = ''`. Regression introduced in commit `ba3692f` (only the
+  read path was updated).
+- PAR SDK gap: `Runtime.save_conversation` (`runtime.ml:687`) doesn't
+  accept `~scope`, even though the underlying `Sqlite_persistence.save_conversation`
+  (`sqlite_persistence.ml:693`) does. See PAR SDK Feedback entry below.
+- Fix options:
+  - (A) **Architecturally correct**: PAR SDK extends `Runtime.save_conversation`
+    to forward `?scope`. ~3 LOC PAR SDK change. **PREFERRED — wait for upstream.**
+  - (B) **Scope compromise (R2)**: par-code bypasses Runtime, calls
+    `Sqlite_persistence.save_conversation ~scope` directly. Requires
+    threading `Types.persistence_service` handle from `par_code_setup.ml`
+    through to `par_code_repl.ml`'s `run`/`run_single_shot`. ~20 LOC.
+    Retirement plan: revert to Runtime API once PAR SDK ships (R2 — has
+    explicit retirement condition).
+- Migration: ~40 existing conversations have `scope = ''`. Backfill from
+  `checkpoints.project_id` (which IS populated) or treat empty-scope as
+  "show in all projects" with `(no project)` marker.
+- Fix effort: ~20 LOC (Option B) or ~3 LOC PAR SDK + 5 LOC par-code (Option A).
+
+**P0 #3 — Startup version notice always fires**
+- Symptom: every `par` launch (without `PAR_NO_UPDATE_CHECK=1`) prints
+  `info: par v0.5.4 is available (current: 0.5.4). Run 'par upgrade'.`
+  `par upgrade --check` always exits 1.
+- Root cause: `bin/main.ml:654` `| Ok latest when latest <> cur ->`
+  compares `"v0.5.4"` (GitHub `tag_name`, with `v`) to `"0.5.4"`
+  (`Par_code_version.version`, no `v`). Always unequal. Same bug at
+  `main.ml:175` (`par upgrade --check` exit code).
+- Fix: strip leading `v` from `latest` before comparing. Helper ~5 LOC +
+  2 call-site changes. ~10 min.
+- Architecturally correct (R1): pure bugfix.
+
+**P1 #4 — `/cost` token counts always zero** (PAR SDK blocker)
+- Symptom: `/cost` shows correct LLM call count but always 0 prompt/output
+  tokens.
+- Root cause: PAR SDK `openai_provider.ml:259` streams with `"stream":true`
+  but omits `stream_options: {"include_usage": true}`. OpenAI-compatible
+  APIs only emit usage in the final chunk when explicitly requested.
+- Re-tiered from P0 to P1: `/cost` still shows LLM call count and context
+  size correctly — degraded, not completely non-functional.
+- **PAR SDK fix required** (see Feedback entry). No feasible par-code
+  workaround (would need duplicate non-streaming request — defeats
+  streaming UI purpose).
+
+**P1 #5 — `par config set` only supports 1 of 21 fields**
+- Symptom: `par config set temperature 0.5` → `Unknown config field`.
+- Root cause: `lib/par_code_config.ml:295-310` `update_field` hardcodes
+  match on `"default_mode"` only.
+- Fix effort: ~80-100 LOC (revised up from initial 50 estimate). Each
+  field needs type coercion (int/float/bool/string/null) + validation.
+  `system_prompt` skipped (multiline — set via wizard only).
+- Architecturally correct (R1): consistency fix.
+
+**P1 #6 — `<think>` tag leak corrupts 3 surfaces** (partially PAR SDK blocker)
+- Symptom: chain-of-thought tags from reasoning models
+  leak into (a) plan files (only `<think>` block persisted), (b) checkpoints
+  (4/7 DB rows have empty fields), (c) REPL / `par ask` output.
+- Root cause: par-code passes through raw assistant text. PAR SDK HAS a
+  `Think_tag_strip` middleware (`/root/dev/PAR/lib/middleware/think_tag_strip.ml`)
+  but par-code does NOT register it at any of the 4 `Runtime.make_agent`
+  call sites (`par_code_setup.ml:280-286` etc., all default `~middleware:[]`).
+  Additionally, `parse_checkpoint_response` (`par_code_checkpoint.ml:191`)
+  calls `extract_json_object` without stripping `<think>` first — fragile
+  when `<think>` contains JSON examples.
+- Fix layers:
+  - (a) Register `Think_tag_strip.create ()` middleware at all 4 agents
+    (4 LOC) — fixes non-streaming responses.
+  - (b) Strip `<think>` in `extract_json_object` (2 LOC) — fixes
+    checkpoint parsing.
+  - (c) Strip in `persist_plan_file` (2 LOC) — fixes plan file content.
+  - (d) Streaming path: need buffer-and-strip in flush_markdown step
+    (10-20 LOC state machine) — fixes REPL output.
+- Note: existing checkpoint `ead94af2-...` has literal task text
+  `"Add a test case verifying parse_checkpoint_response handles responses
+  wrapped in think tags"` — team knew, never implemented.
+
+**P1 #7 — `install.sh` exits 0 on failure**
+- Symptom: `sh install.sh --version v999.999.999` (nonexistent) prints
+  `[error] download failed` but exits 0.
+- Root cause: `scripts/install.sh:14` has `set -u` but no `set -e` /
+  `set -o pipefail`.
+- Fix complexity: `set -e` alone is safe (most error paths already use
+  `|| { error; exit 1; }`). `set -o pipefail` is dangerous — grep pipeline
+  at line 144 returns non-zero when checksum file has no match. Need
+  ~5-8 `|| true` annotations on intentionally-non-fatal commands.
+- Architecturally correct (R1).
+
+**P1 #8 — REPL prompt invisible until first response** (re-tiered from P0)
+- Symptom: after banner, user sees blank line instead of `(build) par>`.
+- Root cause: `lib/par_code_ui.ml:266-267` `render` doesn't flush stdout.
+  `render_prompt` (line 468-473) calls `render`. stdout is line-buffered
+  (tmux pty); won't flush until next `\n`.
+- Fix: add `flush b.out` at end of `render_prompt`. 1 LOC, 2 min.
+  (Note: do NOT add flush to `render` itself — `render_line` already
+  flushes; double-flushing is harmless but the contract is "render is
+  unflushed for batch operations".)
+- Architecturally correct (R1).
+
+**P1 #9 — README MCP/Workflows overstatement** (corrected from initial report)
+- Initial claim: MCP, Skills, Workflows all unwired.
+- **Correction**: Skills IS wired (`par_code_setup.ml:442-444` registers
+  `Builtin_skills.builtin_skills`: code-reviewer, summarizer, translator,
+  rag-assistant). Only MCP client and Workflows engine are unwired.
+- Fix: README capabilities table — annotate MCP as "persistence wired;
+  client init deferred — v0.11.0", Workflows as "state persistence
+  registered; engine not yet invoked — v0.10.0". Remove Skills entry
+  fix (correctly claimed).
+
+**P1 #10 — DROPPED (false positive)**
+- Initial claim: `par session show <prefix>` returns EXIT 0 on not-found.
+- **Verification**: `bin/main.ml:570-587` correctly calls `exit 1` on all
+  error paths (resolve_id error at line 574, load error at line 579,
+  Ok None at line 587). Cmdliner exits 0 only on the success path.
+- This finding is incorrect; no bug present.
+
+**原因**：
+1. Unit tests encoded the same wrong assumptions as the implementations
+   they were meant to verify (e.g., `test_par_code_setup.ml` asserts
+   the same wrong tool names that `par_code_setup.ml` filters on). The
+   tests pass because both sides agree on the wrong contract.
+2. No integration test harness drives the public CLI surface end-to-end.
+   Per AGENTS.md global §"工程习惯与规矩" R3 ("一次做对"), the project
+   needs an integration-test layer (tmux/expect) that asserts on
+   observed behavior, not just internal state.
+3. The v0.5.4 release notes advertised Session Management without an
+   end-to-end smoke test of `par session list` returning non-empty.
+   Per §"工程习惯与规矩" R3, advertised features must be smoke-tested
+   before ship.
+
+**影响范围**：
+- P0 #1: `lib/par_code_setup.ml:326-330, 334-364` + `README.md:281-284`
+- P0 #2: `lib/par_code_repl.ml` (6 call sites) + `lib/par_code_session.ml:28-43`
+  + `lib/par_code_setup.ml` (thread persistence through) + PAR SDK `runtime.ml:687`
+- P0 #3: `bin/main.ml:175, 654`
+- P1 #4: PAR SDK `openai_provider.ml:259`
+- P1 #5: `lib/par_code_config.ml:295-310`
+- P1 #6: `lib/par_code_setup.ml` (4 agent sites) + `lib/par_code_checkpoint.ml:174-192`
+  + `lib/par_code_plan_tools.ml:138-150` + `lib/par_code_ui.ml:301-307` (flush_markdown)
+- P1 #7: `scripts/install.sh:14, 144`
+- P1 #8: `lib/par_code_ui.ml:468-473`
+- P1 #9: `README.md:8-10, 37-39`
+
+**回退方式**：Audit itself is documentation-only; no code changes to
+revert. Each fix ships as an atomic commit in v0.5.5 / v0.5.6 (per wave
+breakdown below). Individual revert via `git revert <commit>`.
+
+**已知限制**：
+- 3 of the 10 findings (P0 #2, P1 #4, P1 #6 streaming) require PAR SDK
+  upstream changes. User will direct PAR SDK team to confirm + fix before
+  v0.5.5 Wave 2 begins (per user instruction 2026-08-05).
+- Audit did not exercise: actual `par upgrade` self-replace runtime test
+  (code-reviewed only — atomic_replace + smoke + rollback looks solid),
+  context compaction at 100k+ tokens (cost-prohibitive), macOS/ARM
+  cross-platform builds (hardware-bound). These remain as future audit work.
+- Coverage matrix of feature → test existence not produced (future work).
+- Audit was conducted against locally-built binary on PAR SDK
+  `v0.7.10-62-gb22e17a`. Release artifact at github.com/jcz2020/par-code
+  is built against PAR SDK `v0.8.2-3-ga377a70` — minor SDK version skew.
+  Re-running P0/P1 verification against the release binary is recommended
+  after v0.5.5 ships.
+
+### Wave breakdown for fixes
+
+**Wave 1 (par-code only, ships as v0.5.5 immediately)**:
+- P0 #1 — Plan Mode tool filter fix (~7 LOC, 15 min)
+- P0 #3 — Version comparison fix (~7 LOC, 10 min)
+- P1 #8 — REPL prompt flush (1 LOC, 2 min)
+- P1 #9 — README MCP/Workflows annotation (5 LOC docs, 10 min)
+
+**Wave 2 (after PAR SDK fixes ship, v0.5.6 or v0.5.5延期)**:
+- P0 #2 — Session scope write (3 LOC PAR SDK + 5 LOC par-code, OR
+  20 LOC par-code bypass if PAR SDK can't ship promptly)
+- P1 #4 — Token tracking via `stream_options.include_usage` (3 LOC PAR SDK)
+- P1 #6 — `<think>` tag middleware registration (4 LOC par-code after
+  PAR SDK exposes clean middleware constructor) + extract_json_object
+  strip (2 LOC) + persist_plan_file strip (2 LOC) + streaming state
+  machine (10-20 LOC)
+
+**Wave 3 (par-code only, v0.6.0 bundle)**:
+- P1 #5 — `par config set` extended to all 20 settable fields (~80-100 LOC)
+- P1 #7 — install.sh `set -e` + audit of intentional non-zero exits (~5-8 LOC)
+
+**Wave 4 (process improvement, ongoing)**:
+- Integration test harness: tmux/expect-based E2E tests for each P0/P1 path
+- Test coverage matrix: feature → test existence audit
+- Per-release smoke checklist: every advertised feature gets an E2E test
+  before ship
+
+## [2026-08-05] PAR SDK Feedback: 3 gaps surfaced by v0.5.4 audit
+
+**Tag**: PAR SDK Feedback
+
+**变更前**：v0.5.4 audit identified three PAR SDK gaps that block par-code
+fixes. Per AGENTS.md §1 (PAR SDK boundary), par-code cannot fix these
+in-tree.
+
+**变更后**：No PAR SDK change yet. User will direct PAR SDK team to
+confirm + fix before v0.5.5 Wave 2 work begins (per user instruction
+2026-08-05). par-code Wave 1 fixes (P0 #1, P0 #3, P1 #8, P1 #9) do NOT
+depend on PAR SDK and can proceed immediately.
+
+**原因**：Per AGENTS.md §1 and the par-code `par-sdk-feedback` skill,
+gaps discovered during par-code development must be filed upstream with
+file:line evidence, severity, and a workaround status. Per STRATEGY.md
+§2 (Dual Role), the first response to a PAR limitation is to fix PAR,
+not work around it in par-code.
+
+**影响范围**：Upstream PAR SDK only (`/root/dev/PAR/`). Zero par-code
+source changes from this entry alone.
+
+**回退方式**：N/A (filing only).
+
+**已知限制**：
+
+1. **`Runtime.save_conversation` doesn't accept `?scope` parameter**
+   (`/root/dev/PAR/lib/core/runtime.ml:687-694`). The function signature
+   is `save_conversation rt ?(conversation : Types.conversation option) ()`
+   but the underlying persistence service fn type at
+   `/root/dev/PAR/lib/core/types.ml:1243` IS `save_conversation_fn :
+   ?scope:string -> string -> conversation -> (...)`, and the sqlite
+   implementation at `/root/dev/PAR/lib/persistence/sqlite_persistence.ml:693`
+   correctly binds `?scope` to the `scope` column. The Runtime wrapper
+   simply drops the parameter.
+   - **Severity**: HIGH — blocks P0 #2 (session management non-functional).
+   - **Recommended upstream fix**: Add `?scope:string` parameter to
+     `Runtime.save_conversation`, forward to `save_conversation_fn`.
+     ~3 LOC + signature update in `runtime.mli`.
+   - **par-code workaround**: bypass Runtime.save_conversation in
+     `par_code_repl.ml`, call `Sqlite_persistence.save_conversation ~scope`
+     directly (pattern already used in `par_code_session.ml:120` for fork).
+     Requires threading `Types.persistence_service` from setup through to
+     repl. ~20 LOC. **Workaround is a scope compromise (R2)** with
+     retirement plan: revert to Runtime API once upstream ships.
+
+2. **`openai_provider` streaming omits `stream_options.include_usage`**
+   (`/root/dev/PAR/lib/providers/openai_provider.ml:259`). The provider
+   adds `("stream", `Bool true)` to the request body but never adds
+   `("stream_options", `Assoc [("include_usage", `Bool true)])`. Per
+   the OpenAI-compatible streaming spec, the final chunk omits the
+   `usage` field unless `include_usage: true` is explicitly requested.
+   PAR SDK's
+   usage-parsing code at `openai_provider.ml:372-374, 541-543` is correct
+   — the data simply never arrives.
+   - **Severity**: MEDIUM — degrades par-code `/cost` slash command
+     (claim 14.1 broken: token counts always zero).
+   - **Recommended upstream fix**: When `stream=true`, add
+     `("stream_options", `Assoc [("include_usage", `Bool true)])` to
+     the request body in `build_request_body`. ~3 LOC.
+   - **par-code workaround**: NONE feasible. The REPL UI requires
+     streaming for responsive output; a duplicate non-streaming request
+     would double LLM cost + latency.
+
+3. **`<think>` tag handling not exposed as default middleware**
+   (`/root/dev/PAR/lib/middleware/think_tag_strip.ml` exists but is opt-in).
+   Reasoning models (those that emit chain-of-thought inline such as
+   `<think>...</think>` tagged variants) corrupt plan files, checkpoints,
+   and REPL output. PAR SDK HAS the middleware but par-code (and
+   likely other SDK consumers) doesn't know to register it. Result:
+   CoT tags corrupt plan files, checkpoints, and REPL output.
+   - **Severity**: MEDIUM — UI pollution across 3 surfaces.
+   - **Recommended upstream fix** (one of):
+     - (a) Make `Think_tag_strip` part of the default middleware stack
+       when an OpenAI-compatible provider is detected. Most non-reasoning
+       models don't emit `<think>` so the middleware is a no-op for them.
+     - (b) Add a `Types.llm_response.reasoning : string option` field and
+       have providers parse `<think>` into it, leaving `text` clean.
+       Cleaner long-term but requires API change.
+     - (c) Document the middleware prominently in PAR SDK quickstart so
+       consumers know to register it.
+   - **par-code workaround**: register middleware at all 4
+     `Runtime.make_agent` sites in `par_code_setup.ml` (~4 LOC). Plus
+     add explicit `<think>` strip in `par_code_checkpoint.ml:extract_json_object`
+     and `par_code_plan_tools.persist_plan_file` (4 LOC). Plus streaming
+     state machine (10-20 LOC). Total ~20-30 LOC.
+
+**Re-evaluation trigger**: PAR SDK 0.9.0 release. **Would enable**: clean
+P0 #2 fix (3 LOC instead of 20), accurate `/cost`, clean CoT model support
+without per-call-site workarounds.
+
 ## [2026-08-04] v0.5.2–v0.5.4 shipped — Streaming fix + REPL polish + Session management
 
 **变更前**：v0.5.1 shipped Plan CLI + git tools but had three critical UX issues:
@@ -24,7 +337,8 @@ list or browse past sessions.
 
 **原因**：These are quality-of-life fixes that make par-code practical for
 daily use. The streaming fallback fixed a show-stopper bug (no response from
-MiniMax provider). The REPL fixes addressed output readability. Session
+certain OpenAI-compatible providers when streaming delivered no chunks).
+The REPL fixes addressed output readability. Session
 management was the #1 UX gap vs competitor tools — users couldn't discover
 or resume past sessions without external tools.
 
