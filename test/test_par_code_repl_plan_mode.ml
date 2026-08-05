@@ -104,6 +104,7 @@ let make_message (role : Types.message_role) (text : string) : Types.message =
   ; tool_calls = None
   ; tool_call_id = None
   ; name = None
+  ; reasoning_content = None
   }
 
 let make_conv (msgs : (Types.message_role * string) list) : Types.conversation =

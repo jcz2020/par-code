@@ -23,7 +23,7 @@ let make_mock_tool name =
     handler = mock_handler }
 
 let all_tool_names =
-  [ "read_file"; "write_file"; "edit_file"; "grep"; "find_files"; "list_directory";
+  [ "read"; "write_file"; "edit_file"; "grep"; "find"; "ls";
     "recall_memory"; "search_history";
     "git_status"; "git_log";
     Par_code_plan_tools.plan_enter_tool.descriptor.Types.name;
@@ -73,7 +73,7 @@ let build_planner_descriptors () =
   let plan_exit_name = Par_code_plan_tools.plan_exit_tool.descriptor.Types.name in
   List.filter_map (fun name ->
     if List.mem name
-         [ "read_file"; "grep"; "find_files"; "list_directory";
+         [ "read"; "grep"; "find"; "ls";
            "recall_memory"; "search_history"; "git_status"; "git_log" ]
        || name = plan_exit_name
     then Some { Types.name;
@@ -130,7 +130,7 @@ let test_planner_tools_subset_exact () =
     | Some agent ->
       let expected =
         List.sort String.compare
-          [ "read_file"; "grep"; "find_files"; "list_directory";
+          [ "read"; "grep"; "find"; "ls";
             "recall_memory"; "search_history"; "git_status"; "git_log"; "plan_exit" ]
       in
       let actual = tool_names agent in

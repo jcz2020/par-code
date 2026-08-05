@@ -149,6 +149,10 @@ let format_cost_output ~cost ~context_tokens ~turn_count ~metrics =
 
 let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
   let ui = Par_code_ui.create_backend () in
+  (* v0.5.5 P0 #2: tag every save with the current project scope so that
+     `par session list` / `par -r` / `par --continue <prefix>` filter
+     correctly. PAR SDK 0.8.3 surfaced ?scope through Runtime.save_conversation. *)
+  let scope = Par_code_memory.resolve_project_id () in
   Par_code_ui.render_banner ui ~version:Par_code_version.version;
   let conv : Types.conversation option ref = ref (load_initial_conv ui rt resume) in
   let turn_count = ref 0 in
@@ -195,7 +199,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
    | None -> ());
   let on_tool_event = make_tool_event_callback ui () in
    Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ ->
-     let _ = Runtime.save_conversation rt ?conversation:!conv () in
+     let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in
      maybe_extract ui rt !conv;
      Par_code_ui.render_notice ui "\nBye!";
      exit 0));
@@ -203,7 +207,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
     Par_code_ui.render_prompt ui !Par_code_mode.current;
     match input_line stdin with
     | exception End_of_file ->
-      let _ = Runtime.save_conversation rt ?conversation:!conv () in
+      let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in
       maybe_extract ui rt !conv;
       Par_code_ui.render_notice ui "\nBye!"
     | line ->
@@ -250,7 +254,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
              | _ -> Par_code_ui.render_warning ui "[checkpoints unavailable]");
             loop ()
          | "/quit" | "/exit" ->
-             let _ = Runtime.save_conversation rt ?conversation:!conv () in
+             let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in
              maybe_extract ui rt !conv;
               Par_code_ui.render_notice ui "Bye!"; exit 0
           | "/cost" ->
@@ -357,7 +361,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
                  conv := Some recovered_conv;
                  Par_code_ui.flush_markdown ui;
                  Par_code_ui.render_error ui (Par_code_setup.error_to_string e);
-                 let _ = Runtime.save_conversation rt ?conversation:!conv () in ()
+                 let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in ()
               | Ok { Types.response = resp; conversation = returned_conv; _ } ->
                  conv := Some returned_conv;
                  Par_code_ui.flush_markdown ui;
@@ -371,7 +375,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
                  end;
                  Par_code_ui.render_line ui Par_code_ui.empty;
                 cost := add_usage !cost resp.Types.usage;
-                let _ = Runtime.save_conversation rt ?conversation:!conv () in ();
+                let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in ();
                 incr turn_count;
                 if !session_id = None then begin
                   (try session_id := Some (Runtime.get_session_id rt) with _ -> ())
@@ -406,6 +410,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
 
 let run_single_shot (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~message =
   let ui = Par_code_ui.create_backend () in
+  let scope = Par_code_memory.resolve_project_id () in
   let memory_appendix = build_memory_appendix mem_db in
   let stream_cb, streamed_text = make_stream_cb ui in
   (match Runtime.invoke rt
@@ -430,5 +435,5 @@ let run_single_shot (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) 
            Par_code_ui.render_warning ui
              "[no response text received — provider streaming may be broken]")
       end;
-     Par_code_ui.render_line ui Par_code_ui.empty;
-     let _ = Runtime.save_conversation rt ~conversation:conv () in ())
+      Par_code_ui.render_line ui Par_code_ui.empty;
+      let _ = Runtime.save_conversation rt ~conversation:conv ~scope () in ())

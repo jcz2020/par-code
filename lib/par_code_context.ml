@@ -77,7 +77,8 @@ let make_summary_message (summary : string) : message =
       cache_control = None } ];
     tool_calls = None;
     tool_call_id = None;
-    name = None }
+    name = None;
+    reasoning_content = None }
 
 let compact (conv : conversation) ~budget_tokens ~summary
     ?(keep_recent = 8) () : conversation =

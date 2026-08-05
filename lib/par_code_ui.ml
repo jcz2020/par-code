@@ -317,6 +317,12 @@ let render_llm_chunk backend (chunk : Par.Types.llm_response_chunk) =
       output_string backend.out output;
       flush backend.out
     end
+  | Reasoning_delta _ ->
+    (* v0.5.5: reasoning model chain-of-thought deltas (o1/o3/etc.).
+       Hide from user-visible output — PAR SDK 0.8.3 captures the full
+       reasoning in [llm_response.reasoning_content] for callers that
+       want to display it. *)
+    ()
   | Tool_call_start { tool_call_id = _; name } ->
     render backend (textf "→ %s..." name ~style:(style ~dim:true ()))
   | Tool_call_delta { tool_call_id = _; args_json = _ } ->
@@ -470,7 +476,11 @@ let render_prompt backend mode =
     | Par_code_mode.Plan -> "(plan) "
     | Par_code_mode.Build -> "(build) "
   in
-  render backend (text (prefix ^ "par> ") ~style:(style ~fg:Green ~bold:true ()))
+  render backend (text (prefix ^ "par> ") ~style:(style ~fg:Green ~bold:true ()));
+  (* Flush so the prompt is visible before [input_line stdin] blocks.
+     stdout is line-buffered on a pty; without this the prompt stays
+     buffered until the next \n. See v0.5.4 audit P1 #8. *)
+  flush backend.out
 
 let render_help backend =
   let item cmd desc = textf "  %-12s %s\n" cmd desc in

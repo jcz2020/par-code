@@ -26,21 +26,44 @@ let with_persistence f =
     Fun.protect ~finally:(fun () -> Sqlite_persistence.close db) (fun () -> f db)
 
 let list_sessions ~limit : (session_info list, string) result =
+  (* v0.5.5 P0 #2: PAR SDK's [Sqlite_persistence.load_sessions] filters by
+     [events.scope], but events don't carry scope in our pipeline (only
+     conversations do, via [Runtime.save_conversation ~scope ...]). JOIN
+     events with conversations to filter on the column that IS populated.
+     When PAR SDK plumbs scope through the event bus, this can revert to
+     the simpler [Sqlite_persistence.load_sessions]. *)
   with_persistence (fun db ->
     let scope = Par_code_memory.resolve_project_id () in
-    match Sqlite_persistence.load_sessions ~scope db limit with
-    | Ok summaries ->
-      Ok (List.map (fun s ->
-        {
-          id = s.Types.session_id;
-          event_count = s.Types.event_count;
-          first_event_at = s.Types.first_event_at;
-          last_event_at = s.Types.last_event_at;
-        }
-      ) summaries)
-    | Error e ->
-      Error (Printf.sprintf "load_sessions failed: %s"
-        (Par_code_setup.error_to_string e)))
+    let raw_db = Sqlite_persistence.raw_sqlite3_db db in
+    let stmt =
+      Sqlite3.prepare raw_db
+        "SELECT e.session_id, COUNT(*) AS cnt, MIN(e.timestamp), MAX(e.timestamp) \
+         FROM events e \
+         JOIN conversations c ON c.session_id = e.session_id \
+         WHERE c.scope = ? \
+         GROUP BY e.session_id \
+         ORDER BY MAX(e.timestamp) DESC \
+         LIMIT ?"
+    in
+    ignore (Sqlite3.bind_text stmt 1 scope);
+    ignore (Sqlite3.bind_int stmt 2 limit);
+    let results = ref [] in
+    let rec fetch () =
+      match Sqlite3.step stmt with
+      | Sqlite3.Rc.ROW ->
+        let sid = Sqlite3.column_text stmt 0 in
+        let cnt = Sqlite3.column_int stmt 1 in
+        let first_at = Sqlite3.column_double stmt 2 in
+        let last_at = Sqlite3.column_double stmt 3 in
+        results := { id = sid; event_count = cnt;
+                     first_event_at = first_at; last_event_at = last_at } :: !results;
+        fetch ()
+      | Sqlite3.Rc.DONE -> ()
+      | _ -> ()
+    in
+    fetch ();
+    ignore (Sqlite3.finalize stmt);
+    Ok (List.rev !results))
 
 let load (session_id : string) : (Types.conversation option, string) result =
   with_persistence (fun db ->

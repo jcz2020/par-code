@@ -2,7 +2,7 @@
 
 (name par_code)
 
-(version "0.5.4")
+(version "0.5.5")
 
 (generate_opam_files true)
 
@@ -31,7 +31,7 @@
    ;; PAR is the upstream SDK. As of writing it is not yet on the public opam
    ;; repository; install it from source:
    ;;   opam pin add par https://github.com/jcz2020/par.git
-     (par (>= 0.8.1))
+     (par (>= 0.8.3))
    cmdliner
    eio
    eio_main

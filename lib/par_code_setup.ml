@@ -15,6 +15,30 @@ let ui_render_warning msg = Par_code_ui.render_warning (Lazy.force ui) msg
 let ui_render_notice msg = Par_code_ui.render_notice (Lazy.force ui) msg
 let ui_render msg = Par_code_ui.render (Lazy.force ui) msg
 
+(* v0.5.5 P1 #6: strip <think>...</think> and <reasoning>...</reasoning> tags
+   from LLM responses for models that inline chain-of-thought in [text]
+   (rather than emitting the separate [reasoning_content] field added in
+   PAR SDK 0.8.3). Constructed here in par-code because PAR SDK 0.8.3 ships
+   the middleware but does not yet re-export it via the public [Par] facade.
+   Retirement: replace with [Par.Think_tag_strip.create ()] when PAR SDK
+   exposes it. *)
+let think_tag_strip_middleware : Types.middleware_hook =
+  let open Par in
+  {
+    Types.name = "think_tag_strip";
+    on_before_llm = None;
+    on_after_llm = Some (fun resp ->
+      match resp.Types.text with
+      | Some text ->
+        let stripped = Json_extract.strip_think_tags text in
+        if stripped = text then None
+        else Some { resp with Types.text = Some stripped }
+      | None -> None);
+    on_before_tool = None;
+    on_after_tool = None;
+    on_error = None;
+  }
+
 let error_to_string (e : Types.error_category) =
   match e with
   | Types.Timeout -> "Timeout"
@@ -282,6 +306,7 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
        ~system_prompt:(Types.stable_prompt base_prompt)
        ~model:model_cfg
        ~tools:!descriptors
+       ~middleware:[think_tag_strip_middleware]
        ~max_iterations:cfg.Par_code_config.max_iterations
        () with
      | Error e ->
@@ -299,6 +324,7 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
        ~system_prompt:(Types.stable_prompt Par_code_extractor.extractor_system_prompt)
        ~model:model_cfg
        ~tools:[]
+       ~middleware:[think_tag_strip_middleware]
        ~max_iterations:1
        () with
      | Error e ->
@@ -312,6 +338,7 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
        ~system_prompt:(Types.stable_prompt Par_code_checkpoint.checkpoint_writer_system_prompt)
        ~model:model_cfg
        ~tools:[]
+       ~middleware:[think_tag_strip_middleware]
        ~max_iterations:1
        () with
     | Error e ->
@@ -325,7 +352,7 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
       let plan_exit_name = Par_code_plan_tools.plan_exit_tool.descriptor.Types.name in
       List.filter (fun (td : Types.tool_descriptor) ->
         List.mem td.name
-          [ "read_file"; "grep"; "find_files"; "list_directory";
+          [ "read"; "grep"; "find"; "ls";
             "recall_memory"; "search_history"; "git_status"; "git_log" ]
         || td.name = plan_exit_name
       ) !descriptors
@@ -357,7 +384,7 @@ Your output should be a markdown plan with these sections:
 ## Steps
 <numbered list of implementation steps in suggested execution order>
 
-Investigate thoroughly using read_file, grep, find_files, list_directory,
+Investigate thoroughly using read, grep, find, ls,
 recall_memory, search_history, git_status, git_log. Ask clarifying questions
 if the request is ambiguous.
 
@@ -368,9 +395,10 @@ When your plan is complete, call the `plan_exit` tool to hand off to build mode.
        ~system_prompt:(Types.stable_prompt planner_prompt)
        ~model:model_cfg
        ~tools:planner_descriptors
+       ~middleware:[think_tag_strip_middleware]
        ~max_iterations:cfg.Par_code_config.max_iterations
        ()
-     with
+      with
     | Error e ->
       ui_render_warning (Printf.sprintf "Warning: planner agent not registered: %s" (error_to_string e))
     | Ok planner ->

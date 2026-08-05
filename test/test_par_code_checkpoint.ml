@@ -53,10 +53,10 @@ let make_conv ~user_text ~assistant_text =
     { messages = [
         { role = User;
           content_blocks = [ Text_block { text = user_text; cache_control = None } ];
-          tool_calls = None; tool_call_id = None; name = None };
+          tool_calls = None; tool_call_id = None; name = None; reasoning_content = None };
         { role = Assistant;
           content_blocks = [ Text_block { text = assistant_text; cache_control = None } ];
-          tool_calls = None; tool_call_id = None; name = None };
+          tool_calls = None; tool_call_id = None; name = None; reasoning_content = None };
       ];
       metadata = [] }
 
@@ -245,7 +245,7 @@ let serialize_too_few_messages () =
     { messages = [
         { role = User;
           content_blocks = [ Text_block { text = "hello"; cache_control = None } ];
-          tool_calls = None; tool_call_id = None; name = None };
+          tool_calls = None; tool_call_id = None; name = None; reasoning_content = None };
       ];
       metadata = [] } in
   let result = Par_code_checkpoint.serialize_for_checkpoint conv ~turn_number:1 in
@@ -270,13 +270,13 @@ let serialize_truncation_keeps_last () =
     { messages = [
         { role = User;
           content_blocks = [ Text_block { text = msg1; cache_control = None } ];
-          tool_calls = None; tool_call_id = None; name = None };
+          tool_calls = None; tool_call_id = None; name = None; reasoning_content = None };
         { role = Assistant;
           content_blocks = [ Text_block { text = msg2; cache_control = None } ];
-          tool_calls = None; tool_call_id = None; name = None };
+          tool_calls = None; tool_call_id = None; name = None; reasoning_content = None };
         { role = User;
           content_blocks = [ Text_block { text = msg3; cache_control = None } ];
-          tool_calls = None; tool_call_id = None; name = None };
+          tool_calls = None; tool_call_id = None; name = None; reasoning_content = None };
       ];
       metadata = [] } in
   let result = Par_code_checkpoint.serialize_for_checkpoint conv ~turn_number:5 in
@@ -345,7 +345,7 @@ let make_large_conv n =
   let mk_msg role text =
     Par.Types.{
       role; content_blocks = [Text_block { text; cache_control = None }];
-      tool_calls = None; tool_call_id = None; name = None
+      tool_calls = None; tool_call_id = None; name = None; reasoning_content = None
     }
   in
   let msgs = List.init n (fun i ->

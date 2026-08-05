@@ -1,5 +1,94 @@
 # CHANGES
 
+## v0.5.5 — Hotfix (audit findings)
+
+> **Status**: In progress (Wave 1 + Wave 2 implementation complete; awaiting release).
+
+Resolves 3 P0 release-blocker regressions and 3 P1 critical UX defects
+identified in the [2026-08-05 comprehensive audit](docs/DECISIONS.md). Wave 1
+fixes par-code internals; Wave 2 consumes PAR SDK 0.8.3 fixes (Runtime
+`?scope` plumbing, `stream_options.include_usage`, `reasoning_content` +
+`Think_tag_strip` middleware).
+
+### Fixed
+
+- **Plan Mode tool filter** (P0 #1): planner agent's tool allowlist used
+  wrong names (`read_file`/`find_files`/`list_directory`) instead of the
+  PAR SDK's actual tool names (`read`/`find`/`ls`). Planner could only
+  `grep` — could not read files or list directories. README "What the
+  planner can do" section updated to match.
+- **Session scope write** (P0 #2): all 6 `Runtime.save_conversation`
+  callsites in `par_code_repl.ml` (REPL + single-shot) now pass
+  `~scope:(resolve_project_id ())`. Previously the write side never set
+  scope, so `par session list` / `par -r` / `par --continue <prefix>`
+  returned empty despite conversations existing in the DB. Also extends
+  `par_code_session.list_sessions` to JOIN events with conversations
+  (PAR SDK's `load_sessions` filters by `events.scope`, which is still
+  unpopulated in our pipeline; retirement plan in
+  `lib/par_code_session.ml:28`).
+- **Startup version notice always fires** (P0 #3): GitHub `tag_name`
+  returns `"v0.5.5"` (with `v` prefix) but `Par_code_version.version`
+  returns `"0.5.5"` (no prefix). The string comparison was always
+  unequal. Added `strip_v_prefix` helper in `bin/main.ml` and applied at
+  both callsites (startup notice + `par upgrade --check` exit code).
+- **REPL prompt invisible until first response** (P1 #8):
+  `par_code_ui.render_prompt` didn't flush stdout. On a line-buffered
+  pty the prompt stayed buffered until the next `\n` was written, so
+  users saw a blank line where `(build) par>` should be. Added
+  `flush backend.out` at the end of `render_prompt`.
+- **`<think>` tag contamination of conversation history** (P1 #6):
+  Reasoning models that embed chain-of-thought inline in `text` (rather
+  than via the new `reasoning_content` field added in PAR SDK 0.8.3)
+  polluted plan files and checkpoints. Registered `think_tag_strip`
+  middleware at all 4 `Runtime.make_agent` callsites. The middleware
+  strips `<think>...</think>` and `<reasoning>...</reasoning>` from
+  `llm_response.text` via `Par.Json_extract.strip_think_tags` before
+  the message enters conversation history. Plan files and checkpoint
+  fields are now clean.
+- **PAR SDK minimum version bumped** (par `(>= 0.8.1)` → `(>= 0.8.3)`):
+  required for `Runtime.save_conversation ?scope`, streaming usage, and
+  `reasoning_content`/`Reasoning_delta` types.
+
+### Added
+
+- **`Reasoning_delta` chunk handling** in `par_code_ui.render_llm_chunk`:
+  the new streaming chunk variant (introduced by PAR SDK 0.8.3 for
+  reasoning-model chain-of-thought deltas) is now explicitly handled —
+  hidden from user-visible output. Future work: optional collapsible
+  display.
+- **`reasoning_content` field propagation** across all `Types.message`
+  record construction sites in `lib/` and `test/` (5 sites) for PAR SDK
+  0.8.3 API compatibility.
+
+### Known Limitations
+
+- **Streaming display still leaks `<think>` for some models**: the
+  middleware runs `on_after_llm` (after streaming completes), so live
+  chunks still hit the user's terminal. Conversation history is clean
+  (verified), but the live REPL display still shows CoT for models that
+  inline `<think>` in `Text_delta` chunks (e.g., some OpenAI-compatible
+  reasoning models). Fix requires a streaming-aware buffer-and-strip
+  state machine in `par_code_ui.flush_markdown`. Deferred to a future
+  release.
+- **Legacy conversations (pre-v0.5.5) remain invisible** in
+  `par session list`. They have `scope = ''` from before the write-side
+  fix. Future migration: backfill `scope` from `checkpoints.project_id`,
+  or treat empty scope as "show in all projects" with a UI marker.
+- **`par_code_session.list_sessions` uses a custom SQL JOIN** instead
+  of `Sqlite_persistence.load_sessions`. The PAR SDK function filters
+  by `events.scope`, which our pipeline does not populate. When PAR SDK
+  plumbs scope through the event bus, this can revert to the simpler
+  SDK call. (Retirement plan documented inline at `lib/par_code_session.ml:28`.)
+
+### Process change
+
+Audit also surfaced that 218/218 unit tests passed but encoded the same
+wrong assumptions as the implementations (e.g., `test_par_code_setup.ml`
+asserted the same wrong tool names that `par_code_setup.ml` filtered on).
+Future releases need an integration-test harness (tmux/expect-based) that
+asserts on observed behavior of advertised features. Tracked in
+`.sisyphus/plans/v0.5.5.md` Wave 4.
+
 ## v0.5.4 — Session management
 
 > **Status**: Shipped.

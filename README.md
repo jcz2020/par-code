@@ -286,8 +286,8 @@ The REPL prompt shows the current mode: `(plan) par> ` or `(build) par> `.
 
 ### What the planner can do
 
-In Plan Mode, the agent has access only to read-only tools: `read_file`,
-`grep`, `find_files`, `list_directory`, `recall_memory`, `search_history`,
+In Plan Mode, the agent has access only to read-only tools: `read`,
+`grep`, `find`, `ls`, `recall_memory`, `search_history`,
 `git_status`, `git_log`. Write, edit, and bash are not available, so the LLM
 never sees their schemas.
 

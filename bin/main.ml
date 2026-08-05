@@ -3,6 +3,14 @@ open Par
 
 let ui = Par_code_ui.create_backend ()
 
+(* [strip_v_prefix s] removes a leading 'v' from version strings so that
+   GitHub release tags like "v0.5.5" compare equal to the local version
+   "0.5.5". See v0.5.4 audit P0 #3. *)
+let strip_v_prefix s =
+  if String.length s > 0 && s.[0] = 'v' then
+    String.sub s 1 (String.length s - 1)
+  else s
+
 let cmd_chat
     provider_opt api_key_opt api_base_opt model_opt
     persistence_opt db_uri_opt temp_opt prompt_opt max_iter_opt
@@ -169,10 +177,10 @@ let cmd_upgrade check_opt to_opt uninstall_opt purge_opt =
      | Error (`Http msg) ->
        Par_code_ui.render_error ui (Printf.sprintf "Error checking latest: %s" msg);
        exit 1
-     | Ok latest ->
-       Par_code_ui.render_notice ui (Printf.sprintf "current: %s" cur);
-       Par_code_ui.render_notice ui (Printf.sprintf "latest:  %s" latest);
-       exit (if cur = latest then 0 else 1))
+      | Ok latest ->
+        Par_code_ui.render_notice ui (Printf.sprintf "current: %s" cur);
+        Par_code_ui.render_notice ui (Printf.sprintf "latest:  %s" latest);
+        exit (if cur = strip_v_prefix latest then 0 else 1))
   end;
   match Par_code_upgrade.perform_upgrade ?target:to_opt () with
   | Ok new_ver ->
@@ -650,13 +658,13 @@ let maybe_check_version () =
     if is_chat_mode () then begin
       (try
          let cur = Par_code_upgrade.current_version () in
-         (match Par_code_upgrade.fetch_latest_tag ~timeout:2.0 () with
-          | Ok latest when latest <> cur ->
-            Par_code_ui.render_notice ui
-              (Printf.sprintf
-                 "info: par %s is available (current: %s). Run 'par upgrade'."
-                 latest cur)
-          | Ok _ | Error _ -> ())
+          (match Par_code_upgrade.fetch_latest_tag ~timeout:2.0 () with
+           | Ok latest when (strip_v_prefix latest) <> cur ->
+             Par_code_ui.render_notice ui
+               (Printf.sprintf
+                  "info: par %s is available (current: %s). Run 'par upgrade'."
+                  latest cur)
+           | Ok _ | Error _ -> ())
        with _ -> ())
     end
 
