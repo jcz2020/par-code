@@ -21,8 +21,13 @@ jobs:
           dune-cache: true
           cache-prefix: v3-par069
       # PAR SDK is not yet on the public opam repo — pin it from source.
+      # Tolerate exit code 31: opam returns it when the pin succeeds but
+      # switch state metadata is "out of sync" (packages are actually
+      # installed and usable). Intermittent on fresh runners without cache.
       - name: Pin PAR SDK
-        run: opam pin add par https://github.com/jcz2020/par.git -y
+        run: |
+          opam pin add par https://github.com/jcz2020/par.git -y || rc=$?
+          if [ -n "${rc:-}" ] && [ "$rc" -ne 31 ]; then exit "$rc"; fi
       - name: Install dependencies
         run: opam install . --deps-only --with-test
       - name: Build
