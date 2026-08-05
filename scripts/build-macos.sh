@@ -126,9 +126,15 @@ info "setting up opam environment ..."
 eval "$(opam env)"
 
 # Pin PAR SDK (idempotent — `opam list` check avoids re-pin churn in CI).
+# Tolerate exit code 31: opam returns it when the pin succeeds but the
+# switch state metadata is "out of sync" (packages are actually installed
+# and usable). Same fix as Linux Dockerfile (commit ca57e82).
 if ! opam list --columns=name 2>/dev/null | grep -qx par; then
     info "pinning PAR SDK ..."
-    opam pin add par https://github.com/jcz2020/par.git -y
+    opam pin add par https://github.com/jcz2020/par.git -y \
+        || { rc=$?; [ "$rc" -eq 31 ] \
+             || die "opam pin failed with exit $rc"; \
+             warn "opam pin returned 31 (out of sync) — continuing"; }
 fi
 
 # Deps (idempotent; --with-test is harmless when no test deps are missing).
