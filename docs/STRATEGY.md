@@ -218,10 +218,13 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
   two waves; Wave 1 (par-code-only) ships immediately, Wave 2 gated on
   PAR SDK. **Process change**: future releases require integration-test
   harness (tmux/expect) for advertised features.
-- **v0.5.5 (planned)** — Hotfix release. Wave 1 (par-code only):
-  P0 #1 planner tool filter, P0 #3 version compare, P1 #8 prompt flush,
-  P1 #9 README capabilities correction. Wave 2 (after PAR SDK fixes):
-  P0 #2 session scope, P1 #4 `/cost` tokens, P1 #6 `<think>` handling.
+- **v0.5.5 ✅ shipped** — Hotfix: 3 P0 + 3 P1 audit findings fixed
+  (planner tool filter, session scope write, version compare, prompt flush,
+  think_tag_strip middleware, PAR SDK 0.8.3 bump). Release took 3 CI
+  attempts (opam exit 31 on macOS + ARM64).
+- **v0.5.6 (next)** — Polish: `par config set` extended to all fields,
+  install.sh `set -e`, memory prune `--dry-run`, prefix resolution,
+  legacy scope migration. Half-day effort.
 - v0.6.0+ — subagent delegation, autonomy, reasoning, self-improvement,
   compose mode, ecosystem, code intelligence, safety, polish → v1.0
 

@@ -2,7 +2,7 @@
 
 ## v0.5.5 — Hotfix (audit findings)
 
-> **Status**: In progress (Wave 1 + Wave 2 implementation complete; awaiting release).
+> **Status**: Shipped.
 
 Resolves 3 P0 release-blocker regressions and 3 P1 critical UX defects
 identified in the [2026-08-05 comprehensive audit](docs/DECISIONS.md). Wave 1
