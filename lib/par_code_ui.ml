@@ -566,16 +566,23 @@ let render_delegation_tool_event backend ~agent_type (evt : Par.Types.event) =
     | "general" -> "[general]"
     | other -> Printf.sprintf "[%s]" other
   in
-  (match evt with
-   | Tool_invoked { tool_name; _ } ->
-     render backend (textf "  %s → %s...\n" label tool_name ~style:(style ~dim:true ()))
-   | Tool_completed { tool_name; duration_ms; _ } ->
-     render backend (textf "  %s ✓ %s (%.1fms)\n" label tool_name duration_ms
-                       ~style:(style ~dim:true ()))
-   | Tool_failed { tool_name; _ } ->
-     render backend (textf "  %s ✗ %s\n" label tool_name
-                       ~style:(style ~fg:Red ~dim:true ()))
-   | _ -> ())
+   (match evt with
+    | Tool_invoked { tool_name; _ } ->
+      render backend (textf "  %s → %s...\n" label tool_name ~style:(style ~dim:true ()))
+    | Tool_completed { tool_name; duration_ms; _ } ->
+      render backend (textf "  %s ✓ %s (%.1fms)\n" label tool_name duration_ms
+                        ~style:(style ~dim:true ()))
+    | Tool_failed { tool_name; _ } ->
+      render backend (textf "  %s ✗ %s\n" label tool_name
+                        ~style:(style ~fg:Red ~dim:true ()))
+    | Bash_invoked { argv; _ } ->
+      let cmd = match argv with h :: _ -> h | [] -> "?" in
+      render backend (textf "  %s $ %s...\n" label cmd ~style:(style ~fg:Yellow ~dim:true ()))
+    | Bash_completed { exit_code; _ } ->
+      let mark = if exit_code = 0 then "✓" else "✗" in
+      render backend (textf "  %s %s bash (exit %d)\n" label mark exit_code
+                        ~style:(style ~dim:true ()))
+    | _ -> ())
 
 let render_delegation_result backend ~agent_type ~text:txt =
   let label = match agent_type with

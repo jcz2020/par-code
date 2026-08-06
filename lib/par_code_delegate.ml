@@ -69,16 +69,29 @@ let make_delegate_tool
     ; input_schema = delegate_input_schema
     ; output_schema = None
     ; permission = Allow
-    ; timeout = None
+    ; timeout = Some 300.0
     ; concurrency_limit = None
     ; on_update = None
     ; cache_control = None
     }
   in
-  let handler json _tok =
+  let handler json tok =
     let open Yojson.Safe.Util in
-    let agent_type = json |> member "agent_type" |> to_string in
-    let task = json |> member "task" |> to_string in
+    let agent_type, task =
+      try
+        (json |> member "agent_type" |> to_string,
+         json |> member "task" |> to_string)
+      with Type_error _ ->
+        ("", "")
+    in
+    if agent_type = "" || task = "" then
+      Types.Error
+        { category = Types.Invalid_input "delegate"
+        ; message = "Missing 'agent_type' or 'task' field"
+        ; retryable = false
+        ; metadata = []
+        }
+    else
     match agent_type with
     | "explore" | "general" as at ->
       let agent_id =
@@ -92,6 +105,7 @@ let make_delegate_tool
               ~message:task
               ~save:false
               ~update_current:false
+              ~cancellation_token:tok
               ~on_tool_event:(fun evt ->
                 Par_code_ui.render_delegation_tool_event backend ~agent_type:at evt)
               ()
@@ -99,8 +113,8 @@ let make_delegate_tool
        | Error (err, _conv) ->
          let msg = Printf.sprintf "Subagent failed: %s" (error_to_string err) in
          Par_code_ui.render_delegation_error backend ~agent_type:at ~error:msg;
-         Error
-           { category = External_failure "delegate"
+         Types.Error
+           { category = Types.External_failure "delegate"
            ; message = msg
            ; retryable = false
            ; metadata = []
@@ -109,7 +123,13 @@ let make_delegate_tool
          let text =
            match result.response.text with
            | Some t when String.length t > 0 -> t
-           | _ -> "(subagent returned no text)"
+           | _ ->
+             (match result.response.Types.finish_reason with
+              | Types.Tool_calls ->
+                "(subagent hit max iterations — work may be incomplete)"
+              | Types.Max_tokens ->
+                "(subagent hit max tokens — output truncated)"
+              | _ -> "(subagent returned no text)")
          in
          Par_code_ui.render_delegation_result backend ~agent_type:at ~text;
          Success (`String text))
