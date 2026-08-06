@@ -1,5 +1,58 @@
 # CHANGES
 
+## v0.6.0 — Subagent delegation
+
+> **Status**: Shipped.
+
+The main agent can now delegate tasks to subagents via the `delegate` tool.
+
+### Added
+
+- **`delegate` tool**: spawn focused subagents for investigation or implementation.
+  - `explore` type: read-only investigation (read/grep/find/ls/git/memory tools),
+    max 15 iterations
+  - `general` type: full capability (read/write/edit/bash/memory/git tools),
+    max 25 iterations
+  - Synchronous: main agent blocks while subagent runs, result returned as tool
+    output
+  - Isolated: `~save:false ~update_current:false` — subagent conversation never
+    pollutes parent
+  - Depth limit = 1: subagents cannot themselves delegate
+  - Rendering: subagent tool events (including bash) shown with `[explore]`/
+    `[general]` prefix; result preview truncated at 500 chars
+  - Safety: cancellation token propagated; 300s timeout; bash confirmation hook
+    inherited (runtime-global)
+
+### Fixed
+
+- **Plan mode completely non-functional** (critical): `find_last_assistant_text`
+  returned the wrong assistant message due to recursive short-circuit logic.
+  Every `/build` saved an empty plan file (1 byte `\n`). Plan content now
+  correctly extracted from the last assistant message with non-empty text.
+- **Plan not injected into build mode**: plan appendix previously referenced
+  `read_file` (non-existent tool name — P0 #1 regression) and only gave a file
+  path, not content. Now reads plan file and injects full content into the
+  build agent's system prompt on the first build-mode turn.
+- **Ctrl+C extraction crash**: SIGINT handler called `Runtime.invoke_generate`
+  (extraction) with inconsistent Eio scheduler state, raising
+  `Effect.Unhandled(Eio__core__Cancel.Get_context)`. Extraction now skipped on
+  Ctrl+C; use `/quit` for clean extraction.
+
+### Changed
+
+- Main agent's default system prompt now includes `## Delegation` section with
+  guidance on when to use `explore` vs `general` subagents.
+- Integration test harness added: 68 tmux-based E2E tests covering CLI
+  subcommands, REPL slash commands, and the v0.5.4 audit bug class.
+- install.sh source compile fallback: auto-installs opam + OCaml on platforms
+  without pre-built binaries (e.g., macOS Intel).
+
+### Tests
+
+271 unit tests + 68 integration tests. PAR SDK 0.8.3.
+
+---
+
 ## v0.5.6 — Audit Wave 2–3 + UX polish
 
 > **Status**: Shipped.
