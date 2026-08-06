@@ -1,5 +1,72 @@
 # Decisions
 
+## [2026-08-07] User-reported runtime issues (v0.5.6, MiniMax-M3)
+
+> Real user on macOS hitting two issues. Root cause diagnosed from
+> terminal session output. Not audit findings — production feedback.
+
+**变更前**: v0.5.6 shipped with all audit findings resolved. No
+production usage data since release.
+
+**变更后**: Two issues surfaced from a real user running `par` with
+MiniMax-M3 via a third-party API endpoint:
+
+**Issue A — Streaming provider silently swallows API errors (PAR SDK gap)**
+- Symptom: every message returns `⚠ [no response text received — provider
+  streaming may be broken]` with no diagnostic detail.
+- Root cause: user set `max_tokens: 100000000` (100M). The API rejected
+  the request (HTTP 400 or error embedded in SSE stream), but PAR SDK's
+  `openai_provider` streaming path did not surface the error to the caller.
+  The user saw "streaming may be broken" instead of the actual API rejection.
+- Fix applied (user-side): `par config set max_tokens none` resolved
+  the immediate issue. MiniMax-M3 then responded correctly.
+- Upstream gap: PAR SDK's streaming error handling needs to propagate
+  API error objects (HTTP 4xx/5xx and SSE error events) to the caller
+  so par-code can display them. Currently these are silently dropped.
+- Severity: MEDIUM — users with misconfigured providers see a confusing
+  message with no actionable diagnostic.
+- Recommended upstream fix: in `openai_provider.ml` streaming path,
+  check for `error` field in SSE data chunks and HTTP status codes;
+  return as `Error` on the stream or raise to the caller.
+
+**Issue B — Ctrl+C during extraction crashes with unhandled Eio effect**
+- Symptom: pressing Ctrl+C to exit while memory extraction is running
+  produces `✗ [extraction failed: Stdlib.Effect.Unhandled(Eio__core__Cancel.Get_context)]`.
+- Root cause: Ctrl+C triggers Eio fiber cancellation. The extraction
+  subagent (running via `Runtime.invoke_generate ~save:false`) doesn't
+  handle the `Eio.Cancel.Get_context` effect, causing an unhandled
+  exception in the extraction code path.
+- Workaround: use `/quit` instead of Ctrl+C — `/quit` saves state and
+  exits cleanly without triggering Eio cancel.
+- Severity: LOW — only affects Ctrl+C exit during the brief extraction
+  window (session-end memory extraction). `/quit` works correctly.
+- Fix direction: wrap extraction in `Eio.Cancel.try_with` or catch
+  `Effect.Unhandled` in the extraction dispatch path. ~5 LOC.
+
+**原因**: Production usage with a non-standard provider (MiniMax via
+custom API base) exposed edge cases not covered by the v0.5.4 audit
+(which used an OpenAI-compatible reasoning model). The max_tokens
+validation in `par config set` (checks `> 0` but no upper bound) allowed
+an absurdly large value that most APIs reject.
+
+**影响范围**:
+- Issue A: PAR SDK `openai_provider.ml` (streaming error path) + par-code
+  error display. Affects all users with misconfigured providers.
+- Issue B: `par_code_extractor.ml` / `par_code_repl.ml` (Ctrl+C handling).
+  Affects users who Ctrl+C during extraction.
+
+**回退方式**: N/A (diagnostic record, no code changes).
+
+**已知限制**:
+- `par config set max_tokens` accepts any positive integer. Consider
+  adding an upper-bound warning (e.g., > 200000 is likely a mistake).
+- Issue A cannot be fixed in par-code alone — requires PAR SDK streaming
+  error propagation. File as PAR SDK feedback when prioritized.
+- Issue B can be fixed in par-code (~5 LOC Eio cancel handling) but is
+  low-priority given the `/quit` workaround.
+
+---
+
 ## [2026-08-05] v0.5.6 scope — clear all audit findings + UX polish
 
 **变更前**: v0.5.5 shipped Wave 1 fixes (P0 #1, #3; P1 #8, #9 partial #6)
