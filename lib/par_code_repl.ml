@@ -334,9 +334,18 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
               in
               let plan_appendix = match !last_plan_path with
                 | Some path ->
-                  Some (Printf.sprintf
-                    "\n\n## Plan Reference\n\nYour plan was saved to `%s`.\nRead it with `read_file` before implementing."
-                    path)
+                  (try
+                    let ic = open_in path in
+                    let len = in_channel_length ic in
+                    let buf = Bytes.create len in
+                    really_input ic buf 0 len;
+                    close_in ic;
+                    let plan_text = Bytes.to_string buf in
+                    Some (Printf.sprintf
+                      "\n\n## Plan (from plan mode)\n\n%s\n\nFollow this plan for the current task." plan_text)
+                  with Sys_error _ ->
+                    Some (Printf.sprintf
+                      "\n\n## Plan Reference\n\nYour plan was saved to `%s`." path))
                 | None -> None
               in
               let combined_appendix = match memory_appendix, plan_appendix with
