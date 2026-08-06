@@ -34,3 +34,11 @@ jobs:
         run: opam exec -- dune build
       - name: Test
         run: opam exec -- dune runtest
+      - name: Install tmux (Linux)
+        run: |
+          if ! command -v tmux >/dev/null 2>&1; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq tmux
+          fi
+        if: runner.os == 'Linux'
+      - name: Integration tests
+        run: bash test/integration/run.sh
