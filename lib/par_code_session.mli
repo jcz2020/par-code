@@ -15,6 +15,11 @@ type session_info = {
 val format_age : float -> string
 (** Human-readable age string ("5m ago", "2h ago", "3d ago"). *)
 
+val migrate_legacy_scopes : Sqlite3.db -> unit
+(** Backfill empty-scope conversations from checkpoints.project_id.
+    Idempotent — no-op when no legacy rows exist. Called automatically
+    by [list_sessions]. *)
+
 val list_sessions : limit:int -> (session_info list, string) result
 (** List sessions for the current project, newest first.
     Errors include DB failures. Returns empty list if no sessions. *)

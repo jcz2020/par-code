@@ -173,6 +173,7 @@ let extract_json_array (text : string) : string option =
   else None
 
 let parse_extraction_response (text : string) : extraction_result list =
+  let text = Par.Json_extract.strip_think_tags text in
   if String.trim text = "" then []
   else
     let json_str = match extract_json_array text with

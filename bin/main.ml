@@ -301,12 +301,20 @@ let info_memory_add = Cmd.info "add" ~doc:"Add a new memory manually"
 
 let cmd_memory_forget id =
   with_memory_db (fun mem_db ->
-    match Par_code_memory.forget mem_db ~id with
+    let project_id = Par_code_memory.resolve_project_id () in
+    let resolved_id =
+      match Par_code_memory.resolve_memory_id mem_db ~project_id id with
+      | Ok full_id -> full_id
+      | Error msg ->
+        Par_code_ui.render_error ui msg;
+        exit 1
+    in
+    match Par_code_memory.forget mem_db ~id:resolved_id with
     | Error (`Db_error msg) ->
       Par_code_ui.render_error ui (Printf.sprintf "Error forgetting memory: %s" msg);
       exit 1
     | Ok () ->
-      Par_code_ui.render_success ui (Printf.sprintf "Forgot memory #%s" id))
+      Par_code_ui.render_success ui (Printf.sprintf "Forgot memory #%s" resolved_id))
 
 let cmd_memory_forget_term =
   let open Term in
@@ -317,47 +325,54 @@ let info_memory_forget = Cmd.info "forget" ~doc:"Delete a memory by ID"
 let cmd_memory_show id =
   with_memory_db (fun mem_db ->
     let project_id = Par_code_memory.resolve_project_id () in
+    let resolved_id =
+      match Par_code_memory.resolve_memory_id mem_db ~project_id id with
+      | Ok full_id -> full_id
+      | Error msg ->
+        Par_code_ui.render_error ui msg;
+        exit 1
+    in
     match Par_code_memory.list mem_db ~project_id ~limit:10000 () with
     | Error (`Db_error msg) ->
       Par_code_ui.render_error ui (Printf.sprintf "Error listing memories: %s" msg);
       exit 1
     | Ok memories ->
-      (match List.find_opt (fun (m : Par_code_memory.memory) -> m.id = id) memories with
+      (match List.find_opt (fun (m : Par_code_memory.memory) -> m.id = resolved_id) memories with
        | None ->
-         Par_code_ui.render_error ui (Printf.sprintf "memory #%s not found" id);
+         Par_code_ui.render_error ui (Printf.sprintf "memory #%s not found" resolved_id);
          exit 1
        | Some m ->
-         let citations_line =
-           match m.citations with
-           | [] -> []
-           | cits -> [ Par_code_ui.textf "Citations:  %s" (String.concat ", " cits) ]
-         in
-         let last_used_line =
-           match m.last_used_at with
-           | None -> []
-           | Some ts -> [ Par_code_ui.textf "Last used:  %s" (format_timestamp ts) ]
-         in
-         let source_str =
-           match m.source with
-           | `Manual -> "manual"
-           | `Agent -> "agent"
-           | `Import -> "import"
-         in
-         let image =
-           Par_code_ui.vcat (
-             [ Par_code_ui.textf "ID:         %s" m.id;
-               Par_code_ui.textf "Kind:       %s" (format_kind m.kind);
-               Par_code_ui.textf "Summary:    %s" m.summary;
-               Par_code_ui.textf "Content:    %s" m.content ]
-             @ citations_line
-             @ [ Par_code_ui.textf "Created:    %s" (format_timestamp m.created_at);
-                 Par_code_ui.textf "Updated:    %s" (format_timestamp m.updated_at) ]
-             @ last_used_line
-             @ [ Par_code_ui.textf "Used:       %d times" m.usage_count;
-                 Par_code_ui.textf "Source:     %s" source_str ]
-           )
-         in
-         Par_code_ui.render_line ui image))
+          let citations_line =
+            match m.citations with
+            | [] -> []
+            | cits -> [ Par_code_ui.textf "Citations:  %s" (String.concat ", " cits) ]
+          in
+          let last_used_line =
+            match m.last_used_at with
+            | None -> []
+            | Some ts -> [ Par_code_ui.textf "Last used:  %s" (format_timestamp ts) ]
+          in
+          let source_str =
+            match m.source with
+            | `Manual -> "manual"
+            | `Agent -> "agent"
+            | `Import -> "import"
+          in
+          let image =
+            Par_code_ui.vcat (
+              [ Par_code_ui.textf "ID:         %s" m.id;
+                Par_code_ui.textf "Kind:       %s" (format_kind m.kind);
+                Par_code_ui.textf "Summary:    %s" m.summary;
+                Par_code_ui.textf "Content:    %s" m.content ]
+              @ citations_line
+              @ [ Par_code_ui.textf "Created:    %s" (format_timestamp m.created_at);
+                  Par_code_ui.textf "Updated:    %s" (format_timestamp m.updated_at) ]
+              @ last_used_line
+              @ [ Par_code_ui.textf "Used:       %d times" m.usage_count;
+                  Par_code_ui.textf "Source:     %s" source_str ]
+            )
+          in
+          Par_code_ui.render_line ui image))
 
 let cmd_memory_show_term =
   let open Term in
@@ -386,19 +401,27 @@ let cmd_memory_export_term =
 
 let info_memory_export = Cmd.info "export" ~doc:"Export memories as MEMORY.md"
 
-let cmd_memory_prune older_than_days =
+let cmd_memory_prune dry_run older_than_days =
   with_memory_db (fun mem_db ->
     let project_id = Par_code_memory.resolve_project_id () in
-    match Par_code_memory.prune_stale mem_db ~project_id ~older_than_days with
-    | Error (`Db_error msg) ->
-      Par_code_ui.render_error ui (Printf.sprintf "Error pruning memories: %s" msg);
-      exit 1
-    | Ok count ->
-      Par_code_ui.render_notice ui (Printf.sprintf "Pruned %d stale memories" count))
+    if dry_run then
+      match Par_code_memory.prune_stale_dry_run mem_db ~project_id ~older_than_days with
+      | Error (`Db_error msg) ->
+        Par_code_ui.render_error ui (Printf.sprintf "Error checking memories: %s" msg);
+        exit 1
+      | Ok count ->
+        Par_code_ui.render_notice ui (Printf.sprintf "Would prune %d stale memories" count)
+    else
+      match Par_code_memory.prune_stale mem_db ~project_id ~older_than_days with
+      | Error (`Db_error msg) ->
+        Par_code_ui.render_error ui (Printf.sprintf "Error pruning memories: %s" msg);
+        exit 1
+      | Ok count ->
+        Par_code_ui.render_notice ui (Printf.sprintf "Pruned %d stale memories" count))
 
 let cmd_memory_prune_term =
   let open Term in
-  const cmd_memory_prune $ Cli_args.memory_older_than_arg
+  const cmd_memory_prune $ Cli_args.memory_dry_run_arg $ Cli_args.memory_older_than_arg
 
 let info_memory_prune = Cmd.info "prune" ~doc:"Remove stale unused memories"
 

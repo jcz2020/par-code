@@ -1,5 +1,49 @@
 # Decisions
 
+## [2026-08-05] v0.5.6 scope — clear all audit findings + UX polish
+
+**变更前**: v0.5.5 shipped Wave 1 fixes (P0 #1, #3; P1 #8, #9 partial #6)
+but Wave 2 (P0 #2, P1 #4, P1 #6 streaming) was believed gated on PAR SDK
+upstream changes. Wave 3 (P1 #5, #7) and P2 items (#11–14) were deferred
+to v0.6.0+.
+
+**变更后**: PAR SDK v0.8.3 shipped all 3 Wave 2 blockers
+(`Runtime.save_conversation ?scope`, `stream_options.include_usage`,
+`Think_tag_strip` middleware). v0.5.6 scope expanded to "全清" — clear
+all remaining audit findings + add deferred UX improvements. 8 items
+implemented across 14 files, +51 tests (218→269).
+
+Key realizations during implementation:
+- v0.5.5 had already shipped MORE than its plan stated: scope threading
+  at all 6 `save_conversation` callsites, `Think_tag_strip` middleware at
+  all 4 agents, and `Reasoning_delta` chunk handling. The DECISIONS.md
+  audit entry was stale relative to the actual v0.5.5 codebase.
+- v0.5.6 remaining work was smaller than estimated: T6 (scope migration)
+  reduced to backfill-only, T8a (think strips) reduced to 2 targeted
+  strips (~4 LOC) since middleware registration was already done.
+
+**原因**: PAR SDK unblock removed the gate. Clearing all audit findings
+in one release is architecturally cleaner than spreading them across
+v0.6.0+ (R5 — "一次做对").
+
+**影响范围**: lib/par_code_config.ml, lib/par_code_memory.{ml,mli},
+lib/par_code_session.{ml,mli}, lib/par_code_ui.{ml,mli},
+lib/par_code_repl.ml, lib/par_code_checkpoint.ml,
+lib/par_code_plan_tools.ml, bin/cli_args.ml, bin/main.ml,
+scripts/install.sh, +5 test files.
+
+**回退方式**: Each fix is independently revertable via `git revert`.
+
+**已知限制**:
+- `/cost` token counts (P1 #4) verified at code level — PAR SDK sends
+  `stream_options.include_usage`, existing `add_usage` reads it. Runtime
+  smoke test with a real LLM deferred to release verification.
+- Streaming `<think>` strip handles common cases (tag at start,
+  across chunks, unclosed at flush) but not adversarial inputs
+  (e.g., `<think>` nested inside a code block). Acceptable for v0.5.6.
+
+---
+
 ## [2026-08-05] v0.5.4 comprehensive audit — 3 P0 + 7 P1 findings, v0.5.5 hotfix planned
 
 > First full end-to-end audit since project inception. Driven via tmux

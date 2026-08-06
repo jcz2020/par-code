@@ -139,6 +139,7 @@ let persist_plan_file (conv : Types.conversation) : string option =
   match find_last_assistant_text conv with
   | None -> None
   | Some text ->
+    let text = Json_extract.strip_think_tags text in
     try
       let plans_dir = ensure_plans_dir () in
       let filename = format_timestamp () ^ ".md" in

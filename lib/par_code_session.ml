@@ -25,6 +25,31 @@ let with_persistence f =
   | Ok db ->
     Fun.protect ~finally:(fun () -> Sqlite_persistence.close db) (fun () -> f db)
 
+(* Migrate legacy NULL-scope conversations by backfilling from checkpoints.project_id.
+   Idempotent: no-op if no NULL-scope rows exist. *)
+let migrate_legacy_scopes db =
+  let count_stmt = Sqlite3.prepare db
+    "SELECT COUNT(*) FROM conversations WHERE scope = '' OR scope IS NULL" in
+  let _ = Sqlite3.step count_stmt in
+  let count = Sqlite3.column_int count_stmt 0 in
+  ignore (Sqlite3.finalize count_stmt);
+  if count = 0 then ()
+  else begin
+    let stmt = Sqlite3.prepare db
+      "UPDATE conversations SET scope = \
+       (SELECT project_id FROM checkpoints \
+        WHERE checkpoints.session_id = conversations.session_id \
+        ORDER BY created_at DESC LIMIT 1) \
+       WHERE (scope = '' OR scope IS NULL) \
+       AND EXISTS (SELECT 1 FROM checkpoints \
+                   WHERE checkpoints.session_id = conversations.session_id)" in
+    ignore (Sqlite3.step stmt);
+    let migrated = Sqlite3.changes db in
+    ignore (Sqlite3.finalize stmt);
+    Printf.eprintf "[migration] %d of %d legacy conversations backfilled with project scope\n"
+      migrated count
+  end
+
 let list_sessions ~limit : (session_info list, string) result =
   (* v0.5.5 P0 #2: PAR SDK's [Sqlite_persistence.load_sessions] filters by
      [events.scope], but events don't carry scope in our pipeline (only
@@ -35,6 +60,7 @@ let list_sessions ~limit : (session_info list, string) result =
   with_persistence (fun db ->
     let scope = Par_code_memory.resolve_project_id () in
     let raw_db = Sqlite_persistence.raw_sqlite3_db db in
+    migrate_legacy_scopes raw_db;
     let stmt =
       Sqlite3.prepare raw_db
         "SELECT e.session_id, COUNT(*) AS cnt, MIN(e.timestamp), MAX(e.timestamp) \

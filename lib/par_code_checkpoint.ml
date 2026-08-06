@@ -189,6 +189,7 @@ let extract_json_object (text : string) : string option =
   else None
 
 let parse_checkpoint_response (text : string) : checkpoint_entry option =
+  let text = Json_extract.strip_think_tags text in
   let json_str = match extract_json_object text with
     | Some s -> s
     | None -> String.trim text

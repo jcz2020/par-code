@@ -195,6 +195,13 @@ let parse_empty_lists () =
     Alcotest.(check (list string)) "files" [] entry.Par_code_checkpoint.files_changed
   | None -> Alcotest.fail "parse returned None"
 
+let parse_think_wrapped () =
+  let think_wrapped = "<think>I should create a checkpoint.</think>{\"task\":\"Fix bug\",\"decisions\":[],\"files_touched\":[],\"interfaces\":[],\"open_threads\":[]}" in
+  match Par_code_checkpoint.parse_checkpoint_response think_wrapped with
+  | Some entry ->
+    Alcotest.(check string) "task" "Fix bug" entry.Par_code_checkpoint.task
+  | None -> Alcotest.fail "expected Some entry, got None"
+
 let parse_garbage () =
   match Par_code_checkpoint.parse_checkpoint_response "not json at all" with
   | None -> ()  (* expected *)
@@ -419,6 +426,7 @@ let () =
       "json", [
         Alcotest.test_case "valid_json"      `Quick parse_valid_json;
         Alcotest.test_case "empty_lists"     `Quick parse_empty_lists;
+        Alcotest.test_case "think_wrapped"   `Quick parse_think_wrapped;
         Alcotest.test_case "garbage"         `Quick parse_garbage;
         Alcotest.test_case "missing_fields"  `Quick parse_missing_fields;
       ];

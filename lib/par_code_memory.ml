@@ -537,6 +537,43 @@ let prune_stale t ~project_id ~older_than_days =
     | Sqlite3.Rc.DONE -> Sqlite3.changes t.db
     | _ -> raise (Sqlite3.Error (Sqlite3.Rc.to_string rc)))
 
+let prune_stale_dry_run t ~project_id ~older_than_days =
+  let cutoff = Unix.gettimeofday () -. (older_than_days *. 86400.0) in
+  wrap_sqlite_error (fun () ->
+    let stmt = Sqlite3.prepare t.db
+      "SELECT COUNT(*) FROM memory_entries \
+       WHERE scope = ? AND usage_count = 0 AND updated_at < ?" in
+    let _ = Sqlite3.bind_text stmt 1 project_id in
+    let _ = Sqlite3.bind_double stmt 2 cutoff in
+    let count = ref 0 in
+    (match Sqlite3.step stmt with
+     | Sqlite3.Rc.ROW -> count := Sqlite3.column_int stmt 0
+     | _ -> ());
+    let _ = Sqlite3.finalize stmt in
+    !count)
+
+(* -- resolve_memory_id (prefix → full UUID) -------------------------------- *)
+
+let resolve_memory_id t ~project_id (prefix : string) =
+  if String.length prefix >= 36 then
+    Ok prefix
+  else
+    match list t ~project_id ~limit:10000 () with
+    | Error e -> Error (match e with `Db_error msg -> msg)
+    | Ok memories ->
+      let matches =
+        List.filter (fun m ->
+          String.starts_with ~prefix m.id
+        ) memories
+      in
+      match matches with
+      | [] -> Error (Printf.sprintf "No memory matches prefix '%s'" prefix)
+      | [m] -> Ok m.id
+      | _ ->
+        let count = List.length matches in
+        Error (Printf.sprintf "Prefix '%s' matches %d memories — be more specific"
+                 prefix count)
+
 (* -- search_history (par-code specific, uses conversations_fts) ---------- *)
 
 let search_history t ~query ?(limit = 10) () =

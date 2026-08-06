@@ -23,6 +23,7 @@ type backend = {
   mutable color : bool option;
   mutable size : (int * int) option;
   mutable markdown_state : Par_code_ui_markdown.state;
+  think_buf : Buffer.t;
 }
 
 let no_style = {
@@ -251,7 +252,8 @@ let detect_size () =
 
 let create_backend () =
   { out = stdout; color = None; size = None;
-    markdown_state = Par_code_ui_markdown.initial }
+    markdown_state = Par_code_ui_markdown.initial;
+    think_buf = Buffer.create 256 }
 
 let color_of b =
   match b.color with
@@ -298,7 +300,87 @@ let render_success backend msg =
 
 (* B. LLM chunk rendering *)
 
+(* Streaming think-tag strip state machine.
+   Buffers incoming chunks and strips [<think>...</think>] and
+   [<reasoning>...</reasoning>] blocks incrementally.  Complete blocks
+   are removed via [Par.Json_extract.strip_think_tags].  Partial tags
+   at the end of the buffer (e.g. [<th] or an unclosed [<think>]) are
+   held back until more text resolves them. *)
+let strip_think_streaming buf chunk =
+  Buffer.add_string buf chunk;
+  let content = Buffer.contents buf in
+  (* Strip complete closed tags *)
+  let stripped = Par.Json_extract.strip_think_tags content in
+  let len = String.length stripped in
+  (* Check for unclosed opening tags (<think> or <reasoning> without closing) *)
+  let rec find_unclosed pos =
+    if pos >= len then None
+    else if stripped.[pos] = '<' then begin
+      let remaining = len - pos in
+      if remaining >= 7 && String.sub stripped pos 7 = "<think>"
+      then Some pos
+      else if remaining >= 11 && String.sub stripped pos 11 = "<reasoning>"
+      then Some pos
+      else find_unclosed (pos + 1)
+    end
+    else find_unclosed (pos + 1)
+  in
+  let safe_len = match find_unclosed 0 with
+    | Some pos -> pos
+    | None ->
+      (* Check if string ends with a partial prefix of an opening tag.
+         Prefixes of "<think>" (len 7): 1..7 chars
+         Prefixes of "<reasoning>" (len 11): 1..11 chars
+         Check longest first to avoid false short matches. *)
+      let rec check_prefix plen =
+        if plen <= 0 then len
+        else if plen > len then check_prefix (plen - 1)
+        else begin
+          let suffix = String.sub stripped (len - plen) plen in
+          let is_think_prefix =
+            plen <= 7 && suffix = String.sub "<think>" 0 plen
+          in
+          let is_reasoning_prefix =
+            plen <= 11 && suffix = String.sub "<reasoning>" 0 plen
+          in
+          if is_think_prefix || is_reasoning_prefix then len - plen
+          else check_prefix (plen - 1)
+        end
+      in
+      check_prefix 11
+  in
+  let to_render = String.sub stripped 0 safe_len in
+  let held = String.sub stripped safe_len (len - safe_len) in
+  Buffer.clear buf;
+  Buffer.add_string buf held;
+  to_render
+
 let flush_markdown backend =
+  let leftover = Buffer.contents backend.think_buf in
+  Buffer.clear backend.think_buf;
+  if leftover <> "" then begin
+    let stripped = Par.Json_extract.strip_think_tags leftover in
+    let len = String.length stripped in
+    let rec find_unclosed pos =
+      if pos >= len then stripped
+      else if stripped.[pos] = '<' then begin
+        let r = len - pos in
+        if (r >= 7 && String.sub stripped pos 7 = "<think>")
+           || (r >= 11 && String.sub stripped pos 11 = "<reasoning>")
+        then String.sub stripped 0 pos
+        else find_unclosed (pos + 1)
+      end
+      else find_unclosed (pos + 1)
+    in
+    let safe = find_unclosed 0 in
+    if safe <> "" then begin
+      let new_state, output =
+        Par_code_ui_markdown.push backend.markdown_state safe
+      in
+      backend.markdown_state <- new_state;
+      if output <> "" then output_string backend.out output
+    end
+  end;
   let final = Par_code_ui_markdown.flush backend.markdown_state in
   if final <> "" then begin
     output_string backend.out final;
@@ -309,13 +391,16 @@ let flush_markdown backend =
 let render_llm_chunk backend (chunk : Par.Types.llm_response_chunk) =
   match chunk with
   | Text_delta { text } ->
-    let new_state, output =
-      Par_code_ui_markdown.push backend.markdown_state text
-    in
-    backend.markdown_state <- new_state;
-    if output <> "" then begin
-      output_string backend.out output;
-      flush backend.out
+    let safe_text = strip_think_streaming backend.think_buf text in
+    if safe_text <> "" then begin
+      let new_state, output =
+        Par_code_ui_markdown.push backend.markdown_state safe_text
+      in
+      backend.markdown_state <- new_state;
+      if output <> "" then begin
+        output_string backend.out output;
+        flush backend.out
+      end
     end
   | Reasoning_delta _ ->
     (* v0.5.5: reasoning model chain-of-thought deltas (o1/o3/etc.).
@@ -454,12 +539,13 @@ let render_cost backend summary =
   in
   render backend image
 
-let render_session_info backend ~agent_id ~session_id ~turn_count =
+let render_session_info backend ~agent_id ~session_id ~turn_count ~message_count =
   let image =
     vcat [
-      textf "Agent: %s\n" agent_id;
-      textf "Session: %s\n" session_id;
-      textf "Turns: %d\n" turn_count;
+      textf "%-10s %s\n" "Agent:" agent_id;
+      textf "%-10s %s\n" "Session:" session_id;
+      textf "%-10s %d\n" "Turns:" turn_count;
+      textf "%-10s %d\n" "Messages:" message_count;
     ]
   in
   render backend image

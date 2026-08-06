@@ -10,16 +10,11 @@ type-safe bash, skills, streaming, persistence — to both ship a useful agent a
 prove out the PAR SDK in anger. (MCP client and Workflow engine are PAR SDK
 primitives par-code does not yet wire — see roadmap items v0.10.0 / v0.11.0.)
 
-**Status:** `v0.5.4` — Session management. `par session list/show/fork` + partial ID resume + Ctrl+C clean exit. Pre-built binaries with a
-one-line installer (`curl | bash`) for Linux x86_64/arm64 + macOS arm64, plus `par upgrade`
-self-update. No OCaml or opam needed for end users.
-
-> ⚠️ **Known regressions in v0.5.4** (audit 2026-08-05): Plan Mode tool filter
-> uses wrong names (planner can only `grep`), session management is
-> non-functional end-to-end (`scope` never written on save), and startup
-> version notice always fires. v0.5.5 hotfix planned; see
-> [DECISIONS.md](docs/DECISIONS.md) `[2026-08-05] v0.5.4 comprehensive audit`
-> entry for details and fix waves.
+**Status:** `v0.5.6` — Audit Wave 2–3 + UX polish + source compile fallback. All 3 P0 and 7 P1
+audit findings from the v0.5.4 comprehensive audit are fixed across v0.5.5 +
+v0.5.6. Pre-built binaries with a one-line installer (`curl | bash`) for
+Linux x86_64/arm64 + macOS arm64, plus `par upgrade` self-update. No OCaml
+or opam needed for end users.
 
 ---
 
@@ -71,7 +66,7 @@ curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.
 curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.sh | bash
 ```
 
-**macOS** (arm64 Apple Silicon; Intel Mac runs via Rosetta 2):
+**macOS** (arm64 Apple Silicon; Intel Mac compiles from source):
 
 ```sh
 curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.sh | bash
@@ -100,6 +95,22 @@ curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.
 | `PAR_NO_UPDATE_CHECK` | unset | Set to `1` to disable the startup version check entirely |
 | `PAR_DISABLE_UPDATE_CHECK` | unset | Set to `1` when invoking `install.sh` from `par upgrade` |
 
+### Source compilation (fallback)
+
+On platforms without a pre-built binary (e.g., macOS Intel), the installer
+automatically falls back to compiling from source. You can also force it:
+
+```sh
+curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.sh | bash -s -- --from-source
+```
+
+This installs opam + OCaml 5.x (if missing), pins the PAR SDK, builds par-code,
+and installs the binary to `~/.par/bin/par`. Takes 5-20 minutes depending on
+whether the OCaml compiler needs to be compiled. Requires:
+
+- **macOS**: Homebrew + Xcode Command Line Tools (`xcode-select --install`)
+- **Linux**: C compiler + make + git (the installer installs opam + dev libraries via apt/dnf/pacman/apk)
+
 ### Self-update
 
 Once installed, `par upgrade` keeps you current without a package manager:
@@ -122,7 +133,7 @@ exists (gated by `PAR_NO_UPDATE_CHECK=1`).
 | Linux x86_64 (glibc >= 2.28) | ✅ Pre-built binary | Covers AlmaLinux 8+, Debian 11+, Ubuntu 20.04+, RHEL 8+, Fedora |
 | Linux arm64 (aarch64) | ✅ Pre-built binary (v0.3.2+) | Raspberry Pi 4/5, AWS Graviton, other ARM Linux |
 | macOS arm64 (Apple Silicon) | ✅ Pre-built binary | Native |
-| macOS x86_64 (Intel) | ✅ Via Rosetta 2 | Same arm64 binary; ~20-40% performance penalty (acceptable for CLI) |
+| macOS x86_64 (Intel) | ✅ Source compile | No pre-built binary; installer auto-detects and compiles from source (requires Homebrew + Xcode CLT) |
 | Windows x86_64 | ❌ Deferred | v0.2.2 deferred (upstream `Eio.Process` Windows blocker); re-scope when eio ships Windows process support |
 | Alpine Linux (musl) | ❌ Not yet | Static musl binary is a stretch goal |
 
@@ -199,6 +210,7 @@ par memory show <id>
 par memory export -o MEMORY.md
 par memory forget <id>
 par memory prune --older-than 90
+par memory prune --older-than 90 --dry-run  # preview without deleting
 ```
 
 ### How the agent uses memory
@@ -345,8 +357,9 @@ Version numbers stay minimal (no 1.0 until core parity is earned).
 | **v0.5.1** ✅ | Plan CLI + git tools — `par plan list/show/prune` commands + `git_status`/`git_log` read-only tools for the planner agent. *"Manage saved plans; planner sees git state."* |
 | **v0.5.2** ✅ | Streaming fallback — print `resp.text` when provider streaming delivers no chunks. *"No more silent empty responses."* |
 | **v0.5.3** ✅ | REPL rendering fixes — tool indicator de-duplication + `/dev/tty` bash confirmation + empty response diagnostics. *"Cleaner tool output; bash no longer swallows your input."* |
-| **v0.5.4** ✅ ⚠️ | Session management — `par session list/show/fork` + partial ID resume + Ctrl+C clean exit. _Audit 2026-08-05 found 3 release-blocker regressions; see [DECISIONS.md](docs/DECISIONS.md) for fix plan._ *"Browse, fork, and resume sessions without copy-pasting UUIDs."* |
-| **v0.5.5** | Hotfix — Plan Mode tool-filter name fix + startup version-notice fix + REPL prompt flush + README capabilities correction. Wave 1 (par-code only, ships immediately). Wave 2 (session scope + `/cost` tokens + `<think>` handling) gated on PAR SDK upstream fixes. *"Audit findings resolved; advertised features actually work."* |
+| **v0.5.4** ✅ | Session management — `par session list/show/fork` + partial ID resume + Ctrl+C clean exit. *"Browse, fork, and resume sessions without copy-pasting UUIDs."* |
+| **v0.5.5** ✅ | Hotfix — Plan Mode tool-filter name fix + startup version-notice fix + REPL prompt flush + `<think>` tag middleware + session scope write-side fix. *"Audit findings resolved; advertised features actually work."* |
+| **v0.5.6** ✅ | Audit Wave 2–3 + UX polish — `par config set` all 20 fields + install.sh source compile fallback + `par memory prune --dry-run` + memory prefix resolution + `/session` alignment + legacy scope migration + streaming `<think>` strip + checkpoint/plan `<think>` strips + `/cost` token counts (PAR SDK 0.8.3). *"Every advertised feature works end-to-end; daily-friction UX polished."* |
 | **v0.6.0** | Subagent delegation — general/explore subagents, actor tool, task tree. *"It spawns helpers to explore and work in parallel."* |
 | **v0.7.0** | Goal-driven autonomy — `/goal` + independent judge model + doom-loop detection. *"It won't declare done until the goal is truly met."* |
 | **v0.8.0** | Best-of-N reasoning — max-mode (parallel candidates + judge selection). *"It tries several approaches and picks the best."* |

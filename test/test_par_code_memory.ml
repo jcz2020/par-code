@@ -380,6 +380,91 @@ let test_raw_db () =
     Alcotest.(check bool) "raw_db returns working handle" true
       (match rc with Sqlite3.Rc.OK -> true | _ -> false))
 
+let prune_dry_run_does_not_delete () =
+  with_temp_db (fun ~tmpdir db ->
+    let project_id = "test-project" in
+    let id_a = add_mem db ~project_id ~kind:Gotcha
+                 ~content:"old unused memory" ~summary:"old unused" in
+    let _id_b = add_mem db ~project_id ~kind:Gotcha
+                  ~content:"recent memory" ~summary:"recent" in
+    let old_ts = Unix.gettimeofday () -. (10.0 *. 86400.0) in
+    let db_path =
+      Filename.concat (Filename.concat tmpdir ".par") "par.db" in
+    let raw = Sqlite3.db_open db_path in
+    let stmt = Sqlite3.prepare raw
+      "UPDATE memory_entries SET updated_at = ? WHERE ext_id = ?" in
+    ignore (Sqlite3.bind_double stmt 1 old_ts);
+    ignore (Sqlite3.bind_text stmt 2 id_a);
+    ignore (Sqlite3.step stmt);
+    ignore (Sqlite3.finalize stmt);
+    ignore (Sqlite3.db_close raw);
+    (match Par_code_memory.prune_stale_dry_run db ~project_id ~older_than_days:1.0 with
+     | Ok n -> Alcotest.(check int) "dry_run count" 1 n
+     | Error (`Db_error msg) -> failf "prune_stale_dry_run: %s" msg);
+    match Par_code_memory.list db ~project_id ~limit:100 () with
+    | Ok ms ->
+      let ids = List.map (fun m -> m.Par_code_memory.id) ms in
+      Alcotest.(check bool) "id_a still exists" true (List.mem id_a ids);
+      Alcotest.(check int) "all memories preserved" 2 (List.length ms)
+    | Error (`Db_error msg) -> failf "list after dry_run: %s" msg)
+
+let resolve_memory_id_full_uuid () =
+  with_temp_db (fun ~tmpdir:_ db ->
+    let project_id = "test-project" in
+    let id = add_mem db ~project_id ~kind:Insight
+               ~content:"test content" ~summary:"test summary" in
+    match Par_code_memory.resolve_memory_id db ~project_id id with
+    | Ok resolved ->
+      Alcotest.(check string) "full UUID passthrough" id resolved
+    | Error msg -> failf "resolve full UUID: %s" msg)
+
+let resolve_memory_id_unique_prefix () =
+  with_temp_db (fun ~tmpdir:_ db ->
+    let project_id = "test-project" in
+    let id = add_mem db ~project_id ~kind:Insight
+               ~content:"prefix test" ~summary:"prefix test" in
+    let prefix = String.sub id 0 8 in
+    match Par_code_memory.resolve_memory_id db ~project_id prefix with
+    | Ok resolved ->
+      Alcotest.(check string) "prefix resolves to full id" id resolved
+    | Error msg -> failf "resolve unique prefix: %s" msg)
+
+let resolve_memory_id_ambiguous () =
+  with_temp_db (fun ~tmpdir:_ db ->
+    let project_id = "test-project" in
+    let id1 = add_mem db ~project_id ~kind:Insight
+                ~content:"ambig1" ~summary:"ambig1" in
+    let id2 = add_mem db ~project_id ~kind:Insight
+                ~content:"ambig2" ~summary:"ambig2" in
+    let raw = Par_code_memory.raw_db db in
+    let new_id1 = "aaaa0000-0000-0000-0000-000000000001" in
+    let new_id2 = "aaaa0000-0000-0000-0000-000000000002" in
+    List.iter2 (fun old_id new_id ->
+      let stmt = Sqlite3.prepare raw
+        "UPDATE memory_entries SET ext_id = ? WHERE ext_id = ?" in
+      ignore (Sqlite3.bind_text stmt 1 new_id);
+      ignore (Sqlite3.bind_text stmt 2 old_id);
+      ignore (Sqlite3.step stmt);
+      ignore (Sqlite3.finalize stmt))
+      [id1; id2] [new_id1; new_id2];
+    let prefix = "aaaa0000" in
+    match Par_code_memory.resolve_memory_id db ~project_id prefix with
+    | Ok _ -> Alcotest.fail "ambiguous prefix should return Error"
+    | Error msg ->
+      Alcotest.(check bool) "error mentions count" true
+        (string_contains msg "matches 2 memories"))
+
+let resolve_memory_id_no_match () =
+  with_temp_db (fun ~tmpdir:_ db ->
+    let project_id = "test-project" in
+    let _id = add_mem db ~project_id ~kind:Insight
+                ~content:"no match" ~summary:"no match" in
+    match Par_code_memory.resolve_memory_id db ~project_id "zzzzzzzz" with
+    | Ok _ -> Alcotest.fail "nonexistent prefix should return Error"
+    | Error msg ->
+      Alcotest.(check bool) "error mentions no match" true
+        (string_contains msg "No memory matches prefix"))
+
 let () =
   Alcotest.run "par_memory"
     [ "schema", [ Alcotest.test_case "idempotent" `Quick schema_idempotent ];
@@ -389,7 +474,16 @@ let () =
         Alcotest.test_case "recall_limit"   `Quick recall_respects_limit;
       ];
       "isolation", [ Alcotest.test_case "project" `Quick project_isolation ];
-      "prune",     [ Alcotest.test_case "stale_semantics" `Quick prune_stale_semantics ];
+      "prune",     [
+        Alcotest.test_case "stale_semantics" `Quick prune_stale_semantics;
+        Alcotest.test_case "dry_run_does_not_delete" `Quick prune_dry_run_does_not_delete;
+      ];
+      "resolve_id", [
+        Alcotest.test_case "full_uuid"       `Quick resolve_memory_id_full_uuid;
+        Alcotest.test_case "unique_prefix"   `Quick resolve_memory_id_unique_prefix;
+        Alcotest.test_case "ambiguous"       `Quick resolve_memory_id_ambiguous;
+        Alcotest.test_case "no_match"        `Quick resolve_memory_id_no_match;
+      ];
       "render",    [ Alcotest.test_case "line_cap" `Quick render_index_line_cap ];
       "raw_db",    [ Alcotest.test_case "accessor" `Quick test_raw_db ];
       "history", [

@@ -1,5 +1,84 @@
 # CHANGES
 
+## v0.5.6 — Audit Wave 2–3 + UX polish
+
+> **Status**: Shipped.
+
+Resolves the remaining audit findings (P1 #5, #7; P2 #11–14) and completes
+Wave 2 items now unblocked by PAR SDK 0.8.3 (`stream_options.include_usage`,
+`Runtime.save_conversation ?scope`, `Think_tag_strip` middleware).
+
+### Fixed
+
+- **`par config set` limited to 1 field** (P1 #5): `update_field` only
+  handled `default_mode`. Extended to all 20 settable config fields with
+  type-aware parsing (string / optional string / float / int / bool /
+  enum) and validation bounds (max_iterations > 0, checkpoint_interval
+  >= 1, context_budget_tokens >= 1000). `system_prompt` excluded
+  (multiline — set via wizard).
+- **`install.sh` exits 0 on failure** (P1 #7): added `set -e` (was
+  `set -u` only). Audited all commands; added `|| true` to 8
+  intentional non-zero exit paths (grep pipelines, optional checksum
+  fetches, trap cleanup). `set -o pipefail` intentionally omitted
+  (POSIX-incompatible + breaks legitimate grep no-match returns).
+- **Legacy NULL-scope conversations invisible** (P2 #14): ~40 existing
+  conversations had `scope = ''` from before the v0.5.5 write-side fix.
+  Added automatic migration in `par_code_session.list_sessions` —
+  backfills from `checkpoints.project_id`. Idempotent.
+- **`<think>` tag leak in checkpoints and plan files** (P1 #6):
+  the middleware (v0.5.5) strips `<think>` from final LLM responses,
+  but `parse_checkpoint_response` and `persist_plan_file` needed
+  targeted strips for subagent responses with `~save:false`. Both now
+  call `Par.Json_extract.strip_think_tags` before JSON extraction /
+  file write.
+- **`<think>` tag leak in streaming REPL output** (P1 #6):
+  the middleware fires `on_after_llm` only (final response) — streaming
+  chunks showed `<think>` live. Added a streaming state machine in
+  `par_code_ui.strip_think_streaming` that buffers chunks, strips
+  complete `<think>...</think>` blocks, detects unclosed opening tags,
+  and holds back partial tag prefixes at chunk boundaries.
+
+### Added
+
+- **Source compilation fallback** in `install.sh`: when no pre-built binary
+  exists for the user's platform (e.g., macOS Intel x86_64), the installer
+  automatically detects this and compiles from source — installs opam +
+  OCaml 5.x if missing, pins PAR SDK, builds par-code, installs binary.
+  `--from-source` flag forces source compilation even when a pre-built
+  binary is available. Supports macOS (Homebrew) and Linux (apt/dnf/pacman/apk).
+- **`par memory prune --dry-run`** (P2 #11): preview the count of
+  memories that would be pruned without deleting. Uses SELECT COUNT(*)
+  with the same WHERE clause as `prune_stale`.
+- **`par memory show/forget` prefix resolution** (P2 #12): both
+  commands now resolve short UUID prefixes to full IDs, mirroring
+  `par session show <prefix>`. Ambiguous prefix → error; unique prefix
+  → resolved; no match → error.
+- **`/session` output alignment** (P2 #13): Messages line merged into
+  `render_session_info` vcat block with `%-10s` label padding. All 4
+  lines (Agent/Session/Turns/Messages) now align consistently.
+- **`/cost` token counts** (P1 #4): zero code change — PAR SDK 0.8.3
+  now sends `stream_options.include_usage`, so token data flows to the
+  existing `add_usage` accumulator. `/cost` now shows non-zero prompt /
+  output / total tokens.
+
+### Known Limitations
+
+- **Legacy sessions without checkpoints**: the scope migration backfills
+  from `checkpoints.project_id`. Sessions from before v0.4.0 (or short
+  sessions where the checkpoint cycle never fired) have no checkpoint and
+  remain with empty scope — they won't appear in `par session list` for
+  any project. Use `par --resume <full-id>` if the session ID is known.
+  The migration uses the latest checkpoint's project_id when multiple
+  exist (deterministic).
+
+### Tests
+
+269 tests (up from 218), all passing. New coverage: config set (35),
+memory prune dry-run + prefix (5), checkpoint think-strip (1),
+session migration (2), UI streaming think-strip (8).
+
+---
+
 ## v0.5.5 — Hotfix (audit findings)
 
 > **Status**: Shipped.

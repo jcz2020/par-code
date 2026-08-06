@@ -54,5 +54,11 @@ val export_markdown : t -> project_id:string -> string
 val prune_stale : t -> project_id:string -> older_than_days:float ->
                   (int, [> `Db_error of string]) result
 
+val prune_stale_dry_run : t -> project_id:string -> older_than_days:float ->
+                          (int, [> `Db_error of string]) result
+
+val resolve_memory_id : t -> project_id:string -> string ->
+                        (string, string) result
+
 val search_history : t -> query:string -> ?limit:int -> unit ->
                      (history_hit list, [> `Db_error of string]) result

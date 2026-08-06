@@ -159,7 +159,7 @@ type cost_summary = {
 }
 
 val render_cost : backend -> cost_summary -> unit
-val render_session_info : backend -> agent_id:string -> session_id:string -> turn_count:int -> unit
+val render_session_info : backend -> agent_id:string -> session_id:string -> turn_count:int -> message_count:int -> unit
 val render_banner : backend -> version:string -> unit
 val render_prompt : backend -> Par_code_mode.mode -> unit
 val render_help : backend -> unit
@@ -172,3 +172,10 @@ val render_table : backend -> headers:string list -> rows:string list list -> un
     stale content garbling the next response. The [Done] chunk handles
     this automatically; this function is for error paths that bypass [Done]. *)
 val flush_markdown : backend -> unit
+
+(** Streaming think-tag strip.  Appends [chunk] to [buf], strips complete
+    [think] and [reasoning] blocks (opening + closing tags inclusive) via
+    [Par.Json_extract.strip_think_tags], and holds back unclosed / partial
+    opening tags.  Returns the safe-to-render text; [buf] retains the
+    held-back residue for the next call. *)
+val strip_think_streaming : Buffer.t -> string -> string

@@ -160,6 +160,11 @@ let memory_output_arg =
     info ["o"; "output"] ~docv:"PATH"
       ~doc:"Output file path (default: stdout)")
 
+let memory_dry_run_arg =
+  let open Cmdliner in
+  Arg.(value & flag &
+    info ["dry-run"] ~doc:"Preview how many memories would be pruned, without deleting")
+
 (* Plan subcommand args *)
 
 let plan_limit_arg =

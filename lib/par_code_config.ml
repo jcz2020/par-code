@@ -294,19 +294,132 @@ let mask_api_key key =
 
 let update_field ~field ~value =
   let cfg = match load () with Some c -> c | None -> default in
+  let parse_bool v =
+    match String.lowercase_ascii (String.trim v) with
+    | "true" | "1" | "yes" -> true
+    | "false" | "0" | "no" -> false
+    | other ->
+      Printf.eprintf "Invalid value for %s: expected bool (true/false/yes/no/1/0), got '%s'\n" field other;
+      exit 1
+  in
+  let is_clear v = let v = String.trim v in v = "" || String.lowercase_ascii v = "none" in
   let updated = match String.lowercase_ascii field with
-    | "default_mode" ->
-      let mode = match String.lowercase_ascii (String.trim value) with
-        | "plan" -> Par_code_mode.Plan
-        | "build" -> Par_code_mode.Build
-        | other ->
-          Printf.eprintf "Invalid mode '%s'. Use 'plan' or 'build'.\n" other;
+    (* ── Plain string ── *)
+    | "provider" -> { cfg with provider = String.trim value }
+    | "api_key" -> { cfg with api_key = String.trim value }
+    | "model" -> { cfg with model = String.trim value }
+    | "persistence" -> { cfg with persistence = String.trim value }
+    (* ── Optional string (empty/"none" → None) ── *)
+    | "api_base" ->
+      let v = String.trim value in
+      { cfg with api_base = if is_clear v then None else Some v }
+    | "db_uri" ->
+      let v = String.trim value in
+      { cfg with db_uri = if is_clear v then None else Some v }
+    | "embedding_base_url" ->
+      let v = String.trim value in
+      { cfg with embedding_base_url = if is_clear v then None else Some v }
+    | "embedding_model" ->
+      let v = String.trim value in
+      { cfg with embedding_model = if is_clear v then None else Some v }
+    (* ── Required float ── *)
+    | "temperature" ->
+      (match float_of_string_opt (String.trim value) with
+       | Some f -> { cfg with temperature = f }
+       | None ->
+         Printf.eprintf "Invalid value for temperature: expected float, got '%s'\n" value;
+         exit 1)
+    | "event_retention_days" ->
+      (match float_of_string_opt (String.trim value) with
+       | Some f -> { cfg with event_retention_days = f }
+       | None ->
+         Printf.eprintf "Invalid value for event_retention_days: expected float, got '%s'\n" value;
+         exit 1)
+    (* ── Optional float ── *)
+    | "top_p" ->
+      if is_clear value then { cfg with top_p = None }
+      else (match float_of_string_opt (String.trim value) with
+        | Some f -> { cfg with top_p = Some f }
+        | None ->
+          Printf.eprintf "Invalid value for top_p: expected float, got '%s'\n" value;
+          exit 1)
+    (* ── Required int (with validation) ── *)
+    | "max_iterations" ->
+      (match int_of_string_opt (String.trim value) with
+       | Some n when n > 0 -> { cfg with max_iterations = n }
+       | Some _ ->
+         Printf.eprintf "Invalid value for max_iterations: must be > 0, got '%s'\n" value;
+         exit 1
+       | None ->
+         Printf.eprintf "Invalid value for max_iterations: expected int, got '%s'\n" value;
+         exit 1)
+    | "embedding_dimension" ->
+      (match int_of_string_opt (String.trim value) with
+       | Some n when n > 0 -> { cfg with embedding_dimension = n }
+       | Some _ ->
+         Printf.eprintf "Invalid value for embedding_dimension: must be > 0, got '%s'\n" value;
+         exit 1
+       | None ->
+         Printf.eprintf "Invalid value for embedding_dimension: expected int, got '%s'\n" value;
+         exit 1)
+    | "checkpoint_interval" ->
+      (match int_of_string_opt (String.trim value) with
+       | Some n when n >= 1 -> { cfg with checkpoint_interval = n }
+       | Some _ ->
+         Printf.eprintf "Invalid value for checkpoint_interval: must be >= 1, got '%s'\n" value;
+         exit 1
+       | None ->
+         Printf.eprintf "Invalid value for checkpoint_interval: expected int, got '%s'\n" value;
+         exit 1)
+    | "context_budget_tokens" ->
+      (match int_of_string_opt (String.trim value) with
+       | Some n when n >= 1000 -> { cfg with context_budget_tokens = n }
+       | Some _ ->
+         Printf.eprintf "Invalid value for context_budget_tokens: must be >= 1000, got '%s'\n" value;
+         exit 1
+       | None ->
+         Printf.eprintf "Invalid value for context_budget_tokens: expected int, got '%s'\n" value;
+         exit 1)
+    (* ── Optional int ── *)
+    | "max_tokens" ->
+      if is_clear value then { cfg with max_tokens = None }
+      else (match int_of_string_opt (String.trim value) with
+        | Some n when n > 0 -> { cfg with max_tokens = Some n }
+        | Some _ ->
+          Printf.eprintf "Invalid value for max_tokens: must be > 0, got '%s'\n" value;
           exit 1
-      in
-      { cfg with default_mode = mode }
+        | None ->
+          Printf.eprintf "Invalid value for max_tokens: expected int, got '%s'\n" value;
+          exit 1)
+    (* ── Bool ── *)
+    | "parallel_tool_execution" -> { cfg with parallel_tool_execution = parse_bool value }
+    | "auto_extract" -> { cfg with auto_extract = parse_bool value }
+    | "checkpoint_enabled" -> { cfg with checkpoint_enabled = parse_bool value }
+    (* ── Enum ── *)
+    | "default_mode" ->
+      (match String.lowercase_ascii (String.trim value) with
+       | "plan" -> { cfg with default_mode = Par_code_mode.Plan }
+       | "build" -> { cfg with default_mode = Par_code_mode.Build }
+       | other ->
+         Printf.eprintf "Invalid mode '%s'. Use 'plan' or 'build'.\n" other;
+         exit 1)
+    (* ── Excluded ── *)
+    | "system_prompt" ->
+      Printf.eprintf "system_prompt is multiline; set it via 'par config' wizard instead.\n";
+      exit 1
+    (* ── Unknown ── *)
     | other ->
       Printf.eprintf "Unknown config field '%s'.\n" other;
-      Printf.eprintf "Supported fields: default_mode\n";
+      Printf.eprintf "Supported fields:\n";
+      List.iter (fun f -> Printf.eprintf "  %s\n" f)
+        [ "api_base"; "api_key"; "auto_extract";
+          "checkpoint_enabled"; "checkpoint_interval";
+          "context_budget_tokens"; "db_uri"; "default_mode";
+          "embedding_base_url"; "embedding_dimension"; "embedding_model";
+          "event_retention_days";
+          "max_iterations"; "max_tokens"; "model";
+          "parallel_tool_execution"; "persistence"; "provider";
+          "system_prompt"; "temperature"; "top_p" ];
       exit 1
   in
   save updated;

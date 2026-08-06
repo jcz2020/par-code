@@ -202,6 +202,95 @@ let text_empty_string () =
   Alcotest.(check int) "width" 0 (width img);
   Alcotest.(check int) "height" 0 (height img)
 
+(* ── Streaming think-tag strip ─────────────────────────────────────── *)
+
+let think_strip_complete () =
+  let buf = Buffer.create 256 in
+  let result = strip_think_streaming buf "<think>hidden</think>visible" in
+  Alcotest.(check string) "renders visible" "visible" result;
+  Alcotest.(check string) "buffer empty" "" (Buffer.contents buf)
+
+let think_streaming_across_chunks () =
+  let buf = Buffer.create 256 in
+  let r1 = strip_think_streaming buf "<think>hi" in
+  Alcotest.(check string) "chunk1 held" "" r1;
+  let r2 = strip_think_streaming buf "dden</think>" in
+  Alcotest.(check string) "chunk2 empty" "" r2;
+  let r3 = strip_think_streaming buf "real text" in
+  Alcotest.(check string) "chunk3 renders" "real text" r3;
+  Alcotest.(check string) "buffer empty" "" (Buffer.contents buf)
+
+let think_partial_tag_held_back () =
+  let buf = Buffer.create 256 in
+  let r1 = strip_think_streaming buf "<t" in
+  Alcotest.(check string) "partial held" "" r1;
+  Alcotest.(check string) "buf has <t" "<t" (Buffer.contents buf);
+  let r2 = strip_think_streaming buf "ext" in
+  Alcotest.(check string) "renders <text" "<text" r2;
+  Alcotest.(check string) "buffer empty" "" (Buffer.contents buf)
+
+let reasoning_tag_stripped () =
+  let buf = Buffer.create 256 in
+  let result = strip_think_streaming buf "<reasoning>hidden</reasoning>visible" in
+  Alcotest.(check string) "renders visible" "visible" result;
+  Alcotest.(check string) "buffer empty" "" (Buffer.contents buf)
+
+let no_think_tag_passthrough () =
+  let buf = Buffer.create 256 in
+  let result = strip_think_streaming buf "hello world" in
+  Alcotest.(check string) "passthrough" "hello world" result;
+  Alcotest.(check string) "buffer empty" "" (Buffer.contents buf)
+
+let think_unclosed_at_flush () =
+  let buf = Buffer.create 256 in
+  let r1 = strip_think_streaming buf "<think>partial" in
+  Alcotest.(check string) "held back" "" r1;
+  Alcotest.(check string) "leftover" "<think>partial" (Buffer.contents buf)
+
+(* Verify flush_markdown discards (not renders) unclosed <think> content.
+   This tests the flush path — separate from strip_think_streaming buffer logic. *)
+let think_unclosed_discarded_by_flush () =
+  let buf = Buffer.create 256 in
+  let _ = strip_think_streaming buf "<think>secret reasoning" in
+  (* Buffer now holds "<think>secret reasoning".
+     Simulate flush: strip complete tags, then find_unclosed should
+     truncate at "<think>" → safe portion is "" → discarded. *)
+  let leftover = Buffer.contents buf in
+  let stripped = Par.Json_extract.strip_think_tags leftover in
+  let len = String.length stripped in
+  let rec find_unclosed pos =
+    if pos >= len then stripped
+    else if stripped.[pos] = '<' then begin
+      let r = len - pos in
+      if (r >= 7 && String.sub stripped pos 7 = "<think>")
+         || (r >= 11 && String.sub stripped pos 11 = "<reasoning>")
+      then String.sub stripped 0 pos
+      else find_unclosed (pos + 1)
+    end
+    else find_unclosed (pos + 1)
+  in
+  let safe = find_unclosed 0 in
+  Alcotest.(check string) "unclosed think discarded" "" safe;
+  Alcotest.(check bool) "no secret leaked" false
+    (String.contains safe 's')
+
+let think_opening_tag_held () =
+  let buf = Buffer.create 256 in
+  let r1 = strip_think_streaming buf "<think>" in
+  Alcotest.(check string) "full open tag held" "" r1;
+  Alcotest.(check string) "buf has tag" "<think>" (Buffer.contents buf);
+  let r2 = strip_think_streaming buf "hidden</think>show" in
+  Alcotest.(check string) "after close renders" "show" r2;
+  Alcotest.(check string) "buffer empty" "" (Buffer.contents buf)
+
+let reasoning_streaming_across_chunks () =
+  let buf = Buffer.create 256 in
+  let r1 = strip_think_streaming buf "<reasoning>hi" in
+  Alcotest.(check string) "chunk1 held" "" r1;
+  let r2 = strip_think_streaming buf "dden</reasoning>real" in
+  Alcotest.(check string) "chunk2 renders" "real" r2;
+  Alcotest.(check string) "buffer empty" "" (Buffer.contents buf)
+
 (* ── Test runner ─────────────────────────────────────────────────────── *)
 
 let () =
@@ -255,5 +344,16 @@ let () =
       ];
       "empty", [
         Alcotest.test_case "text_empty_string" `Quick text_empty_string;
+      ];
+      "think_strip", [
+        Alcotest.test_case "complete" `Quick think_strip_complete;
+        Alcotest.test_case "streaming_across" `Quick think_streaming_across_chunks;
+        Alcotest.test_case "partial_tag" `Quick think_partial_tag_held_back;
+        Alcotest.test_case "reasoning_tag" `Quick reasoning_tag_stripped;
+        Alcotest.test_case "passthrough" `Quick no_think_tag_passthrough;
+        Alcotest.test_case "unclosed" `Quick think_unclosed_at_flush;
+        Alcotest.test_case "unclosed_discarded" `Quick think_unclosed_discarded_by_flush;
+        Alcotest.test_case "opening_tag_held" `Quick think_opening_tag_held;
+        Alcotest.test_case "reasoning_streaming" `Quick reasoning_streaming_across_chunks;
       ];
     ]

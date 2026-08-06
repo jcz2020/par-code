@@ -219,12 +219,15 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
         (match cmd with
          | "/help" -> print_help ui ()
          | "/session" ->
+           let msg_count = match !conv with
+             | None -> 0
+             | Some c -> List.length c.Types.messages
+           in
            Par_code_ui.render_session_info ui
              ~agent_id:Par_code_setup.agent_id
              ~session_id:(match !session_id with Some s -> s | None -> "none")
-             ~turn_count:!turn_count;
-           Par_code_ui.render_notice ui (Printf.sprintf "Messages: %s"
-             (match !conv with None -> "0" | Some c -> string_of_int (List.length c.Types.messages)))
+             ~turn_count:!turn_count
+             ~message_count:msg_count
          | "/health" -> format_health ui (Runtime.health rt)
          | "/reset" -> conv := None; Par_code_ui.render_notice ui "[conversation reset]"
            | "/checkpoint" ->
