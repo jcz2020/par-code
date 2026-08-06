@@ -200,7 +200,6 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
   let on_tool_event = make_tool_event_callback ui () in
    Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ ->
      let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in
-     maybe_extract ui rt !conv;
      Par_code_ui.render_notice ui "\nBye!";
      exit 0));
   let rec loop () =
