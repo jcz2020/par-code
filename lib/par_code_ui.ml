@@ -550,6 +550,55 @@ let render_session_info backend ~agent_id ~session_id ~turn_count ~message_count
   in
   render backend image
 
+(* D2. Delegation rendering *)
+
+let render_delegation_start backend ~agent_type ~task =
+  let label = match agent_type with
+    | "explore" -> "[delegate:explore]"
+    | "general" -> "[delegate:general]"
+    | other -> Printf.sprintf "[delegate:%s]" other
+  in
+  render backend (textf "%s %s\n" label task ~style:(style ~fg:Cyan ()))
+
+let render_delegation_tool_event backend ~agent_type (evt : Par.Types.event) =
+  let label = match agent_type with
+    | "explore" -> "[explore]"
+    | "general" -> "[general]"
+    | other -> Printf.sprintf "[%s]" other
+  in
+  (match evt with
+   | Tool_invoked { tool_name; _ } ->
+     render backend (textf "  %s → %s...\n" label tool_name ~style:(style ~dim:true ()))
+   | Tool_completed { tool_name; duration_ms; _ } ->
+     render backend (textf "  %s ✓ %s (%.1fms)\n" label tool_name duration_ms
+                       ~style:(style ~dim:true ()))
+   | Tool_failed { tool_name; _ } ->
+     render backend (textf "  %s ✗ %s\n" label tool_name
+                       ~style:(style ~fg:Red ~dim:true ()))
+   | _ -> ())
+
+let render_delegation_result backend ~agent_type ~text:txt =
+  let label = match agent_type with
+    | "explore" -> "[explore]"
+    | "general" -> "[general]"
+    | other -> Printf.sprintf "[%s]" other
+  in
+  let preview = if String.length txt > 500 then
+    String.sub txt 0 500 ^ "\n... (truncated)"
+  else txt in
+  render backend (vcat [
+    textf "  %s ✓ complete\n" label ~style:(style ~fg:Green ~dim:true ());
+    text preview ~style:(style ~dim:true ());
+  ])
+
+let render_delegation_error backend ~agent_type ~error =
+  let label = match agent_type with
+    | "explore" -> "[explore]"
+    | "general" -> "[general]"
+    | other -> Printf.sprintf "[%s]" other
+  in
+  render backend (textf "  %s ✗ failed: %s\n" label error ~style:(style ~fg:Red ~dim:true ()))
+
 (* E. Banner / Prompt / Help *)
 
 let render_banner backend ~version =

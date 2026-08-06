@@ -160,6 +160,12 @@ type cost_summary = {
 
 val render_cost : backend -> cost_summary -> unit
 val render_session_info : backend -> agent_id:string -> session_id:string -> turn_count:int -> message_count:int -> unit
+
+val render_delegation_start : backend -> agent_type:string -> task:string -> unit
+val render_delegation_tool_event : backend -> agent_type:string -> Par.Types.event -> unit
+val render_delegation_result : backend -> agent_type:string -> text:string -> unit
+val render_delegation_error : backend -> agent_type:string -> error:string -> unit
+
 val render_banner : backend -> version:string -> unit
 val render_prompt : backend -> Par_code_mode.mode -> unit
 val render_help : backend -> unit

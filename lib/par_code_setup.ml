@@ -299,7 +299,16 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
      | Ok _ -> ()
      | Error e ->
        ui_render_warning (Printf.sprintf "Warning: bash tool not installed: %s" (error_to_string e)));
-    let model_cfg = Par_code_config.to_model_config cfg in
+     let delegate_binding = Par_code_delegate.make_delegate_tool ~rt ~ui in
+     (match Runtime.register_tool rt
+        ~name:delegate_binding.Types.descriptor.Types.name
+        ~description:delegate_binding.Types.descriptor.Types.description
+        ~input_schema:delegate_binding.Types.descriptor.Types.input_schema
+        ~handler:delegate_binding.Types.handler
+        () with
+      | Ok _ -> descriptors := delegate_binding.Types.descriptor :: !descriptors
+      | Error e -> ui_render_warning (Printf.sprintf "Warning: delegate tool not registered: %s" (error_to_string e)));
+     let model_cfg = Par_code_config.to_model_config cfg in
     let base_prompt = cfg.Par_code_config.system_prompt in
     (match Runtime.make_agent
        ~id:agent_id
@@ -405,7 +414,48 @@ When your plan is complete, call the `plan_exit` tool to hand off to build mode.
       (match Runtime.register_agent rt planner with
        | Error e -> ui_render_warning (Printf.sprintf "Warning: planner agent registration failed: %s" (error_to_string e))
        | Ok () -> ()));
-    Runtime.set_tool_description_overrides rt [
+     (* Explore subagent: read-only investigation (v0.6.0) *)
+     let explore_descriptors =
+       List.filter (fun (td : Types.tool_descriptor) ->
+         List.mem td.name
+           [ "read"; "grep"; "find"; "ls";
+             "recall_memory"; "search_history"; "git_status"; "git_log" ]
+       ) !descriptors
+     in
+     (match Runtime.make_agent
+        ~id:Par_code_delegate.explore_agent_id
+        ~system_prompt:(Types.stable_prompt Par_code_delegate.explore_system_prompt)
+        ~model:model_cfg
+        ~tools:explore_descriptors
+        ~middleware:[think_tag_strip_middleware]
+        ~max_iterations:15
+        () with
+     | Error e ->
+       ui_render_warning (Printf.sprintf "Warning: explore agent not registered: %s" (error_to_string e))
+     | Ok agent ->
+       (match Runtime.register_agent rt agent with
+        | Error e -> ui_render_warning (Printf.sprintf "Warning: explore agent registration failed: %s" (error_to_string e))
+        | Ok () -> ()));
+     let general_descriptors =
+       List.filter (fun (td : Types.tool_descriptor) ->
+         td.name <> "delegate"
+       ) !descriptors
+     in
+     (match Runtime.make_agent
+        ~id:Par_code_delegate.general_agent_id
+        ~system_prompt:(Types.stable_prompt Par_code_delegate.general_system_prompt)
+        ~model:model_cfg
+        ~tools:general_descriptors
+        ~middleware:[think_tag_strip_middleware]
+        ~max_iterations:25
+        () with
+     | Error e ->
+       ui_render_warning (Printf.sprintf "Warning: general agent not registered: %s" (error_to_string e))
+     | Ok agent ->
+       (match Runtime.register_agent rt agent with
+        | Error e -> ui_render_warning (Printf.sprintf "Warning: general agent registration failed: %s" (error_to_string e))
+        | Ok () -> ()));
+     Runtime.set_tool_description_overrides rt [
       "bash", "Execute a system command (e.g. git, npm, docker, make, systemctl). \
                NOT for file operations — use read/ls/grep/find tools for those.";
     ];
