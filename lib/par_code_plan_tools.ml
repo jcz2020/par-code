@@ -110,13 +110,10 @@ let find_last_assistant_text (conv : Types.conversation) : string option =
   let rec walk = function
     | [] -> None
     | (m : Types.message) :: rest ->
-      (match walk rest with
-       | Some _ as result -> result
-       | None ->
-         if m.Types.role = Types.Assistant then
-           let text = extract_text_from_blocks m.Types.content_blocks in
-           if text = "" then None else Some text
-         else None)
+      if m.Types.role = Types.Assistant then begin
+        let text = extract_text_from_blocks m.Types.content_blocks in
+        if text <> "" then Some text else walk rest
+      end else walk rest
   in
   walk (List.rev conv.Types.messages)
 
