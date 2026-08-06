@@ -42,3 +42,4 @@ jobs:
         if: runner.os == 'Linux'
       - name: Integration tests
         run: bash test/integration/run.sh
+        if: runner.os == 'Linux'
