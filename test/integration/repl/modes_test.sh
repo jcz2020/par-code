@@ -20,8 +20,8 @@ test_plan_mode_switch() {
   tmux_wait_for 'par>' 8
   tmux_assert_contains 'build'    # default mode is build
   tmux_send '/plan'
-  tmux_wait_for 'plan' 5
-  tmux_assert_contains 'plan.*par>'  # prompt shows (plan) par>
+  tmux_wait_for 'plan.*par>' 5
+  tmux_assert_contains 'plan.*par>'
   tmux_kill
 }
 
@@ -30,8 +30,7 @@ test_build_mode_switch() {
   tmux_spawn
   tmux_wait_for 'par>' 8
   tmux_send '/plan'
-  tmux_wait_for 'plan' 5
-  tmux_assert_contains 'plan.*par>'  # now in plan mode
+  tmux_wait_for 'plan.*par>' 5
   tmux_send '/build'
   tmux_wait_for 'build.*par>' 5
   tmux_kill
@@ -42,7 +41,7 @@ test_plan_file_on_build_switch() {
   tmux_spawn
   tmux_wait_for 'par>' 8
   tmux_send '/plan'
-  tmux_wait_for 'plan' 5
+  tmux_wait_for 'plan.*par>' 5
   # /build attempts to save the plan to .par/plans/ and switches mode
   tmux_send '/build'
   tmux_wait_for 'Switched' 5

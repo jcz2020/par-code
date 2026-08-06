@@ -32,6 +32,7 @@ par_cli() {
 # ── tmux REPL primitives ───────────────────────────────────────────────
 
 tmux_spawn() {
+  command -v tmux >/dev/null 2>&1 || { echo "SKIP: tmux not installed" >&2; exit 0; }
   SESSION_ID="par-$$-$RANDOM"
   tmux kill-session -t "$SESSION_ID" 2>/dev/null || true
   tmux new-session -d -s "$SESSION_ID" -x 200 -y 50 \

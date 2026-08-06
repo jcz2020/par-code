@@ -10,9 +10,10 @@ PROMPT_TIMEOUT=8
 POLL_INTERVAL=0.1
 CLI_TIMEOUT=10
 
-# Integration root (parent of lib/)
 INTEGRATION_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_ROOT="$(cd "$INTEGRATION_ROOT/../.." && pwd)"
+
+[[ "$PAR_BIN" != /* ]] && PAR_BIN="$PROJECT_ROOT/$PAR_BIN"
 
 # Dummy config for non-LLM tests (par needs config to start the REPL,
 # but CLI subcommands like memory/plan/session don't need a real provider)
