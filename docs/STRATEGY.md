@@ -1,6 +1,6 @@
 # par-code Strategy
 
-> **Last updated**: 2026-08-07 (post-v0.6.1)
+> **Last updated**: 2026-08-07 (post-v0.6.2)
 > **Status**: Active
 > **Owner**: PAR-Code Contributors
 >
@@ -233,12 +233,16 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
   platforms now self-update via source recompile instead of dead-ending),
   `Filename.temp_file` hygiene. Closes install/upgrade parity gap surfaced by a
   macOS Intel user.
-- **v0.6.2 (next, unreleased)** — UTF-8 REPL input: migrated line input to
-  linenoise (raw mode, wcwidth-aware backspace) to fix CJK garbling that
-  cooked-mode tty line discipline couldn't (no wcwidth in kernel; IUTF8
-  insufficient). New bundled-C opam dep (no system packages). Plain-text prompt
-  (linenoise strlen cursor math). Ctrl+C `Sys.Break` caught cleanly.
-- **v0.7.0** — Goal-driven autonomy: `/goal` command, independent judge
+- **v0.6.2 ✅ shipped** — UTF-8 REPL input: migrated line input to linenoise
+  (raw mode, wcwidth-aware backspace) to fix CJK garbling that cooked-mode tty
+  line discipline couldn't (no wcwidth in kernel; IUTF8 insufficient). New
+  bundled-C opam dep (no system packages; confirmed builds in release CI).
+  Plain-text prompt (linenoise strlen cursor math). Ctrl+C `Sys.Break` caught
+  (REPL loop + read_line → exit 130). stdout flushed before linenoise (slash
+  commands were swallowed). Three review rounds; two post-migration
+  regressions (config-wizard Ctrl+C crash, slash-command output) caught and
+  fixed before release.
+- **v0.7.0 (next)** — Goal-driven autonomy: `/goal` command, independent judge
   model, doom-loop detection.
 - v0.8.0+ — best-of-N reasoning, self-improvement, compose mode, ecosystem,
   code intelligence, safety, polish → v1.0
@@ -294,7 +298,7 @@ per global rules) lives in `docs/DECISIONS.md`. Strategic-level entries:
 | 2026-08-05 | v0.5.4 comprehensive audit — 3 P0 (planner tool filter, session scope write, version compare) + 7 P1 findings; 218/218 unit tests passed but encoded wrong assumptions; v0.5.5 hotfix planned in two waves (Wave 1 par-code-only, Wave 2 gated on PAR SDK); process change: integration-test harness required for future releases | Active |
 | 2026-08-05 | PAR SDK feedback filed — 3 gaps surfaced by audit: (1) Runtime.save_conversation lacks ?scope (blocks P0 #2), (2) openai_provider streaming lacks stream_options.include_usage (blocks /cost accuracy), (3) think_tag_strip middleware not default (blocks CoT-leaking model support). User will direct PAR SDK team before v0.5.5 Wave 2 | Active |
 | 2026-08-07 | v0.6.1 shipped — install/upgrade parity fix: install.sh stale-binary permission guard + `par upgrade` source-fallback on no-prebuilt platforms (macOS Intel self-update now works via source recompile) + `Filename.temp_file` hygiene. Surfaces install/upgrade consistency as an architectural property. | Active |
-| 2026-08-07 | v0.6.2 (unreleased) — linenoise migration for UTF-8/wide-char REPL input: cooked-mode tty line discipline has no wcwidth (IUTF8 insufficient), garbling CJK backspace cross-platform. Added bundled-C `linenoise` opam dep (no system packages); migrated REPL loop + `read_line` (11 sites); plain-text prompt (linenoise strlen cursor); Ctrl+C `Sys.Break` caught. "一次做对": proven library over hand-rolled raw-mode editor. | Active |
+| 2026-08-07 | v0.6.2 shipped — linenoise migration for UTF-8/wide-char REPL input: cooked-mode tty line discipline has no wcwidth (IUTF8 insufficient), garbling CJK backspace cross-platform. Added bundled-C `linenoise` opam dep (no system packages; confirmed in release CI); migrated REPL loop + `read_line`; plain-text prompt (linenoise strlen cursor); Ctrl+C `Sys.Break` caught (REPL + read_line→exit 130); stdout flush before linenoise (slash-command output fix). "一次做对": proven library over hand-rolled raw-mode editor. | Active |
 
 ## 10. Revision Protocol
 
