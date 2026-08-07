@@ -1,6 +1,6 @@
 # par-code Strategy
 
-> **Last updated**: 2026-08-05 (post-v0.5.4 audit)
+> **Last updated**: 2026-08-07 (post-v0.6.0)
 > **Status**: Active
 > **Owner**: PAR-Code Contributors
 >
@@ -106,16 +106,11 @@ vertical slice. Version numbers stay minimal. Examples:
 - **Production-ready**: not yet (pre-1.0)
 - **Public beta**: v0.2.x — usable for real work, but CLI/API still settling
 - **Internal alpha**: v0.1.x (project skeleton only)
-- **Audit findings (2026-08-05)**: v0.5.4 has 3 release-blocker regressions
-  (Plan Mode tool filter, session scope write, version comparison) and 7
-  critical UX defects. See `docs/DECISIONS.md` `[2026-08-05] v0.5.4
-  comprehensive audit` entry. v0.5.5 hotfix planned in two waves (Wave 1
-  par-code-only ships immediately; Wave 2 gated on PAR SDK upstream fixes).
-  Unit tests (218/218 passing) did not catch the P0s because they encoded
-  the same wrong assumptions as the implementations. **Process implication**:
-  pre-1.0 needs an integration-test harness (tmux/expect-based) that
-  asserts on observed behavior of advertised features, not just internal
-  state.
+- **Audit findings resolved**: v0.5.5 + v0.5.6 cleared all 3 P0 + 7 P1 from
+  the v0.5.4 audit. 68 tmux-based integration tests now guard against the
+  "tests encode wrong assumptions" failure mode. v0.6.0 found a new P0
+  (plan mode non-functional — `find_last_assistant_text` recursive bug)
+  via tmux walkthrough, validating the integration test investment.
 
 ## 6. Strategic Non-Goals
 
@@ -222,11 +217,20 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
   (planner tool filter, session scope write, version compare, prompt flush,
   think_tag_strip middleware, PAR SDK 0.8.3 bump). Release took 3 CI
   attempts (opam exit 31 on macOS + ARM64).
-- **v0.5.6 (next)** — Polish: `par config set` extended to all fields,
-  install.sh `set -e`, memory prune `--dry-run`, prefix resolution,
-  legacy scope migration. Half-day effort.
-- v0.6.0+ — subagent delegation, autonomy, reasoning, self-improvement,
-  compose mode, ecosystem, code intelligence, safety, polish → v1.0
+- **v0.5.6 ✅ shipped** — Audit Wave 2–3: `par config set` all 20 fields,
+  install.sh `set -e` + source compile fallback, memory prune `--dry-run`,
+  prefix resolution, legacy scope migration, streaming `<think>` strip,
+  checkpoint/plan/extractor think-tag strips, `/cost` token counts (PAR SDK
+  0.8.3). 271 tests. Also added 68 tmux-based integration tests.
+- **v0.6.0 ✅ shipped** — Subagent delegation: `delegate` tool with `explore`
+  (read-only) and `general` (full-capability) subagents. Synchronous, isolated,
+  depth-limited. Also fixes critical plan mode bug (`find_last_assistant_text`
+  returned wrong message — plan files were always empty). Plan content now
+  injected directly into build agent's system prompt.
+- **v0.7.0 (next)** — Goal-driven autonomy: `/goal` command, independent judge
+  model, doom-loop detection.
+- v0.8.0+ — best-of-N reasoning, self-improvement, compose mode, ecosystem,
+  code intelligence, safety, polish → v1.0
 
 The roadmap order follows: **usable first (v0.2 foundation) → signature
 capabilities on steepest difficulty curve (v0.3–v0.4 memory/long-context,
