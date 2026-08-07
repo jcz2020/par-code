@@ -280,6 +280,12 @@ let read_line _b ~prompt =
      strlen(prompt), so ANSI escape codes would misposition it. *)
   let prompt_str = flatten ~color:false prompt in
   match LNoise.linenoise prompt_str with
+  (* Ctrl+C: linenoise raises Sys.Break. Cmdliner's Cmd.eval swallows uncaught
+     term exceptions with an "internal error" message, so this must be caught
+     HERE, not at the top level. exit 130 (SIGINT convention) aborts the
+     config wizard / upgrade-confirm — correct: the user wants out, not to
+     continue with defaults. linenoise has already restored the terminal. *)
+  | exception Sys.Break -> exit 130
   | None -> None
   | Some line -> Some line
 
