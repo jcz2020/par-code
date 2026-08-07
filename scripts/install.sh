@@ -34,6 +34,24 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# ensure_target_writable: a stale binary owned by another user (commonly root,
+# from a prior `sudo` install or `sudo curl ... | bash`) makes cp/unzip fail
+# with "Permission denied". Detect early and tell the user exactly how to fix it.
+#
+# Footgun note: `sudo curl ... | bash` does NOT elevate bash — sudo applies
+# only to curl in that pipeline, so the installer still runs as the regular
+# user and cannot overwrite a root-owned file. To elevate the whole pipeline,
+# use `curl ... | sudo bash`.
+ensure_target_writable() {
+    _t="$PREFIX/bin/par"
+    [ -e "$_t" ] || return 0
+    [ -w "$_t" ] && return 0
+    error "cannot overwrite $_t (not writable; likely owned by another user)"
+    error "fix: sudo rm -f '$_t'  &&  re-run this installer"
+    error "  (or, to elevate the whole pipeline: curl <url> | sudo bash)"
+    exit 1
+}
+
 # detect_platform: uname -s/-m → linux-x64 | darwin-arm64. Falls through to source compile for others.
 PLATFORM=""
 detect_platform() {
@@ -168,6 +186,7 @@ verify_sha256() {
 install_binary() {
     _asset="$1"
     mkdir -p "$PREFIX/bin"
+    ensure_target_writable
     info "installing to $PREFIX/bin/ ..."
     case "$PLATFORM" in
         linux-*)
@@ -405,7 +424,13 @@ install_from_source() {
         exit 1
     fi
     mkdir -p "$PREFIX/bin"
-    cp "$_built" "$PREFIX/bin/par"
+    ensure_target_writable
+    rm -f "$PREFIX/bin/par" 2>/dev/null || true
+    cp -f "$_built" "$PREFIX/bin/par" || {
+        error "cp failed to write $PREFIX/bin/par"
+        error "if it is owned by another user: sudo rm -f '$PREFIX/bin/par'"
+        exit 1
+    }
     chmod +x "$PREFIX/bin/par"
 
     SRC_DIR=""

@@ -235,72 +235,115 @@ let perform_upgrade_core ~env ~sw ?target () =
       Filename.concat (Sys.getcwd ()) raw else raw in
     try Unix.readlink abs with _ -> abs in
   let bin_dir = Filename.dirname bin in
-  let temp_archive =
-    Filename.concat bin_dir (Printf.sprintf "par-upgrade-%d.tmp" (Unix.getpid ())) in
-  let staging =
-    Filename.concat bin_dir (Printf.sprintf "par-staging-%d" (Unix.getpid ())) in
-  let cleanup () =
-    (try Sys.remove temp_archive with _ -> ());
-    (try rm_rf staging with _ -> ()) in
-  Fun.protect ~finally:cleanup (fun () ->
-    let* tag = (match target with
-      | Some t -> Ok t
-      | None -> fetch_latest_tag_core ~net ~sw ()
-    ) |> Result.map_error (function
-      | `Http m -> `Download_failed ("version lookup: " ^ m)
-      | `Offline -> `Download_failed "offline") in
-    let* (platform, ext) = detect_platform () in
-    let dl = download_host () in
-    let asset = Printf.sprintf "par-%s-%s.%s" tag platform ext in
-    let url = Printf.sprintf "https://%s/jcz2020/par-code/releases/download/%s/%s"
-      dl tag asset in
+  let prefix = Filename.dirname bin_dir in
+  let* tag = (match target with
+    | Some t -> Ok t
+    | None -> fetch_latest_tag_core ~net ~sw ()
+  ) |> Result.map_error (function
+    | `Http m -> `Download_failed ("version lookup: " ^ m)
+    | `Offline -> `Download_failed "offline") in
+  match detect_platform () with
+  | Error _ ->
+    (* No prebuilt binary for this platform (e.g. macOS Intel). Fall back to
+       recompiling from source via the official installer, so [par upgrade]
+       stays consistent with the installer's behaviour instead of dead-ending
+       the user. Installer progress streams to the user's stdout/stderr; a
+       first-time source build takes 5-20 minutes. *)
+    Printf.eprintf
+      "[info] no prebuilt binary for this platform; recompiling from source...\n";
+    let host = download_host () in
+    let url = Printf.sprintf
+      "https://%s/jcz2020/par-code/releases/download/%s/install.sh" host tag in
     let hdr = [("User-Agent", user_agent)] in
-    let* archive =
+    let* script =
       try
         let (s, _, body) = http_get ~net ~sw ~headers:hdr url in
         if s = 200 then Ok body
-        else Error (`Download_failed (Printf.sprintf "HTTP %d" s))
+        else Error (`Download_failed (Printf.sprintf "installer download HTTP %d" s))
       with exn -> Error (`Download_failed (Printexc.to_string exn))
     in
-    let* () =
-      try
-        let (s, _, hash) = http_get ~net ~sw ~headers:hdr (url ^ ".sha256") in
-        if s = 200 then
-          if verify_sha256 ~expected:hash archive then Ok ()
-          else Error `Checksum_mismatch
-        else Error (`Download_failed (Printf.sprintf "checksum HTTP %d" s))
-      with exn -> Error (`Download_failed (Printexc.to_string exn))
-    in
-    let* () =
-      try
-        let oc = open_out temp_archive in
-        output_string oc archive; close_out oc;
-        Unix.mkdir staging 0o755;
-        let cmd = match ext with
-          | "tar.gz" -> ["tar"; "xzf"; temp_archive; "-C"; staging]
-          | "zip" -> ["unzip"; "-o"; temp_archive; "-d"; staging]
-          | _ -> failwith ("Unknown format: " ^ ext) in
-        let ok = Eio.Switch.run (fun sw2 ->
-          let p = Eio.Process.spawn ~sw:sw2 proc_mgr cmd in
-          match Eio.Process.await p with
-          | `Exited 0 -> true | _ -> false) in
-        if ok then Ok ()
-        else Error (`Download_failed "extraction failed")
-      with exn -> Error (`Download_failed (Printexc.to_string exn))
-    in
-    let new_bin =
-      let direct = Filename.concat staging "par" in
-      if Sys.file_exists direct then direct
-      else match find_par_in staging with Some p -> p | None -> "" in
-    if new_bin = "" then
-      Error (`Download_failed "par binary not found in archive")
-    else begin
-      Unix.chmod new_bin 0o755;
-      match atomic_replace_core ~env ~sw ~src:new_bin ~dst:bin with
-      | Ok () -> Ok tag
-      | Error (`Rename_failed m) -> Error (`Download_failed m)
-      | Error (`Smoke_test_failed m) -> Error (`Smoke_test_failed m)
-    end)
+    let tmp = Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "par-install-%d.sh" (Unix.getpid ())) in
+    Fun.protect
+      ~finally:(fun () -> (try Sys.remove tmp with _ -> ()))
+      (fun () ->
+        let oc = open_out tmp in output_string oc script; close_out oc;
+        Unix.chmod tmp 0o755;
+        let args = [tmp; "--from-source"; "--prefix"; prefix; "--version"; tag] in
+        try
+          Eio.Switch.run (fun sw2 ->
+            let p = Eio.Process.spawn ~sw:sw2 proc_mgr
+              ~stdout:(Eio.Stdenv.stdout env)
+              ~stderr:(Eio.Stdenv.stderr env)
+              args in
+            match Eio.Process.await p with
+            | `Exited 0 -> Ok tag
+            | `Exited n ->
+              Error (`Download_failed (Printf.sprintf "installer exited %d" n))
+            | `Signaled s ->
+              Error (`Download_failed
+                (Printf.sprintf "installer killed by signal %d" s)))
+        with exn -> Error (`Download_failed (Printexc.to_string exn)))
+  | Ok (platform, ext) ->
+    let temp_archive =
+      Filename.concat bin_dir (Printf.sprintf "par-upgrade-%d.tmp" (Unix.getpid ())) in
+    let staging =
+      Filename.concat bin_dir (Printf.sprintf "par-staging-%d" (Unix.getpid ())) in
+    let cleanup () =
+      (try Sys.remove temp_archive with _ -> ());
+      (try rm_rf staging with _ -> ()) in
+    Fun.protect ~finally:cleanup (fun () ->
+      let dl = download_host () in
+      let asset = Printf.sprintf "par-%s-%s.%s" tag platform ext in
+      let url = Printf.sprintf "https://%s/jcz2020/par-code/releases/download/%s/%s"
+        dl tag asset in
+      let hdr = [("User-Agent", user_agent)] in
+      let* archive =
+        try
+          let (s, _, body) = http_get ~net ~sw ~headers:hdr url in
+          if s = 200 then Ok body
+          else Error (`Download_failed (Printf.sprintf "HTTP %d" s))
+        with exn -> Error (`Download_failed (Printexc.to_string exn))
+      in
+      let* () =
+        try
+          let (s, _, hash) = http_get ~net ~sw ~headers:hdr (url ^ ".sha256") in
+          if s = 200 then
+            if verify_sha256 ~expected:hash archive then Ok ()
+            else Error `Checksum_mismatch
+          else Error (`Download_failed (Printf.sprintf "checksum HTTP %d" s))
+        with exn -> Error (`Download_failed (Printexc.to_string exn))
+      in
+      let* () =
+        try
+          let oc = open_out temp_archive in
+          output_string oc archive; close_out oc;
+          Unix.mkdir staging 0o755;
+          let cmd = match ext with
+            | "tar.gz" -> ["tar"; "xzf"; temp_archive; "-C"; staging]
+            | "zip" -> ["unzip"; "-o"; temp_archive; "-d"; staging]
+            | _ -> failwith ("Unknown format: " ^ ext) in
+          let ok = Eio.Switch.run (fun sw2 ->
+            let p = Eio.Process.spawn ~sw:sw2 proc_mgr cmd in
+            match Eio.Process.await p with
+            | `Exited 0 -> true | _ -> false) in
+          if ok then Ok ()
+          else Error (`Download_failed "extraction failed")
+        with exn -> Error (`Download_failed (Printexc.to_string exn))
+      in
+      let new_bin =
+        let direct = Filename.concat staging "par" in
+        if Sys.file_exists direct then direct
+        else match find_par_in staging with Some p -> p | None -> "" in
+      if new_bin = "" then
+        Error (`Download_failed "par binary not found in archive")
+      else begin
+        Unix.chmod new_bin 0o755;
+        match atomic_replace_core ~env ~sw ~src:new_bin ~dst:bin with
+        | Ok () -> Ok tag
+        | Error (`Rename_failed m) -> Error (`Download_failed m)
+        | Error (`Smoke_test_failed m) -> Error (`Smoke_test_failed m)
+      end)
 
 let perform_upgrade ?target () =
   Eio_main.run @@ fun env ->

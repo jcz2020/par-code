@@ -126,6 +126,12 @@ par upgrade --uninstall --purge  # remove ALL of ~/.par/ (interactive prompt)
 A purely-additive startup check prints one stderr line when a newer version
 exists (gated by `PAR_NO_UPDATE_CHECK=1`).
 
+On platforms without a pre-built binary (e.g. macOS Intel), `par upgrade`
+automatically recompiles from source via the installer — it streams build
+progress to the terminal and takes 5-20 minutes on a first-time build. This
+keeps install and upgrade consistent: whatever the installer can do, upgrade
+can redo.
+
 ### Platform support
 
 | Platform | Status | Notes |
@@ -133,7 +139,7 @@ exists (gated by `PAR_NO_UPDATE_CHECK=1`).
 | Linux x86_64 (glibc >= 2.28) | ✅ Pre-built binary | Covers AlmaLinux 8+, Debian 11+, Ubuntu 20.04+, RHEL 8+, Fedora |
 | Linux arm64 (aarch64) | ✅ Pre-built binary (v0.3.2+) | Raspberry Pi 4/5, AWS Graviton, other ARM Linux |
 | macOS arm64 (Apple Silicon) | ✅ Pre-built binary | Native |
-| macOS x86_64 (Intel) | ✅ Source compile | No pre-built binary; installer auto-detects and compiles from source (requires Homebrew + Xcode CLT) |
+| macOS x86_64 (Intel) | ✅ Source compile | No pre-built binary; installer and `par upgrade` auto-detect and compile from source (requires Homebrew + Xcode CLT; 5-20 min build) |
 | Windows x86_64 | ❌ Deferred | v0.2.2 deferred (upstream `Eio.Process` Windows blocker); re-scope when eio ships Windows process support |
 | Alpine Linux (musl) | ❌ Not yet | Static musl binary is a stretch goal |
 

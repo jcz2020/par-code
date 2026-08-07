@@ -1,5 +1,58 @@
 # Decisions
 
+## [2026-08-07] install.sh + par upgrade: stale-binary permission fix + source-fallback parity
+
+> Real user on macOS Intel hit two dead-ends in one session: install failed
+> with a confusing `cp: Permission denied`, and `par upgrade` returned a bare
+> "Unsupported platform: darwin/x86_64" with no path forward.
+
+**变更前**：
+- `install.sh` copied the built binary with a bare `cp` (no `-f`, no pre-clean).
+  A stale `~/.par/bin/par` owned by another user (e.g. root, from a prior
+  `sudo` run or the `sudo curl … | bash` footgun where sudo applies only to
+  curl) made `cp` fail with an unactionable "Permission denied".
+- `par_code_upgrade.ml`'s `detect_platform` returned a hard
+  `Error (Download_failed "Unsupported platform: …")` for any platform without
+  a pre-built binary (notably macOS Intel). But `install.sh` treats the same
+  platform as "compile from source" (supported). So install said "yes" and
+  upgrade said "no" — a user who installed from source could never self-update.
+
+**变更后**：
+- `install.sh`: new `ensure_target_writable` guard runs before every binary
+  write (both the pre-built `install_binary` and the source `install_from_source`
+  paths). On a non-writable stale binary it exits early with the exact fix:
+  `sudo rm -f '~/.par/bin/par' && re-run`, plus a note that
+  `sudo curl … | bash` does not elevate bash (use `curl … | sudo bash`). The
+  source path also switched to `rm -f` + `cp -f` with the same actionable hint.
+- `par_code_upgrade.ml`: `perform_upgrade_core` now branches on
+  `detect_platform ()`. `Error` no longer dead-ends — it fetches the matching
+  release's `install.sh` and execs it with `--from-source --prefix <current>
+  --version <tag>`, streaming build progress to the user's stdout/stderr
+  (5-20 min on first build). Install and upgrade now agree on every platform.
+
+**原因**：
+- Install/upgrade parity is an architectural property, not a nicety: a feature
+  the installer advertises (source compile on Intel Mac) that `par upgrade`
+  refuses to redo is a broken contract.
+- The bare-`cp` failure was the #1 install failure mode for anyone who had
+  ever touched `sudo`; the fix turns a mystifying shell error into a one-line
+  remediation.
+
+**影响范围**：
+- `scripts/install.sh` (guard helper + two call sites).
+- `lib/par_code_upgrade.ml` (`perform_upgrade_core` restructured; `detect_platform`
+  and the public `perform_upgrade` signature unchanged — no `.mli` change).
+- `README.md` (Self-update section + platform table now state upgrade works
+  via source fallback on Intel Mac).
+
+**回退方式**：
+- Revert the two files. No on-disk format, schema, or config change — the
+  behaviour change is purely in the install/upgrade code paths.
+- Open enhancement (not taken now, per user's scope-B choice): ship a
+  pre-built `darwin-x64` binary via a `macos-13` CI runner to eliminate the
+  source-compile cost on Intel Mac entirely. This decision does not preclude
+  that; it is complementary.
+
 ## [2026-08-07] User-reported runtime issues (v0.5.6, MiniMax-M3)
 
 > Real user on macOS hitting two issues. Root cause diagnosed from
