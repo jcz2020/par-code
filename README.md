@@ -46,35 +46,13 @@ or opam needed for end users.
 
 ## Install
 
-### One-line installer (Linux + macOS)
-
-**Linux** (x86_64, glibc >= 2.28 — covers AlmaLinux 8+, Debian 11+, Ubuntu 20.04+, RHEL 8+, Fedora, Arch, etc.):
+### One-line install (Linux + macOS)
 
 ```sh
 curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.sh | bash
 ```
 
-**Linux** (x86_64, glibc >= 2.28 — covers AlmaLinux 8+, Debian 11+, Ubuntu 20.04+, RHEL 8+, Fedora, Arch):
-
-```sh
-curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.sh | bash
-```
-
-**Linux ARM64** (Raspberry Pi 4/5, AWS Graviton, other aarch64 Linux):
-
-```sh
-curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.sh | bash
-```
-
-**macOS** (arm64 Apple Silicon; Intel Mac compiles from source):
-
-```sh
-curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.sh | bash
-```
-
-This downloads a pre-built `par` binary with `libsqlite3` (FTS5-enabled) + `libgmp` bundled
-alongside it (no system prerequisites). The binary lands at `~/.par/bin/par`.
-The installer offers to add `~/.par/bin` to your shell's PATH.
+Pre-built binary on Linux x64/arm64 + macOS arm64; source compile on macOS Intel. Installs to `~/.par/bin/par` and offers to add it to PATH. Full matrix: [Platform support](#platform-support).
 
 **Custom install prefix or version:**
 
