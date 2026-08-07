@@ -36,7 +36,7 @@ tmux_spawn() {
   SESSION_ID="par-$$-$RANDOM"
   tmux kill-session -t "$SESSION_ID" 2>/dev/null || true
   tmux new-session -d -s "$SESSION_ID" -x 200 -y 50 \
-    "TERM=screen-256color exec $PAR_BIN"
+    "env TERM=screen-256color HOME=$HOME PAR_NO_UPDATE_CHECK=1 PAR_NO_AUTO_EXTRACT=1 PAR_NO_CHECKPOINT=1 $PAR_BIN"
 }
 
 tmux_wait_for() {
