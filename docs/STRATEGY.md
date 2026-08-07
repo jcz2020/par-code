@@ -1,6 +1,6 @@
 # par-code Strategy
 
-> **Last updated**: 2026-08-07 (post-v0.6.0)
+> **Last updated**: 2026-08-07 (post-v0.6.1)
 > **Status**: Active
 > **Owner**: PAR-Code Contributors
 >
@@ -227,6 +227,12 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
   depth-limited. Also fixes critical plan mode bug (`find_last_assistant_text`
   returned wrong message — plan files were always empty). Plan content now
   injected directly into build agent's system prompt.
+- **v0.6.1 ✅ shipped** — Install/upgrade fixes (patch, no new features):
+  install.sh `ensure_target_writable` guard for stale root-owned binary (the
+  `sudo curl | bash` footgun), `par upgrade` source-fallback parity (no-prebuilt
+  platforms now self-update via source recompile instead of dead-ending),
+  `Filename.temp_file` hygiene. Closes install/upgrade parity gap surfaced by a
+  macOS Intel user.
 - **v0.7.0 (next)** — Goal-driven autonomy: `/goal` command, independent judge
   model, doom-loop detection.
 - v0.8.0+ — best-of-N reasoning, self-improvement, compose mode, ecosystem,
@@ -282,6 +288,7 @@ per global rules) lives in `docs/DECISIONS.md`. Strategic-level entries:
 | 2026-08-04 | v0.5.2–v0.5.4 shipped — streaming fallback (print resp.text on no-chunks), REPL rendering fixes (tool dedup + /dev/tty bash + empty-response diagnostics + Ctrl+C clean exit), session management (par session list/show/fork + partial ID resume + project-scoped listing) | Active — v0.5.4 has known regressions, see next row |
 | 2026-08-05 | v0.5.4 comprehensive audit — 3 P0 (planner tool filter, session scope write, version compare) + 7 P1 findings; 218/218 unit tests passed but encoded wrong assumptions; v0.5.5 hotfix planned in two waves (Wave 1 par-code-only, Wave 2 gated on PAR SDK); process change: integration-test harness required for future releases | Active |
 | 2026-08-05 | PAR SDK feedback filed — 3 gaps surfaced by audit: (1) Runtime.save_conversation lacks ?scope (blocks P0 #2), (2) openai_provider streaming lacks stream_options.include_usage (blocks /cost accuracy), (3) think_tag_strip middleware not default (blocks CoT-leaking model support). User will direct PAR SDK team before v0.5.5 Wave 2 | Active |
+| 2026-08-07 | v0.6.1 shipped — install/upgrade parity fix: install.sh stale-binary permission guard + `par upgrade` source-fallback on no-prebuilt platforms (macOS Intel self-update now works via source recompile) + `Filename.temp_file` hygiene. Surfaces install/upgrade consistency as an architectural property. | Active |
 
 ## 10. Revision Protocol
 

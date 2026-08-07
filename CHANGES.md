@@ -1,5 +1,39 @@
 # CHANGES
 
+## v0.6.1 — Install/upgrade fixes
+
+> **Status**: Shipped. Patch release — no new features, fixes two dead-ends a
+> macOS Intel user hit in install + upgrade.
+
+### Fixed
+
+- **install.sh stale-binary `Permission denied`**: the installer copied the
+  built binary with a bare `cp` (no `-f`, no pre-clean). A stale
+  `~/.par/bin/par` owned by another user (e.g. root, from a prior `sudo` run,
+  or the `sudo curl … | bash` footgun where sudo applies only to curl, not
+  bash) made `cp` fail with an unactionable "Permission denied". New
+  `ensure_target_writable` guard runs before every binary write (both pre-built
+  and source paths) and exits early with the exact fix:
+  `sudo rm -f ~/.par/bin/par`. Source path also switched to `rm -f` + `cp -f`.
+- **`par upgrade` dead-ended on no-prebuilt platforms**: `detect_platform`
+  returned a hard `Error ("Unsupported platform: darwin/x86_64")` with no path
+  forward, while `install.sh` treats the same platform as "compile from
+  source". `perform_upgrade_core` now branches on `detect_platform`: `Error`
+  fetches the matching release's `install.sh` and execs it with `--from-source`,
+  streaming build progress to the terminal (5-20 min first build). Install and
+  upgrade now agree on every platform; `detect_platform`'s `Error` flipped from
+  user-facing hard failure to an internal source-fallback signal.
+- **Temp-file hygiene in source-fallback**: the installer script was written to
+  a pid-based name in `/tmp` via `open_out` (no `O_EXCL`) — a classic tmpfile
+  symlink-race vector on shared multi-user systems. Switched to
+  `Filename.temp_file` (random name + `O_CREAT|O_EXCL`). No behavioural change.
+
+### Changed
+
+- README Install section collapsed: removed a duplicated Linux x86_64 block and
+  four identical `curl | bash` callouts; one command + one line now, pointing
+  at the Platform support table for the per-platform matrix.
+
 ## v0.6.0 — Subagent delegation
 
 > **Status**: Shipped.

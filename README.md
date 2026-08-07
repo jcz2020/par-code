@@ -10,11 +10,11 @@ type-safe bash, skills, streaming, persistence — to both ship a useful agent a
 prove out the PAR SDK in anger. (MCP client and Workflow engine are PAR SDK
 primitives par-code does not yet wire — see roadmap items v0.10.0 / v0.11.0.)
 
-**Status:** `v0.6.0` — Subagent delegation. All 3 P0 and 7 P1
-audit findings from the v0.5.4 comprehensive audit are fixed across v0.5.5 +
-v0.5.6. Pre-built binaries with a one-line installer (`curl | bash`) for
-Linux x86_64/arm64 + macOS arm64, plus `par upgrade` self-update. No OCaml
-or opam needed for end users.
+**Status:** `v0.6.1` — Install/upgrade fixes. Stale-binary permission
+guard in install.sh + `par upgrade` source-fallback parity (macOS Intel
+self-update now works) + temp-file hygiene. Pre-built binaries with a one-line
+installer (`curl | bash`) for Linux x86_64/arm64 + macOS arm64, plus
+`par upgrade` self-update. No OCaml or opam needed for end users.
 
 ---
 
@@ -345,6 +345,7 @@ Version numbers stay minimal (no 1.0 until core parity is earned).
 | **v0.5.5** ✅ | Hotfix — Plan Mode tool-filter name fix + startup version-notice fix + REPL prompt flush + `<think>` tag middleware + session scope write-side fix. *"Audit findings resolved; advertised features actually work."* |
 | **v0.5.6** ✅ | Audit Wave 2–3 + UX polish — `par config set` all 20 fields + install.sh source compile fallback + `par memory prune --dry-run` + memory prefix resolution + `/session` alignment + legacy scope migration + streaming `<think>` strip + checkpoint/plan `<think>` strips + `/cost` token counts (PAR SDK 0.8.3). *"Every advertised feature works end-to-end; daily-friction UX polished."* |
 | **v0.6.0** ✅ | Subagent delegation — `delegate` tool with `explore` (read-only) and `general` (full capability) subagents. Synchronous, isolated, depth-limited. Plus plan mode fix (find_last_assistant_text bug). *"It spawns helpers to explore and work in parallel."* |
+| **v0.6.1** ✅ | Install/upgrade fixes — stale-binary permission guard in install.sh + `par upgrade` source-fallback parity (no-prebuilt platforms now self-update via source recompile) + `Filename.temp_file` hygiene. *"Intel Mac upgrade no longer dead-ends."* |
 | **v0.7.0** | Goal-driven autonomy — `/goal` + independent judge model + doom-loop detection. *"It won't declare done until the goal is truly met."* |
 | **v0.8.0** | Best-of-N reasoning — max-mode (parallel candidates + judge selection). *"It tries several approaches and picks the best."* |
 | **v0.9.0** | Self-improvement — `/dream` + `/distill` + custom slash commands. *"It turns my repeated workflows into reusable skills."* |
