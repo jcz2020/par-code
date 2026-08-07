@@ -262,8 +262,7 @@ let perform_upgrade_core ~env ~sw ?target () =
         else Error (`Download_failed (Printf.sprintf "installer download HTTP %d" s))
       with exn -> Error (`Download_failed (Printexc.to_string exn))
     in
-    let tmp = Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "par-install-%d.sh" (Unix.getpid ())) in
+    let tmp = Filename.temp_file "par-install" ".sh" in
     Fun.protect
       ~finally:(fun () -> (try Sys.remove tmp with _ -> ()))
       (fun () ->
