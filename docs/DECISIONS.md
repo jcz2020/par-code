@@ -1,5 +1,60 @@
 # Decisions
 
+## [2026-08-07] linenoise migration for UTF-8/wide-char REPL input
+
+> User reported Chinese (CJK) input couldn't be backspaced cleanly in the
+> REPL — characters left "ghost" residue and the screen scrambled after a
+> few backspaces. Reproduced on Linux (not macOS-only).
+
+**变更前**: par-code read REPL input via stdlib `input_line stdin`, relying
+entirely on the kernel tty line discipline (canonical/cooked mode) for line
+editing. The line discipline erases wide characters (CJK = 2 terminal columns)
+one byte/column at a time even with `IUTF8` set — it has no `wcwidth` table.
+So backspace on Chinese left half-erased "ghost" characters that accumulated
+into a scrambled screen. Cross-platform (Linux + macOS), because the root cause
+is the kernel line-discipline, not par-code. Setting `IUTF8` was confirmed
+insufficient (it was already set in the repro pty; wide-char display erase
+still failed).
+
+**变更后**: par-code now uses [linenoise][ln] (`ocaml-linenoise`, module
+`LNoise`) for interactive line input. linenoise takes over the terminal in raw
+mode during `readline` and does UTF-8/wcwidth-aware editing itself (one
+backspace = one codepoint, correct column erase), then restores the terminal.
+Migrated sites: the REPL main loop (`par_code_repl.ml`) and
+`Par_code_ui.read_line` (config wizard + upgrade prompts = 11 sites). The
+`/dev/tty` bash y/n confirmation stays on `input_line` (ASCII-only, different
+channel). Up-arrow history is persisted at `~/.par/history`.
+
+**原因**:
+- cooked-mode CJK backspace is fundamentally broken (kernel has no display-
+  width awareness); no termios flag fixes it. The only correct fix is to take
+  over input editing.
+- linenoise is the standard OCaml solution: battle-tested, BSD-licensed,
+  self-contained bundled C (no system lib), adds history/completion for free.
+  A hand-rolled raw-mode editor would be 300-500 lines with many correctness
+  traps (terminal width/wrapping, signals, wide-char widths) — worse than the
+  bug if done poorly. "一次做对": use the proven library.
+
+**影响范围**:
+- New opam dependency `linenoise (>= 1.3)` in `dune-project`; linked in
+  `lib/dune`. Self-contained C, so release Docker (AlmaLinux 8) + macOS builds
+  need NO extra system packages — only the opam dep flows through
+  `opam install . --deps-only`.
+- REPL prompt is now plain text (`(build) par> `) — linenoise sizes the
+  prompt cursor with `strlen`, so ANSI color codes would misposition it. The
+  colored `render_prompt` is retained (tests + non-linenoise contexts).
+- Ctrl+C during input: linenoise raises `Sys.Break` (not `None`); the REPL
+  loop catches it → clean save + "Bye!" exit. The streaming-time SIGINT
+  handler is unchanged.
+- `par ask` with piped stdin: unchanged — linenoise auto-detects non-tty and
+  falls back to a plain `fgetc` loop.
+
+**回退方式**: Revert the commits. `input_line stdin` path is still present in
+git history. No on-disk format change (`~/.par/history` is a new optional file;
+its absence is handled).
+
+[ln]: https://github.com/ocaml-community/ocaml-linenoise
+
 ## [2026-08-07] install.sh + par upgrade: stale-binary permission fix + source-fallback parity
 
 > Real user on macOS Intel hit two dead-ends in one session: install failed

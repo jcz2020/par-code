@@ -273,10 +273,15 @@ let render_line b img =
   output_char b.out '\n';
   flush b.out
 
-let read_line b ~prompt =
-  render b prompt;
-  flush b.out;
-  try Some (input_line stdin) with End_of_file -> None
+let read_line _b ~prompt =
+  (* linenoise owns prompt display + input editing (raw mode, UTF-8/wide-char-
+     aware backspace). On non-tty stdin it auto-falls-back to a plain fgetc
+     loop. The prompt must be PLAIN TEXT: linenoise sizes the cursor with
+     strlen(prompt), so ANSI escape codes would misposition it. *)
+  let prompt_str = flatten ~color:false prompt in
+  match LNoise.linenoise prompt_str with
+  | None -> None
+  | Some line -> Some line
 
 let get_size b = size_of b
 let supports_color b = color_of b
@@ -623,6 +628,17 @@ let render_prompt backend mode =
      stdout is line-buffered on a pty; without this the prompt stays
      buffered until the next \n. See v0.5.4 audit P1 #8. *)
   flush backend.out
+
+(* Plain-text prompt for [LNoise.linenoise]. No ANSI: linenoise sizes the
+   cursor with strlen(prompt), so color codes would misposition it.
+   [render_prompt] above still produces the colored version for tests/non-
+   linenoise contexts. *)
+let prompt_string mode =
+  let prefix = match mode with
+    | Par_code_mode.Plan -> "(plan) "
+    | Par_code_mode.Build -> "(build) "
+  in
+  prefix ^ "par> "
 
 let render_help backend =
   let item cmd desc = textf "  %-12s %s\n" cmd desc in

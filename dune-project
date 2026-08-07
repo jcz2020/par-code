@@ -44,5 +44,11 @@
    cohttp-eio
    ;; TLS handshake via Tls_eio.client_of_flow + Par.Http_client.tls_config.
    tls-eio
-   ;; SHA256 verification of downloaded release artifacts.
-   digestif))
+    ;; SHA256 verification of downloaded release artifacts.
+    digestif
+    ;; UTF-8/wcwidth-aware line editing for the REPL prompt. The kernel tty
+    ;; line discipline erases CJK wide characters one byte/column at a time
+    ;; (even with IUTF8 set), garbling the display on backspace. linenoise
+    ;; takes over input editing in raw mode with proper wide-char handling.
+    ;; Self-contained: bundled C source, no system lib.
+    (linenoise (>= 1.3))))

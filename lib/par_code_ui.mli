@@ -168,6 +168,9 @@ val render_delegation_error : backend -> agent_type:string -> error:string -> un
 
 val render_banner : backend -> version:string -> unit
 val render_prompt : backend -> Par_code_mode.mode -> unit
+(* Plain-text prompt string for [LNoise.linenoise] (no ANSI — linenoise
+   sizes the cursor with strlen). See [prompt_string] impl in par_code_ui.ml. *)
+val prompt_string : Par_code_mode.mode -> string
 val render_help : backend -> unit
 
 (** Simple fixed-width column table renderer. *)

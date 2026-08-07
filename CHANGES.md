@@ -1,5 +1,37 @@
 # CHANGES
 
+## v0.6.2 (unreleased) — UTF-8 REPL input (linenoise)
+
+> **Status**: In development on `main`. Not yet tagged.
+
+### Fixed
+
+- **CJK (Chinese/Japanese/Korean) backspace garbled the REPL prompt**: the
+  kernel tty line discipline erases wide characters one byte/column at a
+  time even with `IUTF8` set, so typing Chinese and pressing backspace left
+  "ghost" characters on screen and eventually scrambled the display. This is
+  cross-platform (Linux + macOS), not a macOS-only issue. par-code now uses
+  [linenoise](https://github.com/ocaml-community/ocaml-linenoise) for input
+  editing (raw mode, UTF-8/wcwidth-aware backspace). One backspace deletes one
+  codepoint cleanly, no residue.
+- **Ctrl+C during input crashed** (`uncaught exception Stdlib.Sys.Break`):
+  linenoise raises `Sys.Break` on Ctrl+C (not `None`); the REPL loop now
+  catches it and routes to the same clean save + "Bye!" exit as EOF.
+
+### Changed
+
+- **New dependency: `linenoise` (ocaml-linenoise)**. Self-contained — bundled C
+  source compiled via dune, no system library. Release Docker/macOS builds need
+  no extra system packages beyond the opam dep. Adds in-REPL line editing with
+  up-arrow history (persisted at `~/.par/history`).
+- **REPL prompt is now plain text** `(build) par> ` (was green-bold). linenoise
+  sizes the prompt cursor with `strlen`, so ANSI escape codes would misposition
+  it. The colored `render_prompt` is retained for tests/non-linenoise contexts.
+- `Par_code_ui.read_line` (config wizard + upgrade prompts) migrated to
+  linenoise too — all 11 interactive line-input sites now UTF-8-aware. The
+  `/dev/tty` bash y/n confirmation stays on `input_line` (ASCII-only, different
+  channel).
+
 ## v0.6.1 — Install/upgrade fixes
 
 > **Status**: Shipped. Patch release — no new features, fixes two dead-ends a

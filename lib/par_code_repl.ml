@@ -202,14 +202,27 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
      let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in
      Par_code_ui.render_notice ui "\nBye!";
      exit 0));
+  (* linenoise handles prompt display + UTF-8/wide-char-aware input editing.
+     None = EOF (Ctrl+D) or Ctrl+C (linenoise default catch_break=false).
+     History persists across sessions at ~/.par/history. *)
+  (try
+     LNoise.history_load ~filename:(Filename.concat (Par_code_config.config_dir ()) "history")
+     |> ignore
+   with _ -> ());
   let rec loop () =
-    Par_code_ui.render_prompt ui !Par_code_mode.current;
-    match input_line stdin with
-    | exception End_of_file ->
+    match LNoise.linenoise (Par_code_ui.prompt_string !Par_code_mode.current) with
+    | exception Sys.Break ->
+      (* Ctrl+C during input — linenoise raises Sys.Break; clean shutdown
+         (same path as EOF below). The streaming-time SIGINT handler set
+         above covers Ctrl+C while the LLM is responding. *)
       let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in
       maybe_extract ui rt !conv;
       Par_code_ui.render_notice ui "\nBye!"
-    | line ->
+    | None ->
+      let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in
+      maybe_extract ui rt !conv;
+      Par_code_ui.render_notice ui "\nBye!"
+    | Some line ->
       let trimmed = String.trim line in
       if trimmed = "" then loop ()
       else if trimmed.[0] = '/' then begin
@@ -303,8 +316,13 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
           | _ -> Par_code_ui.render_error ui (Printf.sprintf "Unknown command: %s (try /help)" cmd));
          loop ()
        end else begin
-          (try
-             (match !conv with
+           (match LNoise.history_add trimmed with Ok () -> () | Error _ -> ());
+           (try LNoise.history_save
+             ~filename:(Filename.concat (Par_code_config.config_dir ()) "history")
+             |> ignore
+           with _ -> ());
+           (try
+              (match !conv with
               | Some c ->
                 let estimated = Par_code_context.token_estimate c in
                 if estimated > ctx_budget then begin
