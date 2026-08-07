@@ -279,6 +279,10 @@ let read_line _b ~prompt =
      loop. The prompt must be PLAIN TEXT: linenoise sizes the cursor with
      strlen(prompt), so ANSI escape codes would misposition it. *)
   let prompt_str = flatten ~color:false prompt in
+  (* linenoise writes the prompt directly to fd 1, bypassing OCaml's stdout
+     buffer — flush first so any pending rendered output (e.g. a slash command
+     via render, which doesn't flush) reaches the terminal before the prompt. *)
+  flush stdout;
   match LNoise.linenoise prompt_str with
   (* Ctrl+C: linenoise raises Sys.Break. Cmdliner's Cmd.eval swallows uncaught
      term exceptions with an "internal error" message, so this must be caught

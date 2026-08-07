@@ -210,6 +210,10 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
      |> ignore
    with _ -> ());
   let rec loop () =
+    (* linenoise writes the prompt directly to fd 1, bypassing OCaml's stdout
+       buffer — flush first so rendered output (slash commands via render,
+       which doesn't flush) appears before the next prompt overwrites the view. *)
+    flush stdout;
     match LNoise.linenoise (Par_code_ui.prompt_string !Par_code_mode.current) with
     | exception Sys.Break ->
       (* Ctrl+C during input — linenoise raises Sys.Break; clean shutdown
