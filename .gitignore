@@ -17,6 +17,7 @@ _opam/
 .opencode/
 .beads/
 .dolt/
+.session/
 *.db
 
 # par-code runtime artifacts (plans, session mode, local state)
