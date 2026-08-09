@@ -499,8 +499,14 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                          (Printf.sprintf "[judge evaluation failed: %s]" msg))
                   end
                 | _ -> ())
-           with ex ->
-           Par_code_ui.render_error ui (Printf.sprintf "\n[error] %s" (Printexc.to_string ex)));
+            with ex ->
+             Par_code_ui.render_error ui (Printf.sprintf "\n[error] %s" (Printexc.to_string ex)));
+               (match Par_code_plan_tools.consume_submitted_plan () with
+                | Some path ->
+                  last_plan_path := Some path;
+                  Par_code_ui.render_success ui
+                    (Printf.sprintf "Plan saved to %s. Switched to BUILD mode." path)
+                | None -> ());
         loop ()
       end
   in

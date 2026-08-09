@@ -253,7 +253,7 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
        descriptors := mem_descriptors @ !descriptors
      | None -> ());
     (* Plan mode tools: agent-invocable mode switching (v0.5.0) *)
-    let plan_tools = [Par_code_plan_tools.plan_enter_tool; Par_code_plan_tools.plan_exit_tool] in
+    let plan_tools = [Par_code_plan_tools.plan_enter_tool; Par_code_plan_tools.plan_exit_tool; Par_code_plan_tools.plan_submit_tool] in
     List.iter (fun (tb : Types.tool_binding) ->
       (match Runtime.register_tool rt
          ~name:tb.descriptor.Types.name
@@ -368,22 +368,35 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
     (* Planner agent: read-only tool subset, used in Plan mode (v0.5.0) *)
     let planner_descriptors =
       let plan_exit_name = Par_code_plan_tools.plan_exit_tool.descriptor.Types.name in
+      let plan_submit_name = Par_code_plan_tools.plan_submit_tool.descriptor.Types.name in
       List.filter (fun (td : Types.tool_descriptor) ->
         List.mem td.name
           [ "read"; "grep"; "find"; "ls";
             "recall_memory"; "search_history"; "git_status"; "git_log" ]
         || td.name = plan_exit_name
+        || td.name = plan_submit_name
       ) !descriptors
     in
     let planner_prompt =
       {|You are "planner", the read-only planning agent for par-code.
 
-You are operating in PLAN MODE. Your job is to investigate the user's request
-and produce a plan. You CANNOT write, edit, or run bash — those tools are not
-available to you.
+You are in PLAN MODE. Investigate the user's request, then submit a structured plan.
 
-Your output should be a markdown plan with these sections:
+## Tools available
+- read, grep, find, ls: investigate the codebase
+- recall_memory, search_history: check project context
+- git_status, git_log: see repository state
+- plan_submit: submit your plan (REQUIRED to finish)
 
+## What you cannot do
+No write, edit, or bash — those tools are unavailable.
+
+## Workflow
+1. Investigate using the read-only tools (aim for ≤8 tool calls)
+2. Call plan_submit with your complete plan as the "plan" argument
+3. You MUST call plan_submit to finish — do not end your turn without it
+
+## Plan format (pass as the "plan" string argument to plan_submit)
 ## Goal
 <one-paragraph restatement of what the user wants>
 
@@ -397,16 +410,12 @@ Your output should be a markdown plan with these sections:
 <bulleted list of things that could go wrong, edge cases, unknowns>
 
 ## Open Questions
-<bulleted list of decisions that need user input before/during implementation>
+<bulleted list of decisions that need user input>
 
 ## Steps
 <numbered list of implementation steps in suggested execution order>
 
-Investigate thoroughly using read, grep, find, ls,
-recall_memory, search_history, git_status, git_log. Ask clarifying questions
-if the request is ambiguous.
-
-When your plan is complete, call the `plan_exit` tool to hand off to build mode.|}
+If the request is ambiguous, ask ONE clarifying question, then proceed with reasonable defaults.|}
     in
     (match Runtime.make_agent
        ~id:Par_code_mode.planner_agent_id

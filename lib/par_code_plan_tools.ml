@@ -147,6 +147,86 @@ let persist_plan_file (conv : Types.conversation) : string option =
       Some path
     with Sys_error _ -> None
 
+(* -- plan_submit tool ----------------------------------------------------- *)
+
+let plan_submit_input_schema : Yojson.Safe.t =
+  `Assoc
+    [ ("type", `String "object")
+    ; ("properties", `Assoc
+        [ ("plan", `Assoc
+            [ ("type", `String "string")
+            ; ("description", `String
+                "Your complete plan in markdown. Must include sections: \
+                 ## Goal, ## Approach, ## Files to Touch, ## Risks, \
+                 ## Open Questions, ## Steps")
+            ])
+        ])
+    ; ("required", `List [ `String "plan" ])
+    ]
+
+let last_submitted_plan : string option ref = ref None
+
+let consume_submitted_plan () =
+  match !last_submitted_plan with
+  | Some path -> last_submitted_plan := None; Some path
+  | None -> None
+
+let plan_submit_handler : Yojson.Safe.t -> Types.cancellation_token -> Types.handler_result =
+  fun json _tok ->
+    let open Yojson.Safe.Util in
+    let plan =
+      try json |> member "plan" |> to_string
+      with Type_error _ -> ""
+    in
+    if plan = "" then
+      Types.Error
+        { category = Types.Invalid_input "plan_submit"
+        ; message = "Missing or empty 'plan' field"
+        ; retryable = false
+        ; metadata = []
+        }
+    else begin
+      let cleaned = Json_extract.strip_think_tags plan in
+      let plans_dir = ensure_plans_dir () in
+      let filename = format_timestamp () ^ ".md" in
+      let path = Filename.concat plans_dir filename in
+      (try
+        let oc = open_out path in
+        Fun.protect ~finally:(fun () -> close_out oc)
+          (fun () -> output_string oc cleaned);
+        last_submitted_plan := Some path;
+        let _ = Par_code_mode.switch Build in
+        Types.Success
+          (`Assoc [ ("plan_saved_to", `String path)
+                  ; ("mode", `String "build") ])
+      with Sys_error _ ->
+        Types.Error
+          { category = Types.External_failure "plan_submit"
+          ; message = "Failed to write plan file"
+          ; retryable = false
+          ; metadata = []
+          })
+    end
+
+let plan_submit_tool : Types.tool_binding =
+  let open Types in
+  let descriptor =
+    { name = "plan_submit"
+    ; description =
+        "Submit your complete plan and switch to build mode. You MUST call \
+         this tool to finish planning. The 'plan' argument must be your full \
+         plan in markdown format with all required sections."
+    ; input_schema = plan_submit_input_schema
+    ; output_schema = None
+    ; permission = Allow
+    ; timeout = Some 10.0
+    ; concurrency_limit = None
+    ; on_update = None
+    ; cache_control = None
+    }
+  in
+  { descriptor; handler = plan_submit_handler }
+
 (* -- Plan file management -------------------------------------------------- *)
 
 type plan_entry = { filename : string; size : int; timestamp : float option }
