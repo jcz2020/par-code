@@ -31,6 +31,14 @@ type config = {
   checkpoint_interval : int;
   context_budget_tokens : int;
   default_mode : Par_code_mode.mode;
+  judge_enabled : bool;
+  judge_model : string option;
+  judge_provider : string option;
+  judge_api_key : string option;
+  judge_api_base : string option;
+  goal_verify_command : string option;
+  goal_max_steps : int;
+  doom_loop_threshold : int;
 }
 
 let default_system_prompt = {|
@@ -116,6 +124,14 @@ let default = {
   checkpoint_interval = 10;
   context_budget_tokens = 100000;
   default_mode = Par_code_mode.Build;
+  judge_enabled = true;
+  judge_model = None;
+  judge_provider = None;
+  judge_api_key = None;
+  judge_api_base = None;
+  goal_verify_command = None;
+  goal_max_steps = 50;
+  doom_loop_threshold = 3;
 }
 
 let config_dir () =
@@ -154,6 +170,14 @@ let to_json (cfg : config) : Yojson.Safe.t =
     ("checkpoint_interval", `Int cfg.checkpoint_interval);
     ("context_budget_tokens", `Int cfg.context_budget_tokens);
     ("default_mode", `String (Par_code_mode.label cfg.default_mode));
+    ("judge_enabled", `Bool cfg.judge_enabled);
+    ("judge_model", opt_str cfg.judge_model);
+    ("judge_provider", opt_str cfg.judge_provider);
+    ("judge_api_key", opt_str cfg.judge_api_key);
+    ("judge_api_base", opt_str cfg.judge_api_base);
+    ("goal_verify_command", opt_str cfg.goal_verify_command);
+    ("goal_max_steps", `Int cfg.goal_max_steps);
+    ("doom_loop_threshold", `Int cfg.doom_loop_threshold);
   ]
 
 let of_json (json : Yojson.Safe.t) : (config, string) result =
@@ -196,6 +220,14 @@ let of_json (json : Yojson.Safe.t) : (config, string) result =
       checkpoint_interval = get_i "checkpoint_interval" default.checkpoint_interval;
       context_budget_tokens = get_i "context_budget_tokens" default.context_budget_tokens;
       default_mode = get_mode "default_mode" default.default_mode;
+      judge_enabled = get_b "judge_enabled" default.judge_enabled;
+      judge_model = get_os "judge_model";
+      judge_provider = get_os "judge_provider";
+      judge_api_key = get_os "judge_api_key";
+      judge_api_base = get_os "judge_api_base";
+      goal_verify_command = get_os "goal_verify_command";
+      goal_max_steps = get_i "goal_max_steps" default.goal_max_steps;
+      doom_loop_threshold = get_i "doom_loop_threshold" default.doom_loop_threshold;
     }
   with exn -> Error (Printexc.to_string exn)
 
@@ -215,10 +247,16 @@ let load () : config option =
     with _ -> None
 
 let save (cfg : config) : unit =
-  let oc = open_out (config_path ()) in
+  (* Atomic write: write to temp file on the same filesystem, then rename.
+     Prevents readers from seeing a partially-truncated file during write —
+     the race that caused config_set_test flakiness (~10% failure rate). *)
+  let path = config_path () in
+  let tmp = path ^ ".tmp" in
+  let oc = open_out tmp in
   output_string oc (Yojson.Safe.pretty_to_string ~std:true (to_json cfg));
   output_char oc '\n';
-  close_out oc
+  close_out oc;
+  Sys.rename tmp path
 
 type provider_tag = [ `Openai | `Anthropic | `Ollama | `Custom of string ]
 
@@ -279,6 +317,14 @@ let merge
     checkpoint_interval = Option.value checkpoint_interval ~default:cfg.checkpoint_interval;
     context_budget_tokens = Option.value context_budget_tokens ~default:cfg.context_budget_tokens;
     default_mode = (match default_mode with Some m -> m | None -> cfg.default_mode);
+    judge_enabled = cfg.judge_enabled;
+    judge_model = cfg.judge_model;
+    judge_provider = cfg.judge_provider;
+    judge_api_key = cfg.judge_api_key;
+    judge_api_base = cfg.judge_api_base;
+    goal_verify_command = cfg.goal_verify_command;
+    goal_max_steps = cfg.goal_max_steps;
+    doom_loop_threshold = cfg.doom_loop_threshold;
   }
 
 let require_config () =
@@ -403,6 +449,42 @@ let update_field ~field ~value =
     | "parallel_tool_execution" -> { cfg with parallel_tool_execution = parse_bool value }
     | "auto_extract" -> { cfg with auto_extract = parse_bool value }
     | "checkpoint_enabled" -> { cfg with checkpoint_enabled = parse_bool value }
+    | "judge_enabled" -> { cfg with judge_enabled = parse_bool value }
+    (* ── Optional string ── *)
+    | "judge_model" ->
+      let v = String.trim value in
+      { cfg with judge_model = if is_clear v then None else Some v }
+    | "judge_provider" ->
+      let v = String.trim value in
+      { cfg with judge_provider = if is_clear v then None else Some v }
+    | "judge_api_key" ->
+      let v = String.trim value in
+      { cfg with judge_api_key = if is_clear v then None else Some v }
+    | "judge_api_base" ->
+      let v = String.trim value in
+      { cfg with judge_api_base = if is_clear v then None else Some v }
+    | "goal_verify_command" ->
+      let v = String.trim value in
+      { cfg with goal_verify_command = if is_clear v then None else Some v }
+    (* ── Required int with validation ── *)
+    | "goal_max_steps" ->
+      (match int_of_string_opt (String.trim value) with
+       | Some n when n > 0 -> { cfg with goal_max_steps = n }
+       | Some _ ->
+         Printf.eprintf "Invalid value for goal_max_steps: must be > 0, got '%s'\n" value;
+         exit 1
+       | None ->
+         Printf.eprintf "Invalid value for goal_max_steps: expected int, got '%s'\n" value;
+         exit 1)
+    | "doom_loop_threshold" ->
+      (match int_of_string_opt (String.trim value) with
+       | Some n when n >= 1 -> { cfg with doom_loop_threshold = n }
+       | Some _ ->
+         Printf.eprintf "Invalid value for doom_loop_threshold: must be >= 1, got '%s'\n" value;
+         exit 1
+       | None ->
+         Printf.eprintf "Invalid value for doom_loop_threshold: expected int, got '%s'\n" value;
+         exit 1)
     (* ── Enum ── *)
     | "default_mode" ->
       (match String.lowercase_ascii (String.trim value) with
@@ -423,8 +505,12 @@ let update_field ~field ~value =
         [ "api_base"; "api_key"; "auto_extract";
           "checkpoint_enabled"; "checkpoint_interval";
           "context_budget_tokens"; "db_uri"; "default_mode";
+          "doom_loop_threshold";
           "embedding_base_url"; "embedding_dimension"; "embedding_model";
           "event_retention_days";
+          "goal_max_steps"; "goal_verify_command";
+          "judge_api_base"; "judge_api_key";
+          "judge_enabled"; "judge_model"; "judge_provider";
           "max_iterations"; "max_tokens"; "model";
           "parallel_tool_execution"; "persistence"; "provider";
           "system_prompt"; "temperature"; "top_p" ];
@@ -459,6 +545,14 @@ let show ?(ui=Par_code_ui.create_backend ()) (cfg : config) =
     line "context_budget_tokens:" (string_of_int cfg.context_budget_tokens);
     line "default_mode:" (Par_code_mode.label cfg.default_mode);
     line "system_prompt:" (if cfg.system_prompt = default.system_prompt then "<default>" else "<custom>");
+    line "judge_enabled:" (string_of_bool cfg.judge_enabled);
+    line "judge_model:" (match cfg.judge_model with Some s -> s | None -> "<inherit>");
+    line "judge_provider:" (match cfg.judge_provider with Some s -> s | None -> "<inherit>");
+    line "judge_api_key:" (match cfg.judge_api_key with Some k -> mask_api_key k | None -> "<inherit>");
+    line "judge_api_base:" (match cfg.judge_api_base with Some s -> s | None -> "<inherit>");
+    line "goal_verify_command:" (match cfg.goal_verify_command with Some s -> s | None -> "<none>");
+    line "goal_max_steps:" (string_of_int cfg.goal_max_steps);
+    line "doom_loop_threshold:" (string_of_int cfg.doom_loop_threshold);
   ] in
   render_line ui image
 
@@ -628,6 +722,14 @@ let run_wizard ?(ui=Par_code_ui.create_backend ()) () =
     embedding_base_url; embedding_model; embedding_dimension;
     checkpoint_enabled; checkpoint_interval; context_budget_tokens;
     default_mode;
+    judge_enabled = default.judge_enabled;
+    judge_model = default.judge_model;
+    judge_provider = default.judge_provider;
+    judge_api_key = default.judge_api_key;
+    judge_api_base = default.judge_api_base;
+    goal_verify_command = default.goal_verify_command;
+    goal_max_steps = default.goal_max_steps;
+    doom_loop_threshold = default.doom_loop_threshold;
   } in
   save cfg;
   render_notice ui (Printf.sprintf "\nSaved config to %s" (config_path ()))

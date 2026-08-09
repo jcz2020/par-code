@@ -147,7 +147,7 @@ let format_cost_output ~cost ~context_tokens ~turn_count ~metrics =
   Buffer.add_string b "\nNote: excludes async checkpoint/extraction calls.\n";
   Buffer.contents b
 
-let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
+let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goal () =
   let ui = Par_code_ui.create_backend () in
   (* v0.5.5 P0 #2: tag every save with the current project scope so that
      `par session list` / `par -r` / `par --continue <prefix>` filter
@@ -170,6 +170,8 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
   let ckpt_enabled = match loaded_cfg with Some c -> c.Par_code_config.checkpoint_enabled | None -> true in
   let ckpt_interval = match loaded_cfg with Some c -> c.Par_code_config.checkpoint_interval | None -> 10 in
   let ctx_budget = match loaded_cfg with Some c -> c.Par_code_config.context_budget_tokens | None -> 100000 in
+  let goal_max_steps = match loaded_cfg with Some c -> c.Par_code_config.goal_max_steps | None -> 50 in
+  let goal_verify_cmd = match loaded_cfg with Some c -> c.Par_code_config.goal_verify_command | None -> None in
   let env_no_ckpt = match Sys.getenv_opt "PAR_NO_CHECKPOINT" with Some "1" | Some "true" -> true | _ -> false in
   (match resume with
    | No_prior ->
@@ -317,6 +319,27 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
               Par_code_ui.render_success ui "Switched to BUILD mode."
             end;
             loop ()
+          | "/goal" ->
+            let rest = if String.length trimmed > 5 then String.trim (String.sub trimmed 5 (String.length trimmed - 5)) else "" in
+            if rest = "clear" then begin
+              Par_code_goal.clear_goal ();
+              Par_code_goal.clear_done_signal ();
+              Par_code_ui.render_notice ui "[goal cleared]"
+            end else if rest = "" then
+              (match !Par_code_goal.current with
+               | Some g -> Par_code_ui.render_notice ui
+                   (Printf.sprintf "[active goal: %s] (step %d/%d, %s)"
+                      g.Par_code_goal.objective g.Par_code_goal.step_count
+                      g.Par_code_goal.max_steps (Par_code_goal.status_label g.Par_code_goal.status))
+               | None -> Par_code_ui.render_notice ui "[no active goal]")
+            else begin
+              if !Par_code_mode.current = Plan then
+                ignore (Par_code_mode.switch Build);
+              Par_code_goal.set_goal ~objective:rest ~max_steps:goal_max_steps ();
+              Par_code_ui.render_success ui
+                (Printf.sprintf "Goal set: %s\nAgent will be evaluated by the judge after each turn. Use goal_done tool when you believe the goal is met." rest)
+            end;
+            loop ()
           | _ -> Par_code_ui.render_error ui (Printf.sprintf "Unknown command: %s (try /help)" cmd));
          loop ()
        end else begin
@@ -398,14 +421,19 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
               | Ok { Types.response = resp; conversation = returned_conv; _ } ->
                  conv := Some returned_conv;
                  Par_code_ui.flush_markdown ui;
-                 if not !streamed_text then begin
-                   (match resp.Types.text with
-                    | Some text when text <> "" ->
-                      Par_code_ui.render ui (Par_code_ui.text text)
-                    | Some _ | None ->
-                      Par_code_ui.render_warning ui
-                        "[no response text received — provider streaming may be broken]")
-                 end;
+                  if not !streamed_text then begin
+                    (match resp.Types.text with
+                     | Some text when text <> "" ->
+                       Par_code_ui.render ui (Par_code_ui.text text)
+                     | Some _ | None ->
+                       let reason = match resp.Types.finish_reason with
+                         | Types.Content_filter -> " (content filter)"
+                         | Types.Max_tokens -> " (max tokens)"
+                         | _ -> ""
+                       in
+                       Par_code_ui.render_warning ui
+                         (Printf.sprintf "[model returned no text%s]" reason))
+                  end;
                  Par_code_ui.render_line ui Par_code_ui.empty;
                 cost := add_usage !cost resp.Types.usage;
                 let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in ();
@@ -433,12 +461,55 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume =
                        Par_code_ui.render_notice ui (Printf.sprintf "Plan saved to %s" path)
                      | None -> ())
                   | None -> ())
-               end)
-          with ex ->
+                end);
+               (match !Par_code_goal.current with
+                | Some g when g.Par_code_goal.status = Active
+                             && !Par_code_mode.current = Par_code_mode.Build ->
+                  let step = Par_code_goal.advance_step () in
+                  let triggered_by_done = !Par_code_goal.done_signal <> None in
+                  Par_code_goal.clear_done_signal ();
+                  if step >= g.Par_code_goal.max_steps then begin
+                    Par_code_goal.mark_status Aborted;
+                    Par_code_ui.render_warning ui "[goal aborted: max steps reached]"
+                  end else if triggered_by_done || step mod 3 = 0 then begin
+                    let verify_result =
+                      match goal_verify_cmd with
+                      | Some cmd ->
+                        let ic = Unix.open_process_in cmd in
+                        let buf = Buffer.create 256 in
+                        (try while true do
+                           Buffer.add_channel buf ic 256
+                         done with End_of_file -> ());
+                        let _ = Unix.close_process_in ic in
+                        Buffer.contents buf
+                      | None -> ""
+                    in
+                    (match Par_code_judge.evaluate_goal ~rt
+                       ~goal:g.Par_code_goal.objective ?conv:!conv ~verify_result () with
+                     | Ok v when v.goal_met ->
+                       Par_code_goal.mark_status Met;
+                       Par_code_goal.clear_goal ();
+                       Par_code_ui.render_success ui
+                         (Printf.sprintf "Goal verified as complete: %s" v.reasoning)
+                     | Ok v ->
+                       Par_code_ui.render_warning ui
+                         (Printf.sprintf "[judge: goal not yet met — %s]" v.reasoning)
+                     | Error msg ->
+                       Par_code_ui.render_warning ui
+                         (Printf.sprintf "[judge evaluation failed: %s]" msg))
+                  end
+                | _ -> ())
+           with ex ->
            Par_code_ui.render_error ui (Printf.sprintf "\n[error] %s" (Printexc.to_string ex)));
         loop ()
       end
   in
+  (match goal with
+   | Some g when g <> "" ->
+     Par_code_goal.set_goal ~objective:g ~max_steps:goal_max_steps ();
+     Par_code_ui.render_success ui
+       (Printf.sprintf "Goal set: %s\nAgent will be evaluated by the judge after each turn." g)
+   | _ -> ());
   loop ()
 
 let run_single_shot (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~message =
@@ -460,13 +531,18 @@ let run_single_shot (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) 
      exit 1
     | Ok { Types.response = resp; conversation = conv; _ } ->
       Par_code_ui.flush_markdown ui;
-      if not !streamed_text then begin
-        (match resp.Types.text with
-         | Some text when text <> "" ->
-           Par_code_ui.render ui (Par_code_ui.text text)
-         | Some _ | None ->
-           Par_code_ui.render_warning ui
-             "[no response text received — provider streaming may be broken]")
-      end;
+       if not !streamed_text then begin
+         (match resp.Types.text with
+          | Some text when text <> "" ->
+            Par_code_ui.render ui (Par_code_ui.text text)
+          | Some _ | None ->
+            let reason = match resp.Types.finish_reason with
+              | Types.Content_filter -> " (content filter)"
+              | Types.Max_tokens -> " (max tokens)"
+              | _ -> ""
+            in
+            Par_code_ui.render_warning ui
+              (Printf.sprintf "[model returned no text%s]" reason))
+       end;
       Par_code_ui.render_line ui Par_code_ui.empty;
       let _ = Runtime.save_conversation rt ~conversation:conv ~scope () in ())

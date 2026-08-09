@@ -308,7 +308,16 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
         () with
       | Ok _ -> descriptors := delegate_binding.Types.descriptor :: !descriptors
       | Error e -> ui_render_warning (Printf.sprintf "Warning: delegate tool not registered: %s" (error_to_string e)));
-     let model_cfg = Par_code_config.to_model_config cfg in
+      let goal_done = Par_code_goal_tools.goal_done_tool_binding in
+      (match Runtime.register_tool rt
+         ~name:goal_done.Types.descriptor.Types.name
+         ~description:goal_done.Types.descriptor.Types.description
+         ~input_schema:goal_done.Types.descriptor.Types.input_schema
+         ~handler:goal_done.Types.handler
+         () with
+       | Ok _ -> descriptors := goal_done.Types.descriptor :: !descriptors
+       | Error e -> ui_render_warning (Printf.sprintf "Warning: goal_done tool not registered: %s" (error_to_string e)));
+      let model_cfg = Par_code_config.to_model_config cfg in
     let base_prompt = cfg.Par_code_config.system_prompt in
     (match Runtime.make_agent
        ~id:agent_id

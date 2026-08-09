@@ -86,6 +86,12 @@ let resume_opt =
   value & flag
   & info ["r"; "resume"] ~doc:"Resume the most recent session"
 
+let goal_opt =
+  let open Cmdliner.Arg in
+  value & opt (some string) None
+  & info ["goal"] ~docv:"GOAL"
+      ~doc:"Set a goal for the agent on startup (judge-supervised mode)"
+
 let question_arg =
   let open Cmdliner in
   Arg.(value & pos_all string [] &

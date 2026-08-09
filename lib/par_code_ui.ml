@@ -661,6 +661,7 @@ let render_help backend =
       item "/cost" "Show session token usage";
       item "/plan" "Switch to plan mode (read-only; produces a plan file)";
       item "/build" "Switch to build mode (full tool access; saves current plan)";
+      item "/goal" "Set a goal for the agent (judge verifies completion)";
       item "/reset" "Reset conversation";
       item "/checkpoint" "Force a session checkpoint";
       item "/checkpoints" "List session checkpoints";

@@ -15,7 +15,7 @@ let cmd_chat
     provider_opt api_key_opt api_base_opt model_opt
     persistence_opt db_uri_opt temp_opt prompt_opt max_iter_opt
     max_tokens_opt top_p_opt no_parallel_tools retention_days_opt
-    continue_id_opt resume_opt =
+    continue_id_opt resume_opt goal_opt =
   let cfg = Par_code_config.require_config () in
   let cfg =
     Par_code_config.merge cfg
@@ -34,7 +34,7 @@ let cmd_chat
     | false, None -> Par_code_repl.No_prior
   in
   Par_code_setup.setup_runtime cfg ~f:(fun rt mem_db ->
-    Par_code_repl.run rt ~mem_db ~resume:resume_target)
+    Par_code_repl.run rt ~mem_db ~resume:resume_target ?goal:goal_opt ())
 
 let term_chat =
   let open Term in
@@ -43,7 +43,7 @@ let term_chat =
   $ Cli_args.persistence_arg $ Cli_args.db_uri $ Cli_args.temperature_arg
   $ Cli_args.system_prompt_arg $ Cli_args.max_iterations
   $ Cli_args.max_tokens_arg $ Cli_args.top_p_arg $ Cli_args.no_parallel_tools
-  $ Cli_args.retention_days $ Cli_args.continue_id_opt $ Cli_args.resume_opt
+  $ Cli_args.retention_days $ Cli_args.continue_id_opt $ Cli_args.resume_opt $ Cli_args.goal_opt
 
 let cmd_ask
     question_tokens

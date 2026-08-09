@@ -1,5 +1,165 @@
 # Decisions
 
+## [2026-08-09] v0.7.0 architecture — goal-driven autonomy design decisions
+
+> Six architectural decisions for v0.7.0 "Goal-driven autonomy", all
+> classified per the "一次做对" R1-R4 framework.
+
+**变更前**: v0.7.0 was the next roadmap item. No design decisions recorded.
+
+**变更后**: Six decisions made during implementation:
+
+1. **Goal is orthogonal to Mode (R1 architecturally-correct)**: `Goal` is NOT
+   a third variant of `Par_code_mode.t` (alongside Plan/Build). It's a separate
+   `goal_state` ref. Plan/Build change which agent runs + which tools it has;
+   Goal changes loop control (judge, continuation, doom-detection). Adding
+   Goal to the mode type would be a disguised scope compromise (R4).
+
+2. **Judge default = zero-config, main model in separate context (R1 + R3)**:
+   `judge_enabled = true`, `judge_model = None` (inherits main model). Research
+   ("progress mirage" arXiv:2607.25152): separate-context same-model drops
+   false-acceptance from ~100% to ~44%; separate model is best. Zero-config is
+   strictly better than nothing and upgrades cleanly. Alternative (require
+   explicit config) blocks the headline feature behind setup — rejected.
+
+3. **Judge-supervised mode, not full autonomous chaining (R2 scope compromise
+   with retirement plan)**: v0.7.0 evaluates the goal after each
+   user-triggered turn (every 3 steps or on `goal_done`). Full autonomous
+   chaining (invokes without user input) deferred to v0.7.1. Rationale: the
+   REPL loop restructuring for autonomous chaining is the highest-risk change
+   (Slice 6 in the plan); judge-supervised mode delivers 80% of the value at
+   20% of the risk. Retirement: v0.7.1 adds `goal_loop` recursion to chain
+   invokes.
+
+4. **Doom-loop detection = mechanical hash-based, threshold 3 (R1)**: Hash
+   `(tool_name, args)`, detect N consecutive identical, escalate at 3→6→9.
+   No filesystem-mutation tracking or semantic similarity (deferred to v0.8.0).
+   Industry consensus (ForgeCode, LangSight, Vstorm): threshold 3 has zero
+   reported false positives.
+
+5. **Goal storage = flat JSON file, not SQLite (R1 + R3)**: Goal persists to
+   `.par/goals/current.json`. Human-readable, no schema migration, matches
+   Codex/goalkeeper pattern. The conversation history already lives in SQLite;
+   the goal is a thin session-scoped pointer.
+
+6. **PAR SDK bumped 0.8.3 → 0.8.6 (R3 one-shot)**: Consumes streaming error
+   fix (C5 retirement). Low risk — zero API surface changes between 0.8.3 and
+   0.8.6. Two workaround retirements: C1 (Memory_object usage fields, already
+   retired in code, Superseded marker added) and C5 (streaming error
+   propagation, consumed in this version).
+
+**原因**: v0.7.0 is the first "autonomy" release. The architectural decisions
+above determine how the agent self-regulates (judge), self-corrects
+(doom-loop), and persists intent (goal state). Getting these right avoids
+costly rework in v0.7.1+.
+
+**影响范围**: 4 new modules (`par_code_doom_loop`, `par_code_goal`,
+`par_code_judge`, `par_code_goal_tools`), 8 new config fields, `/goal`
+slash command, `goal_done` agent tool, `--goal` CLI flag, PAR SDK dep bump.
+
+**回退方式**: `/goal` command and goal features are additive — removing the
+new modules + config fields + slash command reverts to v0.6.2 behavior. The
+PAR SDK dep bump is a 1-line revert in `dune-project`.
+
+**已知限制**:
+- Judge-supervised mode (not full autonomous) — see decision 3 above.
+- Doom-loop detection is mechanical only — see decision 4 above.
+- Two PAR SDK gaps anticipated but not yet formally filed (doom-loop primitive,
+  nested invoke depth-limiting) — will file if v0.7.1 implementation confirms.
+
+## [2026-08-09] PAR SDK upgrade assessment — v0.8.3 → v0.8.6 (v0.7.0 prep)
+
+> Pre-v0.7.0 investigation. Searched whether PAR SDK can support v0.7.0's
+> three needs (independent judge model, nested subagent calls, doom-loop
+> detection) without upstream changes, and whether any existing par-code
+> workarounds are retirement-eligible against newer PAR versions.
+
+**变更前**: par-code v0.6.2 pins `par {>= "0.8.3"}`. Local opam pin metadata
+reads 0.8.3 even though `/root/dev/PAR` source `dune-project` is at 0.8.6
+(the metadata lag is normal — opam caches the version at last install).
+PAR SDK has shipped three patch releases since (0.8.4, 0.8.5, 0.8.6); their
+contents and relevance to v0.7.0 had not been assessed.
+
+**变更后**: Assessment complete. Findings:
+
+**A. v0.8.4 / v0.8.5 / v0.8.6 contain zero API surface changes** — confirmed
+by both `CHANGES.md` and per-tag `git log` (each version has exactly one
+commit). 0.8.4 and 0.8.5 are test mock-path portability fixes (so opam-repo
+CI users can run `dune runtest`). 0.8.6 is one production-relevant fix:
+`Http_client.do_request_streaming` now raises `Http_status_error` for
+non-2xx streaming responses instead of silently swallowing the error body.
+The OpenAI/Anthropic providers' existing `map_http_status` handlers (dead
+code in the production streaming path before 0.8.6) are now reachable.
+
+**B. v0.7.0's three needs are all buildable from existing v0.8.3 primitives**
+(no PAR SDK blocker):
+
+| v0.7.0 need | PAR SDK primitive | Status |
+|---|---|---|
+| Independent judge model | `Runtime.register_llm_provider ~id` + `Runtime.make_agent ~model:{provider_id; ...}` + `Runtime.invoke_structured ~response_schema` | Fully composable. `skill_descriptor.expected_output` comment in `types.mli:341-346` shows PAR is design-aware of judge use-case. |
+| Nested subagent calls | `handler_result.Handoff` (lateral transfer within ReAct loop) + `Runtime.invoke` from tool handler (already used by v0.6.0 `delegate`) | Safe — `invoke_context` is fiber-local via `Eio.Fiber.with_binding`; `?save:false ~update_current:false` isolates. Handoff ≠ true nesting but is sufficient for v0.7.0. |
+| Doom-loop detection | `max_iterations` + `max_execution_time` + `early_stopping_method` + `context_compression_threshold` (all pre-existing) | **No PAR SDK primitive exists.** par-code must build tool-call dedup + progress heuristics at app level (as middleware or `register_tool_call_hook`). |
+
+**C. Two existing workarounds are retirement-eligible**:
+
+- **C1 (Memory_object usage fields)** — **fully retired in code, DECISIONS.md
+  Superseded marker added today**. PAR v0.8.1 exposed `last_used_at` /
+  `usage_count` on the public type; `lib/par_code_memory.ml:304-305` reads
+  them directly. The v0.4.3 supplementary-SQL fetch is gone.
+- **C5 (streaming error propagation)** — **retirement-eligible but not yet
+  consumed**. PAR v0.8.6 fix is in `Http_client`, but `lib/par_code_repl.ml:407,469`
+  still shows the generic `"[no response text received — provider streaming
+  may be broken]"` fallback. To retire: surface PAR SDK's `error_category`
+  (now populated for non-2xx streaming) instead of the generic message.
+  Defer to v0.7.0 cycle.
+
+**D. Two PAR SDK gaps anticipated for v0.7.0** (NOT yet filed as formal
+feedback — per `par-sdk-feedback` skill, file when implementation actually
+hits the gap, not before):
+
+1. **Doom-loop detection primitive** (anticipated 🟡 WORKAROUND): no
+   `tool_call_dedup` or no-progress hook on `agent_config`. par-code must
+   implement at app level (~30-50 LOC for tool-call hash tracker +
+   breaker). Will file formally when v0.7.0 doom-loop implementation
+   confirms the gap is real.
+2. **Nested invoke depth-limiting** (anticipated 🟡 WORKAROUND): no
+   `?depth:int` parameter on `Runtime.invoke` and no `max_call_depth` on
+   `agent_config`. par-code v0.6.0 `delegate` already does manual depth
+   limiting; v0.7.0 judge-handoff will need the same. Will file formally
+   if v0.7.0 implementation hits a depth-limiting wall that manual code
+   cannot cleanly handle.
+
+**原因**: Per STRATEGY.md §2 (Dual Role), par-code's first response to a
+PAR limitation is to confirm whether PAR can already do it. This assessment
+unblocks v0.7.0 planning: no PAR SDK changes are required to start, all
+three needs compose from existing primitives, and the v0.8.6 streaming fix
+is a bonus that improves error diagnostics when consumed.
+
+**影响范围**:
+- `docs/DECISIONS.md` (this entry + Superseded marker on the 2026-07-20
+  Memory_object feedback entry)
+- v0.7.0 prep tasks tracked (NOT executed in this assessment):
+  - `opam upgrade par` in the `/root/dev/PAR` switch to refresh pin metadata 0.8.3 → 0.8.6
+  - bump `par {>= "0.8.3"}` → `par {>= "0.8.6"}` in `dune-project` after pin refresh
+  - consume PAR v0.8.6 streaming error fix in `par_code_repl.ml:407,469` (C5 retirement)
+- Zero par-code source changes from this assessment alone.
+
+**回退方式**: N/A (filing + supersede marker only). The Superseded marker
+on the Memory_object entry reflects already-shipped code reality; reverting
+the marker would not un-retire the workaround.
+
+**已知限制**:
+- Local opam pin metadata lag (0.8.3 vs source 0.8.6) means `dune build`
+  currently links against whatever code is at `/root/dev/PAR` HEAD (which
+  is post-v0.8.6 source). The version-string constraint in `dune-project`
+  is the only formal declaration — bumping it requires the pin refresh.
+- v0.7.0 anticipated gaps (doom-loop primitive, depth-limiting) are
+  hypotheses based on reading PAR SDK surface area, not implementation
+  experience. Either may turn out to be cleanly workaroundable (downgrade
+  to 🟢) or genuinely blocking (upgrade to 🔴) once v0.7.0 work starts.
+
+---
+
 ## [2026-08-07] linenoise migration for UTF-8/wide-char REPL input
 
 > User reported Chinese (CJK) input couldn't be backspaced cleanly in the
@@ -935,6 +1095,18 @@ that uses `Sqlite_memory.search` directly (without going through par-code's
 ([2026-07-20] PAR SDK Feedback entry below).
 
 ## [2026-07-20] PAR SDK Feedback: Memory_object.t lacks usage-tracking fields
+
+> **Superseded [2026-08-09]**: PAR SDK v0.8.1 shipped `last_used_at` and
+> `usage_count` as public fields on `Memory_object.memory_object` (CHANGES.md
+> v0.8.1 §"Memory service": "exposed on public type — were internal-only,
+> maintained by `bump_usage`, affected `list_all` ordering"). par-code
+> consumes them directly at `lib/par_code_memory.ml:304-305`
+> (`memory_of_object` conversion reads `obj.Memory_object.last_used_at` and
+> `obj.Memory_object.usage_count`). The v0.4.3 supplementary-SQL workaround
+> in `Par_code_memory.recall` is fully removed; no `fetch_usage` or
+> `supplementary` references remain. The raw-SQL paths in `row_to_memory`
+> (line 311+) are unrelated bulk-listing queries, not the recall workaround.
+> Retirement recorded as part of the v0.7.0 PAR SDK upgrade assessment.
 
 Per global AGENTS.md §1 and the par-code par-sdk-feedback skill, one PAR
 SDK gap surfaced during v0.4.3 implementation. Tracked here for upstream

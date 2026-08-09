@@ -1,5 +1,58 @@
 # CHANGES
 
+## v0.7.0 — Goal-driven autonomy
+
+> **Status**: In development. Core feature implemented (judge-supervised mode);
+> full autonomous chaining deferred to v0.7.1.
+
+### Added — Goal-driven autonomy
+
+- **`/goal <description>` command** — sets an objective for the agent. The agent
+  works toward the goal with an independent judge model evaluating progress.
+  Use `/goal` (no args) to see status, `/goal clear` to abort.
+- **Independent judge model** — a second LLM with fresh context evaluates
+  whether the goal is truly met, preventing the agent from self-deceiving.
+  Zero-config: uses the main model in a separate agent context by default.
+  Configure via `judge_model`, `judge_provider`, `judge_api_key`,
+  `judge_api_base` for a separate model.
+- **`goal_done` agent tool** — the agent signals completion via this tool,
+  triggering immediate judge verification.
+- **Doom-loop detection** — hash-based tool-call repetition detector (threshold
+  3, configurable via `doom_loop_threshold`). Escalation: nudge → force judge →
+  abort.
+- **Goal state persistence** — active goal saved to `.par/goals/current.json`,
+  survives crashes.
+- **`--goal` CLI flag** — start the REPL with a pre-set goal.
+
+### Added — Config fields (8 new)
+
+- `judge_enabled` (bool, default true)
+- `judge_model` (string option, default inherit main model)
+- `judge_provider`, `judge_api_key`, `judge_api_base` (string option, default inherit)
+- `goal_verify_command` (string option, deterministic check before judge)
+- `goal_max_steps` (int, default 50)
+- `doom_loop_threshold` (int, default 3)
+
+### Changed — PAR SDK consumption
+
+- Bumped PAR SDK dependency from `>= 0.8.3` to `>= 0.8.6`.
+- Consumed PAR v0.8.6 streaming error fix: non-2xx streaming responses now
+  surface real error categories (rate_limited, auth failure, etc.) instead of
+  silent empty responses. Empty-text fallback now shows finish_reason.
+
+### Changed — Config
+
+- `Par_code_config.save` now uses atomic write (temp-file + rename) to prevent
+  readers from seeing partially-truncated files.
+
+### Known Limitations
+
+- Judge-supervised mode evaluates after each user-triggered turn (every 3 steps
+  or when `goal_done` is called). Full autonomous chaining (invokes without
+  user input) is deferred to v0.7.1.
+- Doom-loop detection is mechanical (hash-based) only — no filesystem-mutation
+  tracking or semantic similarity (v0.8.0 candidates).
+
 ## v0.6.2 — UTF-8 REPL input (linenoise)
 
 > **Status**: Shipped. Patch release — fixes CJK input garbling + Ctrl+C

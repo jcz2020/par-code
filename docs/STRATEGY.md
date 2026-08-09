@@ -242,8 +242,14 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
   commands were swallowed). Three review rounds; two post-migration
   regressions (config-wizard Ctrl+C crash, slash-command output) caught and
   fixed before release.
-- **v0.7.0 (next)** — Goal-driven autonomy: `/goal` command, independent judge
-  model, doom-loop detection.
+- **v0.7.0 ✅ implemented (unreleased)** — Goal-driven autonomy: `/goal`
+  command, independent judge model, doom-loop detection, `goal_done` agent
+  tool, `--goal` CLI flag. Judge-supervised mode (evaluates after each turn;
+  full autonomous chaining deferred to v0.7.1). PAR SDK bumped 0.8.3 → 0.8.6.
+  300 tests passing. 4 new modules, 29 new unit tests.
+- **v0.7.1 (next)** — Full autonomous goal chaining (invokes without user
+  input), doom-loop pattern detection (A-B-A-B), PAR SDK feedback filings
+  (doom-loop primitive, nested invoke depth-limiting).
 - v0.8.0+ — best-of-N reasoning, self-improvement, compose mode, ecosystem,
   code intelligence, safety, polish → v1.0
 
