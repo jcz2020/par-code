@@ -1,5 +1,43 @@
 # Decisions
 
+## [2026-08-10] PAR SDK Feedback: parallel tool-call error loses tool_call_id
+
+**Tag**: PAR SDK Feedback
+
+**变更前**: par-code v0.7.0 plan mode walkthrough with MiniMax-M3 found that
+when the LLM makes parallel tool calls and some fail, the subsequent API
+request returns 400 with `"invalid params, tool result's tool id
+(call_xxx) not found (2013)"`. Root cause: PAR SDK's engine, when processing
+multiple tool results from a single assistant message, sends a tool result
+message whose `tool_call_id` doesn't match the LLM's original tool call IDs.
+The mismatch is specific to error results (when `handler_result = Error`).
+
+**变更后**: Filed as PAR SDK gap. par-code mitigations:
+1. Planner `max_iterations` lowered to 8 (reduces parallel call chains)
+2. Plan auto-save fallback: if planner reaches step limit without calling
+   `plan_submit`, extract last assistant text and save as plan file
+3. With affected providers (MiniMax), plan mode still produces empty plan
+   files due to this bug — not fixable on par-code side
+
+**原因**: Discovered during real LLM walkthrough (MiniMax-M3 via
+`api.minimaxi.com/v1`). Error message is provider-specific:
+`tool result's tool id(call_c3c9d58cabf149f7b1c4d0ff) not found (2013)`.
+
+**影响范围**: All par-code features that trigger parallel tool calls where
+some succeed and some fail. Not limited to plan mode.
+
+**回退方式**: N/A (filing only — PAR SDK source change needed).
+
+**已知限制**:
+- **Severity**: HIGH — breaks plan mode with affected providers
+- **Proposed upstream fix**: In `/root/dev/PAR/lib/core/engine.ml`, verify
+  that every tool result message carries the exact `tool_call_id` from the
+  corresponding assistant tool call, even when the handler returns `Error`.
+  The error path may be generating synthetic IDs or dropping the original.
+- **Retirement trigger**: When PAR SDK ships the fix, remove the plan
+  auto-save fallback (it becomes unnecessary) and restore planner
+  `max_iterations` to the user-configured value.
+
 ## [2026-08-09] v0.7.0 architecture — goal-driven autonomy design decisions
 
 > Six architectural decisions for v0.7.0 "Goal-driven autonomy", all

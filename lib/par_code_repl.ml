@@ -501,12 +501,22 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                 | _ -> ())
             with ex ->
              Par_code_ui.render_error ui (Printf.sprintf "\n[error] %s" (Printexc.to_string ex)));
-               (match Par_code_plan_tools.consume_submitted_plan () with
-                | Some path ->
-                  last_plan_path := Some path;
-                  Par_code_ui.render_success ui
-                    (Printf.sprintf "Plan saved to %s. Switched to BUILD mode." path)
-                | None -> ());
+                (match Par_code_plan_tools.consume_submitted_plan () with
+                 | Some path ->
+                   last_plan_path := Some path;
+                   Par_code_ui.render_success ui
+                     (Printf.sprintf "Plan saved to %s. Switched to BUILD mode." path)
+                 | None ->
+                   if !Par_code_mode.current = Par_code_mode.Plan then
+                     (match !conv with
+                      | Some c ->
+                        (match Par_code_plan_tools.persist_plan_file c with
+                         | Some path ->
+                           last_plan_path := Some path;
+                           Par_code_ui.render_notice ui
+                             (Printf.sprintf "Plan auto-saved to %s (planner reached step limit)." path)
+                         | None -> ())
+                      | None -> ()));
         loop ()
       end
   in

@@ -425,7 +425,7 @@ user to confirm the switch to build mode. You MUST call plan_submit.
        ~model:model_cfg
        ~tools:planner_descriptors
        ~middleware:[think_tag_strip_middleware]
-       ~max_iterations:cfg.Par_code_config.max_iterations
+       ~max_iterations:(min cfg.Par_code_config.max_iterations 8)
        ()
       with
     | Error e ->
