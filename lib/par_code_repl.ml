@@ -386,8 +386,8 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                     really_input ic buf 0 len;
                     close_in ic;
                     let plan_text = Bytes.to_string buf in
-                    Some (Printf.sprintf
-                      "\n\n## Plan (from plan mode)\n\n%s\n\nFollow this plan for the current task." plan_text)
+            Some (Printf.sprintf
+                       "\n\n## Mode Switch: Plan -> Build\n\nYour operational mode has changed from plan to build. The plan below was produced in plan mode and approved by the user. Execute it now.\n\n%s" plan_text)
                   with Sys_error _ ->
                     Some (Printf.sprintf
                       "\n\n## Plan Reference\n\nYour plan was saved to `%s`." path))

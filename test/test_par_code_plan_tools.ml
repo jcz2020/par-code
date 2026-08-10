@@ -480,4 +480,18 @@ let () =
         Alcotest.test_case "no_files"        `Quick test_prune_no_files;
         Alcotest.test_case "undated_file"    `Quick test_prune_undated_file;
       ];
+      "sanitize_filename", [
+        Alcotest.test_case "simple"          `Quick (fun () ->
+          Alcotest.(check string) "simple" "add-auth.md"
+            (Par_code_plan_tools.sanitize_plan_filename "add-auth.md"));
+        Alcotest.test_case "adds_md"         `Quick (fun () ->
+          Alcotest.(check string) "adds .md" "feature.md"
+            (Par_code_plan_tools.sanitize_plan_filename "feature"));
+        Alcotest.test_case "strips_path"     `Quick (fun () ->
+          Alcotest.(check string) "strips path traversal" "passwd.md"
+            (Par_code_plan_tools.sanitize_plan_filename "../../../etc/passwd"));
+        Alcotest.test_case "replaces_slashes" `Quick (fun () ->
+          let r = Par_code_plan_tools.sanitize_plan_filename "a/b/c.md" in
+          Alcotest.(check bool) "no slashes" true (not (String.contains r '/')));
+      ];
     ]

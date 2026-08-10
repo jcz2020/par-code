@@ -171,16 +171,40 @@ let consume_submitted_plan () =
   | Some path -> last_submitted_plan := None; Some path
   | None -> None
 
-let plan_submit_handler : Yojson.Safe.t -> Types.cancellation_token -> Types.handler_result =
-  fun json _tok ->
+let read_confirm_tty () =
+  try
+    let tty = open_in "/dev/tty" in
+    Fun.protect ~finally:(fun () -> close_in tty)
+      (fun () -> input_line tty)
+  with Sys_error _ ->
+    input_line stdin
+
+let make_plan_submit_tool ~(ui : Par_code_ui.backend Lazy.t) : Types.tool_binding =
+  let open Types in
+  let descriptor =
+    { name = "plan_submit"
+    ; description =
+        "Submit your complete plan and switch to build mode. You MUST call \
+         this tool to finish planning. The 'plan' argument must be your full \
+         plan in markdown format with all required sections."
+    ; input_schema = plan_submit_input_schema
+    ; output_schema = None
+    ; permission = Allow
+    ; timeout = Some 30.0
+    ; concurrency_limit = None
+    ; on_update = None
+    ; cache_control = None
+    }
+  in
+  let handler json _tok =
     let open Yojson.Safe.Util in
     let plan =
       try json |> member "plan" |> to_string
       with Type_error _ -> ""
     in
     if plan = "" then
-      Types.Error
-        { category = Types.Invalid_input "plan_submit"
+      Error
+        { category = Invalid_input "plan_submit"
         ; message = "Missing or empty 'plan' field"
         ; retryable = false
         ; metadata = []
@@ -194,29 +218,67 @@ let plan_submit_handler : Yojson.Safe.t -> Types.cancellation_token -> Types.han
         let oc = open_out path in
         Fun.protect ~finally:(fun () -> close_out oc)
           (fun () -> output_string oc cleaned);
-        last_submitted_plan := Some path;
-        let _ = Par_code_mode.switch Build in
-        Types.Success
-          (`Assoc [ ("plan_saved_to", `String path)
-                  ; ("mode", `String "build") ])
+        let backend = Lazy.force ui in
+        Par_code_ui.render_notice backend
+          (Printf.sprintf "Plan saved to %s" path);
+        Par_code_ui.render backend
+          (Par_code_ui.textf ~style:(Par_code_ui.style ~fg:Yellow ~bold:true ())
+             "\nSwitch to build mode? [y/N] ");
+        let answer = read_confirm_tty () in
+        if String.lowercase_ascii (String.trim answer) = "y" then begin
+          last_submitted_plan := Some path;
+          let _ = Par_code_mode.switch Build in
+          Success
+            (`Assoc [ ("plan_saved_to", `String path)
+                    ; ("mode", `String "build") ])
+        end else
+          Success
+            (`Assoc [ ("plan_saved_to", `String path)
+                    ; ("mode", `String "plan")
+                    ; ("user_declined", `Bool true) ])
       with Sys_error _ ->
-        Types.Error
-          { category = Types.External_failure "plan_submit"
+        Error
+          { category = External_failure "plan_submit"
           ; message = "Failed to write plan file"
           ; retryable = false
           ; metadata = []
           })
     end
+  in
+  { descriptor; handler }
 
-let plan_submit_tool : Types.tool_binding =
+(* -- write_plan_file tool ------------------------------------------------- *)
+
+let write_plan_file_input_schema : Yojson.Safe.t =
+  `Assoc
+    [ ("type", `String "object")
+    ; ("properties", `Assoc
+        [ ("filename", `Assoc
+            [ ("type", `String "string")
+            ; ("description", `String
+                "Plan filename, e.g. 'add-auth.md' (only .md extension allowed)")
+            ])
+        ; ("content", `Assoc
+            [ ("type", `String "string")
+            ; ("description", `String "Full plan content in markdown")
+            ])
+        ])
+    ; ("required", `List [ `String "filename"; `String "content" ])
+    ]
+
+let sanitize_plan_filename raw =
+  let base = Filename.basename raw in
+  let safe = String.map (fun c -> if c = '/' || c = '\\' then '_' else c) base in
+  if Filename.check_suffix safe ".md" then safe else safe ^ ".md"
+
+let write_plan_file_tool : Types.tool_binding =
   let open Types in
   let descriptor =
-    { name = "plan_submit"
+    { name = "write_plan_file"
     ; description =
-        "Submit your complete plan and switch to build mode. You MUST call \
-         this tool to finish planning. The 'plan' argument must be your full \
-         plan in markdown format with all required sections."
-    ; input_schema = plan_submit_input_schema
+        "Write or update your plan file in the .par/plans/ directory. \
+         Use this to draft your plan incrementally before calling plan_submit."
+    ; input_schema = write_plan_file_input_schema
     ; output_schema = None
     ; permission = Allow
     ; timeout = Some 10.0
@@ -225,7 +287,43 @@ let plan_submit_tool : Types.tool_binding =
     ; cache_control = None
     }
   in
-  { descriptor; handler = plan_submit_handler }
+  let handler json _tok =
+    let open Yojson.Safe.Util in
+    let filename =
+      try sanitize_plan_filename (json |> member "filename" |> to_string)
+      with Type_error _ -> ""
+    in
+    let content =
+      try json |> member "content" |> to_string
+      with Type_error _ -> ""
+    in
+    if filename = "" || content = "" then
+      Error
+        { category = Invalid_input "write_plan_file"
+        ; message = "Missing 'filename' or 'content' field"
+        ; retryable = false
+        ; metadata = []
+        }
+    else begin
+      let plans_dir = ensure_plans_dir () in
+      let path = Filename.concat plans_dir filename in
+      (try
+        let cleaned = Json_extract.strip_think_tags content in
+        let oc = open_out path in
+        Fun.protect ~finally:(fun () -> close_out oc)
+          (fun () -> output_string oc cleaned);
+        Success
+          (`Assoc [ ("written_to", `String path) ])
+      with Sys_error _ ->
+        Error
+          { category = External_failure "write_plan_file"
+          ; message = "Failed to write plan file"
+          ; retryable = false
+          ; metadata = []
+          })
+    end
+  in
+  { descriptor; handler }
 
 (* -- Plan file management -------------------------------------------------- *)
 

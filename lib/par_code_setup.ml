@@ -253,7 +253,7 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
        descriptors := mem_descriptors @ !descriptors
      | None -> ());
     (* Plan mode tools: agent-invocable mode switching (v0.5.0) *)
-    let plan_tools = [Par_code_plan_tools.plan_enter_tool; Par_code_plan_tools.plan_exit_tool; Par_code_plan_tools.plan_submit_tool] in
+    let plan_tools = [Par_code_plan_tools.plan_enter_tool; Par_code_plan_tools.plan_exit_tool; Par_code_plan_tools.make_plan_submit_tool ~ui; Par_code_plan_tools.write_plan_file_tool] in
     List.iter (fun (tb : Types.tool_binding) ->
       (match Runtime.register_tool rt
          ~name:tb.descriptor.Types.name
@@ -367,55 +367,57 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
        | Ok () -> ()));
     (* Planner agent: read-only tool subset, used in Plan mode (v0.5.0) *)
     let planner_descriptors =
-      let plan_exit_name = Par_code_plan_tools.plan_exit_tool.descriptor.Types.name in
-      let plan_submit_name = Par_code_plan_tools.plan_submit_tool.descriptor.Types.name in
       List.filter (fun (td : Types.tool_descriptor) ->
         List.mem td.name
           [ "read"; "grep"; "find"; "ls";
-            "recall_memory"; "search_history"; "git_status"; "git_log" ]
-        || td.name = plan_exit_name
-        || td.name = plan_submit_name
+            "recall_memory"; "search_history"; "git_status"; "git_log";
+            "plan_exit"; "plan_submit"; "write_plan_file" ]
       ) !descriptors
     in
     let planner_prompt =
       {|You are "planner", the read-only planning agent for par-code.
 
-You are in PLAN MODE. Investigate the user's request, then submit a structured plan.
+You are in PLAN MODE. Follow this workflow strictly.
 
-## Tools available
-- read, grep, find, ls: investigate the codebase
-- recall_memory, search_history: check project context
-- git_status, git_log: see repository state
-- plan_submit: submit your plan (REQUIRED to finish)
+## Phase 1: Investigate (≤6 tool calls)
+Use read, grep, find, ls to understand the codebase. Use recall_memory
+and search_history for project context. Use git_status, git_log for
+repository state. Be efficient — 6 tool calls maximum.
 
-## What you cannot do
-No write, edit, or bash — those tools are unavailable.
+## Phase 2: Design
+Think about the best approach. Consider alternatives. Pick one with rationale.
 
-## Workflow
-1. Investigate using the read-only tools (aim for ≤8 tool calls)
-2. Call plan_submit with your complete plan as the "plan" argument
-3. You MUST call plan_submit to finish — do not end your turn without it
+## Phase 3: Write Plan
+Call write_plan_file with your complete plan. Use a descriptive filename
+(e.g. "add-auth.md"). Content must include:
 
-## Plan format (pass as the "plan" string argument to plan_submit)
 ## Goal
-<one-paragraph restatement of what the user wants>
+<one-paragraph restatement>
 
 ## Approach
-<the strategy you propose, with rationale>
+<strategy with rationale>
 
 ## Files to Touch
-<bulleted list of file paths, with brief notes on what changes each needs>
+<file paths with notes on what changes each needs>
 
 ## Risks
-<bulleted list of things that could go wrong, edge cases, unknowns>
+<things that could go wrong, edge cases, unknowns>
 
 ## Open Questions
-<bulleted list of decisions that need user input>
+<decisions that need user input>
 
 ## Steps
-<numbered list of implementation steps in suggested execution order>
+<numbered implementation steps in suggested execution order>
 
-If the request is ambiguous, ask ONE clarifying question, then proceed with reasonable defaults.|}
+## Phase 4: Submit
+Call plan_submit with your final plan. This saves the plan and asks the
+user to confirm the switch to build mode. You MUST call plan_submit.
+
+## Rules
+- You CANNOT write, edit, or run bash (except write_plan_file for plans).
+- You MUST call plan_submit to finish. Do not end your turn without it.
+- Do NOT call plan_exit — plan_submit handles the switch.
+- If the request is ambiguous, ask ONE clarifying question, then proceed.|}
     in
     (match Runtime.make_agent
        ~id:Par_code_mode.planner_agent_id

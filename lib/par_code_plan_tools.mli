@@ -4,7 +4,9 @@ val plan_enter_handler : Yojson.Safe.t -> Types.cancellation_token -> Types.hand
 val plan_exit_handler : Yojson.Safe.t -> Types.cancellation_token -> Types.handler_result
 val plan_enter_tool : Types.tool_binding
 val plan_exit_tool : Types.tool_binding
-val plan_submit_tool : Types.tool_binding
+val make_plan_submit_tool : ui:Par_code_ui.backend Lazy.t -> Types.tool_binding
+val write_plan_file_tool : Types.tool_binding
+val sanitize_plan_filename : string -> string
 val last_submitted_plan : string option ref
 val consume_submitted_plan : unit -> string option
 val persist_plan_file : Types.conversation -> string option
