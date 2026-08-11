@@ -16,9 +16,18 @@ let make_stream_cb ui =
   in
   cb, streamed_text
 
-let make_tool_event_callback (ui : Par_code_ui.backend) () =
+let make_tool_event_callback (ui : Par_code_ui.backend) ?(doom = None) () =
   let start_times : (string, float) Hashtbl.t = Hashtbl.create 8 in
   fun (evt : Types.event) ->
+    (match evt, doom with
+     | Types.Tool_invoked { tool_name; _ }, Some d ->
+       let action = Par_code_doom_loop.record_tool_call d tool_name in
+       (match action with
+        | Nudge msg -> Par_code_ui.render_warning ui msg
+        | Force_judge msg -> Par_code_ui.render_warning ui msg
+        | Abort msg -> Par_code_ui.render_error ui msg
+        | Continue -> ())
+     | _ -> ());
     match evt with
     | Types.Tool_invoked { task_id; _ } ->
       Hashtbl.replace start_times (Types.Task_id.to_string task_id) (Unix.gettimeofday ());
@@ -166,6 +175,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
   let in_flight_checkpoint = ref false in
   let cost = ref empty_cost in
   let last_plan_path : string option ref = ref None in
+  let goal_feedback : string option ref = ref None in
   let loaded_cfg = Par_code_config.load () in
   let ckpt_enabled = match loaded_cfg with Some c -> c.Par_code_config.checkpoint_enabled | None -> true in
   let ckpt_interval = match loaded_cfg with Some c -> c.Par_code_config.checkpoint_interval | None -> 10 in
@@ -199,7 +209,8 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
          | None -> ())
       with _ -> ())
    | None -> ());
-  let on_tool_event = make_tool_event_callback ui () in
+  let doom_detector = Par_code_doom_loop.create ~threshold:5 () in
+ let on_tool_event = make_tool_event_callback ui ~doom:(Some doom_detector) () in
    Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ ->
      let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in
      Par_code_ui.render_notice ui "\nBye!";
@@ -393,11 +404,22 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                       "\n\n## Plan Reference\n\nYour plan was saved to `%s`." path))
                 | None -> None
               in
-              let combined_appendix = match memory_appendix, plan_appendix with
-                | None, None -> None
-                | Some m, None -> Some m
-                | None, Some p -> Some p
-                | Some m, Some p -> Some (m ^ p)
+              let goal_appendix = match !goal_feedback with
+                | Some feedback ->
+                  goal_feedback := None;
+                  Some (Printf.sprintf
+                    "\n\n## Goal Status\n\nYou are working toward a goal. The judge evaluated your last turn and found the goal NOT YET MET.\n\nJudge feedback: %s\n\nContinue working toward the goal. Address the judge's feedback." feedback)
+                | None -> None
+              in
+              let combined_appendix = match memory_appendix, plan_appendix, goal_appendix with
+                | None, None, None -> None
+                | Some m, None, None -> Some m
+                | None, Some p, None -> Some p
+                | None, None, Some g -> Some g
+                | Some m, Some p, None -> Some (m ^ p)
+                | Some m, None, Some g -> Some (m ^ g)
+                | None, Some p, Some g -> Some (p ^ g)
+                | Some m, Some p, Some g -> Some (m ^ p ^ g)
               in
               let mode_before_invoke = !Par_code_mode.current in
               let stream_cb, streamed_text = make_stream_cb ui in
@@ -492,8 +514,9 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                        Par_code_ui.render_success ui
                          (Printf.sprintf "Goal verified as complete: %s" v.reasoning)
                      | Ok v ->
-                       Par_code_ui.render_warning ui
-                         (Printf.sprintf "[judge: goal not yet met — %s]" v.reasoning)
+                        goal_feedback := Some v.reasoning;
+                        Par_code_ui.render_warning ui
+                          (Printf.sprintf "[judge: goal not yet met — %s]" v.reasoning)
                      | Error msg ->
                        Par_code_ui.render_warning ui
                          (Printf.sprintf "[judge evaluation failed: %s]" msg))

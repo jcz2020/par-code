@@ -49,3 +49,6 @@ let record_call t ~tool_name ~args =
   end
   else
     Continue
+
+let record_tool_call t tool_name =
+  record_call t ~tool_name ~args:`Null

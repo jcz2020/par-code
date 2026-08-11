@@ -10,4 +10,6 @@ type action =
 
 val record_call : t -> tool_name:string -> args:Yojson.Safe.t -> action
 
+val record_tool_call : t -> string -> action
+
 val streak_count : t -> int
