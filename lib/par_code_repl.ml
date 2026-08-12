@@ -404,12 +404,16 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                       "\n\n## Plan Reference\n\nYour plan was saved to `%s`." path))
                 | None -> None
               in
-              let goal_appendix = match !goal_feedback with
-                | Some feedback ->
+              let goal_appendix =
+                match !goal_feedback, !Par_code_goal.current with
+                | Some feedback, _ ->
                   goal_feedback := None;
                   Some (Printf.sprintf
                     "\n\n## Goal Status\n\nYou are working toward a goal. The judge evaluated your last turn and found the goal NOT YET MET.\n\nJudge feedback: %s\n\nContinue working toward the goal. Address the judge's feedback." feedback)
-                | None -> None
+                | None, Some g when g.Par_code_goal.status = Par_code_goal.Active ->
+                  Some (Printf.sprintf
+                    "\n\n## Active Goal\n\nYou are working toward this goal: %s\n\nWork toward this goal. When you believe it is complete, call the goal_done tool with a summary of what you accomplished." g.Par_code_goal.objective)
+                | _ -> None
               in
               let combined_appendix = match memory_appendix, plan_appendix, goal_appendix with
                 | None, None, None -> None

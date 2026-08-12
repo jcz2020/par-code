@@ -365,7 +365,21 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
       (match Runtime.register_agent rt ckpt_agent with
        | Error e -> ui_render_warning (Printf.sprintf "Warning: checkpoint-writer agent registration failed: %s" (error_to_string e))
        | Ok () -> ()));
-    (* Planner agent: read-only tool subset, used in Plan mode (v0.5.0) *)
+     (match Runtime.make_agent
+        ~id:Par_code_judge.judge_agent_id
+        ~system_prompt:(Types.stable_prompt Par_code_judge.judge_system_prompt)
+        ~model:model_cfg
+        ~tools:[]
+        ~middleware:[think_tag_strip_middleware]
+        ~max_iterations:2
+        () with
+     | Error e ->
+       ui_render_warning (Printf.sprintf "Warning: judge agent not registered: %s" (error_to_string e))
+     | Ok j ->
+       (match Runtime.register_agent rt j with
+        | Error e -> ui_render_warning (Printf.sprintf "Warning: judge agent registration failed: %s" (error_to_string e))
+        | Ok () -> ()));
+     (* Planner agent: read-only tool subset, used in Plan mode (v0.5.0) *)
     let planner_descriptors =
       List.filter (fun (td : Types.tool_descriptor) ->
         List.mem td.name

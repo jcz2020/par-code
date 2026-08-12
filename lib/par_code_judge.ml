@@ -16,6 +16,16 @@ Respond with JSON only:
 {"goal_met": <true|false>, "reasoning": "<one or two sentences citing specific evidence>"}
 |}
 
+let error_to_string (e : Types.error_category) =
+  match e with
+  | Types.Timeout -> "Timeout"
+  | Types.Invalid_input s -> Printf.sprintf "Invalid input: %s" s
+  | Types.External_failure s -> Printf.sprintf "External failure: %s" s
+  | Types.Rate_limited -> "Rate limited"
+  | Types.Permission_denied s -> Printf.sprintf "Permission denied: %s" s
+  | Types.Internal s -> Printf.sprintf "Internal error: %s" s
+  | Types.Embedding_unsupported -> "Embedding unsupported"
+
 type verdict = {
   goal_met : bool;
   reasoning : string;
@@ -124,7 +134,7 @@ let evaluate_goal ~rt ~goal ?conv ~verify_result () =
     ~update_current:false
     ()
   with
-  | Error (e, _) -> Error (Par_code_setup.error_to_string e)
+  | Error (e, _) -> Error (error_to_string e)
   | Ok result ->
     let text = match result.Types.response.Types.text with
       | Some t -> t
