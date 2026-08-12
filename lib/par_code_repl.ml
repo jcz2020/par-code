@@ -214,10 +214,16 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
    Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ ->
      let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in
      Par_code_ui.render_notice ui "\nBye!";
-     exit 0));
-  (* linenoise handles prompt display + UTF-8/wide-char-aware input editing.
-     None = EOF (Ctrl+D) or Ctrl+C (linenoise default catch_break=false).
-     History persists across sessions at ~/.par/history. *)
+      exit 0));
+   let exit_normally () =
+     let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in
+     maybe_extract ui rt !conv;
+     Par_code_ui.render_notice ui "\nBye!";
+     exit 0
+   in
+   (* linenoise handles prompt display + UTF-8/wide-char-aware input editing.
+      None = EOF (Ctrl+D) or Ctrl+C (linenoise default catch_break=false).
+      History persists across sessions at ~/.par/history. *)
   (try
      LNoise.history_load ~filename:(Filename.concat (Par_code_config.config_dir ()) "history")
      |> ignore
@@ -229,16 +235,9 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
     flush stdout;
     match LNoise.linenoise (Par_code_ui.prompt_string !Par_code_mode.current) with
     | exception Sys.Break ->
-      (* Ctrl+C during input — linenoise raises Sys.Break; clean shutdown
-         (same path as EOF below). The streaming-time SIGINT handler set
-         above covers Ctrl+C while the LLM is responding. *)
-      let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in
-      maybe_extract ui rt !conv;
-      Par_code_ui.render_notice ui "\nBye!"
+      exit_normally ()
     | None ->
-      let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in
-      maybe_extract ui rt !conv;
-      Par_code_ui.render_notice ui "\nBye!"
+      exit_normally ()
     | Some line ->
       let trimmed = String.trim line in
       if trimmed = "" then loop ()
@@ -286,9 +285,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
              | _ -> Par_code_ui.render_warning ui "[checkpoints unavailable]");
             loop ()
          | "/quit" | "/exit" ->
-             let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in
-             maybe_extract ui rt !conv;
-              Par_code_ui.render_notice ui "Bye!"; exit 0
+             exit_normally ()
           | "/cost" ->
             let metrics = Runtime.metrics_snapshot rt in
             let context_tokens = match !conv with

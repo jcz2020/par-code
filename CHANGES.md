@@ -1,5 +1,38 @@
 # CHANGES
 
+## v0.7.1 — Planner budget + REPL exit-path hotfix
+
+### Fixed — Planner exhausted its iteration budget before producing a plan
+
+- The planner agent's `max_iterations` was capped at `min cfg.max_iterations 8`
+  (= 8 with default config). The prescribed 5-phase workflow needs 7 tool calls
+  + a final response = 8 iterations, leaving zero slack. Any LLM "thinking"
+  iteration burned the budget, so the planner hit the cap mid-investigation and
+  the REPL fell through to the "Plan auto-saved to ... (planner reached step
+  limit)" fallback — saving an empty/partial plan instead of a real one.
+- **Fix (R3 "一次做对")**:
+  - Added a dedicated `planner_max_iterations` config field (default **15**,
+    configurable via `par config set planner_max_iterations N` and the wizard).
+    The planner no longer piggybacks on the main agent's `max_iterations`.
+  - Switched the planner's `early_stopping_method` from the default `Force`
+    (returns `Error`) to `Generate`. If the planner does run out of iterations
+    mid-investigation, the engine now makes one final "best answer" LLM call
+    with the full investigation context, so the user gets a synthesized partial
+    plan instead of nothing.
+
+### Fixed — REPL exit ran memory extraction twice
+
+- Three of the four exit paths (`/exit`, Ctrl+D, Ctrl+C at prompt) had
+  inconsistent code: only `/exit` called `exit 0`. The Ctrl+D (`None`) and
+  Ctrl+C (`Sys.Break`) arms returned unit from `loop ()`, leaving the process
+  in an ambiguous state that could re-prompt and trigger a second extraction.
+- **Fix**: extracted a shared `exit_normally ()` helper that does
+  `save_conversation → maybe_extract → "Bye!" → exit 0`, and routed all three
+  normal-exit paths through it. The streaming-time SIGINT handler stays
+  separate (intentionally skips extraction for a fast abort while the LLM is
+  mid-response).
+- Added regression integration tests for Ctrl+D and Ctrl+C at prompt.
+
 ## v0.7.0 — Goal-driven autonomy
 
 > **Status**: Shipped. Goal-driven autonomy with judge-supervised mode;

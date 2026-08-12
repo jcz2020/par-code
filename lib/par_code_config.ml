@@ -19,6 +19,7 @@ type config = {
   temperature : float;
   system_prompt : string;
   max_iterations : int;
+  planner_max_iterations : int;
   max_tokens : int option;
   top_p : float option;
   parallel_tool_execution : bool;
@@ -112,6 +113,7 @@ let default = {
   temperature = 0.7;
   system_prompt = default_system_prompt;
   max_iterations = 50;
+  planner_max_iterations = 15;
   max_tokens = None;
   top_p = None;
   parallel_tool_execution = true;
@@ -158,6 +160,7 @@ let to_json (cfg : config) : Yojson.Safe.t =
     ("temperature", `Float cfg.temperature);
     ("system_prompt", `String cfg.system_prompt);
     ("max_iterations", `Int cfg.max_iterations);
+    ("planner_max_iterations", `Int cfg.planner_max_iterations);
     ("max_tokens", opt_int cfg.max_tokens);
     ("top_p", opt_float cfg.top_p);
     ("parallel_tool_execution", `Bool cfg.parallel_tool_execution);
@@ -208,6 +211,7 @@ let of_json (json : Yojson.Safe.t) : (config, string) result =
         (let s = get_s "system_prompt" in
          if s = "" then default.system_prompt else s);
       max_iterations = get_i "max_iterations" default.max_iterations;
+      planner_max_iterations = get_i "planner_max_iterations" default.planner_max_iterations;
       max_tokens = get_oi "max_tokens";
       top_p = get_of "top_p";
       parallel_tool_execution = get_b "parallel_tool_execution" default.parallel_tool_execution;
@@ -288,6 +292,7 @@ let merge
     ?(provider = None) ?(api_key = None) ?(api_base = None)
     ?(model = None) ?(persistence = None) ?(db_uri = None)
     ?(temperature = None) ?(system_prompt = None) ?(max_iterations = None)
+    ?(planner_max_iterations = None)
     ?(max_tokens = None) ?(top_p = None) ?(parallel_tool_execution = None)
     ?(event_retention_days = None) ?(auto_extract = None)
     ?(embedding_base_url = None) ?(embedding_model = None)
@@ -305,6 +310,7 @@ let merge
     temperature = Option.value temperature ~default:cfg.temperature;
     system_prompt = Option.value system_prompt ~default:cfg.system_prompt;
     max_iterations = Option.value max_iterations ~default:cfg.max_iterations;
+    planner_max_iterations = Option.value planner_max_iterations ~default:cfg.planner_max_iterations;
     max_tokens = (match max_tokens with Some _ as v -> v | None -> cfg.max_tokens);
     top_p = (match top_p with Some _ as v -> v | None -> cfg.top_p);
     parallel_tool_execution = Option.value parallel_tool_execution ~default:cfg.parallel_tool_execution;
@@ -406,6 +412,15 @@ let update_field ~field ~value =
          exit 1
        | None ->
          Printf.eprintf "Invalid value for max_iterations: expected int, got '%s'\n" value;
+          exit 1)
+    | "planner_max_iterations" ->
+      (match int_of_string_opt (String.trim value) with
+       | Some n when n > 0 -> { cfg with planner_max_iterations = n }
+       | Some _ ->
+         Printf.eprintf "Invalid value for planner_max_iterations: must be > 0, got '%s'\n" value;
+         exit 1
+       | None ->
+         Printf.eprintf "Invalid value for planner_max_iterations: expected int, got '%s'\n" value;
          exit 1)
     | "embedding_dimension" ->
       (match int_of_string_opt (String.trim value) with
@@ -512,7 +527,8 @@ let update_field ~field ~value =
           "judge_api_base"; "judge_api_key";
           "judge_enabled"; "judge_model"; "judge_provider";
           "max_iterations"; "max_tokens"; "model";
-          "parallel_tool_execution"; "persistence"; "provider";
+          "parallel_tool_execution"; "persistence"; "planner_max_iterations";
+          "provider";
           "system_prompt"; "temperature"; "top_p" ];
       exit 1
   in
@@ -532,6 +548,7 @@ let show ?(ui=Par_code_ui.create_backend ()) (cfg : config) =
     line "db_uri:" (match cfg.db_uri with Some s -> s | None -> "<default>");
     line "temperature:" (Printf.sprintf "%.2f" cfg.temperature);
     line "max_iterations:" (string_of_int cfg.max_iterations);
+    line "planner_max_iterations:" (string_of_int cfg.planner_max_iterations);
     line "max_tokens:" (match cfg.max_tokens with Some n -> string_of_int n | None -> "<unlimited>");
     line "top_p:" (match cfg.top_p with Some f -> Printf.sprintf "%.4f" f | None -> "<default>");
     line "parallel_tool_execution:" (string_of_bool cfg.parallel_tool_execution);
@@ -619,6 +636,12 @@ let run_wizard ?(ui=Par_code_ui.create_backend ()) () =
   in
   let max_iter_str = prompt_line ui "Max ReAct iterations" max_iter_default in
   let max_iterations = match int_of_string_opt max_iter_str with Some n when n > 0 -> n | _ -> 50 in
+
+  let planner_max_iter_default =
+    match existing with Some c -> Some (string_of_int c.planner_max_iterations) | None -> Some "15"
+  in
+  let planner_max_iter_str = prompt_line ui "Planner max iterations" planner_max_iter_default in
+  let planner_max_iterations = match int_of_string_opt planner_max_iter_str with Some n when n > 0 -> n | _ -> 15 in
 
   render_line ui (text "\n--- Advanced options ---");
 
@@ -715,6 +738,7 @@ let run_wizard ?(ui=Par_code_ui.create_backend ()) () =
     provider; api_key; api_base; model;
     persistence = "sqlite"; db_uri = None;
     temperature; system_prompt = default_system_prompt; max_iterations;
+    planner_max_iterations;
     max_tokens; top_p;
     parallel_tool_execution = true;
     event_retention_days = 7.0;

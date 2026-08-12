@@ -1,5 +1,132 @@
 # Decisions
 
+## [2026-08-12] v0.7.1: Dedicated `planner_max_iterations` config + `Generate` early-stop
+
+**Tag**: Architecture / Config
+
+**变更前**: Planner agent's `max_iterations` was computed as
+`min cfg.max_iterations 8` at registration (`lib/par_code_setup.ml:441`).
+The planner's system prompt prescribes a 5-phase workflow that needs 7 tool
+calls (5 investigation + `write_plan_file` + `plan_submit`) + 1 closing LLM
+response = 8 iterations total. Budget exactly equal to demand left zero slack,
+so any LLM "thinking" iteration, parallel-tool-call batching, retry, or
+off-script behavior burned the cap mid-investigation. The engine's default
+`early_stopping_method = Force` then returned `Error (Internal "Max iterations
+exceeded")`, and the REPL's auto-save fallback printed
+`"Plan auto-saved to ... (planner reached step limit)."` — saving whatever
+partial text the planner had emitted (often just the preamble "let me
+investigate"), not a real plan.
+
+**变更后**:
+1. Added dedicated `planner_max_iterations : int` config field (default **15**,
+   ~2× the old cap). Follows the existing `max_iterations` lifecycle exactly:
+   type, default, `to_json`, `of_json`, `merge`, `update_field`, wizard,
+   `show`, valid-keys list. Configurable via `par config set planner_max_iterations N`
+   and the interactive wizard. No CLI flag (matches `goal_max_steps`,
+   `context_budget_tokens`, `checkpoint_interval` — all config-file only).
+2. Planner agent's `early_stopping_method` switched from default `Force` to
+   `Types.Generate`. When the iteration budget does exhaust, the PAR SDK
+   engine now appends `"Based on the work done so far, provide your best
+   final answer."` to the conversation and makes one more LLM call with the
+   full investigation context, returning `Ok (resp, conv')` instead of
+   `Error`. User gets a synthesized partial plan instead of nothing.
+
+**原因**:
+- Budget of 8 was a leftover from an early planner prototype; the prompt grew
+  to 7 mandatory tool calls but the cap was never re-checked. Tight coupling
+  to `cfg.max_iterations` (main agent budget) meant raising one raised both,
+  which is wrong — main agent and planner have different workflow shapes.
+- `Force` policy is appropriate for the main agent (errors should surface
+  loudly) but wrong for the planner, whose entire purpose is to produce a
+  plan. An error mid-investigation gives the user nothing; a synthesized
+  best-effort answer at least captures what the planner learned.
+- R3 "一次做对": rather than just bumping `8` to `15`, do the structural fix
+  (dedicated field + Generate policy) so the same class of bug doesn't recur
+  when the planner prompt evolves again.
+
+**影响范围**:
+- `lib/par_code_config.ml` — 9 touchpoints (type/default/json/wizard/set/show/keys)
+- `lib/par_code_setup.ml:441–442` — agent registration
+- `test/test_par_code_config.ml` — +1 unit test, +1 field in round-trip + unknown-field list
+- `par_code.opam` — no dependency change
+- **Public API**: adds one config field. Non-breaking — old configs without
+  the field load fine via `get_i "planner_max_iterations" default.planner_max_iterations`
+  fallback. No existing config behavior changes.
+- **Migration**: users with `max_iterations = N < 15` who relied on the
+  `min N 8` behavior will now see the planner get 15 (not 8). This is the
+  intended fix; no migration action needed.
+
+**回退方式**:
+- Field removal: revert `par_code_config.ml` and `par_code_setup.ml` changes;
+  the field is additive and unused elsewhere.
+- Behavioral revert: change `par_code_setup.ml:442` back to
+  `~early_stopping_method:Types.Force` (or remove the line entirely — `Force`
+  is the default).
+- Cap revert: change `par_code_setup.ml:441` back to
+  `~max_iterations:(min cfg.Par_code_config.max_iterations 8)`.
+- All three are independent and individually reversible.
+
+**已知限制**:
+- `Generate` policy's effectiveness depends on the LLM's ability to synthesize
+  from the investigation trail. If the planner spent most iterations on tool
+  calls and never produced substantial assistant text, the synthesized answer
+  may be thin. Not manually verified end-to-end in this release (audit env
+  lacked a working LLM provider); covered by type system + PAR SDK contract
+  test (`test_engine_assistant_message.ml` test 9).
+- `planner_max_iterations` has no CLI flag (`--planner-max-iterations`). This
+  matches the convention for "internal" config fields (`goal_max_steps`,
+  `context_budget_tokens`, `checkpoint_interval`). Add later if users ask.
+
+## [2026-08-12] v0.7.1: Unified REPL exit path (`exit_normally`)
+
+**Tag**: Bugfix / Architecture
+
+**变更前**: Four exit paths in `lib/par_code_repl.ml` had inconsistent
+post-conditions. Only `/exit`-`/quit` and the streaming-time SIGINT handler
+called `exit 0`. The Ctrl+D (`None`) and Ctrl+C-at-prompt (`Sys.Break`)
+arms returned unit from `loop ()` without terminating the process, leaving
+the OCaml runtime in an ambiguous state that could re-prompt the user and
+trigger a second memory-extraction pass. User-visible symptom: type Ctrl+D
+at the prompt → `[extracting memories...]` → `Bye!` → fresh prompt →
+`[extracting memories...]` again → user hits Ctrl+C → second `Bye!`.
+
+**变更后**: Extracted a shared `exit_normally ()` helper inside `run` that
+performs `save_conversation → maybe_extract → render_notice "\nBye!" → exit 0`.
+Routed three of the four exit paths through it (`/exit`, `/quit`, Ctrl+D,
+Ctrl+C at prompt). The streaming-time SIGINT handler stays separate — it
+intentionally skips `maybe_extract` for a fast abort while the LLM is
+mid-response.
+
+**原因**:
+- Three code paths doing nearly the same thing with subtly different
+  post-conditions is the textbook setup for the bug that shipped. Centralize
+  or repeat the mistake.
+- Streaming-SIGINT stays separate because its requirements differ: when the
+  user hits Ctrl+C mid-LLM-response, they want immediate termination, not a
+  30-second extraction pass. Conflating the two would either slow the fast
+  path or lose extraction on the normal path.
+
+**影响范围**:
+- `lib/par_code_repl.ml:218–223` (new `exit_normally` helper) + lines 237,
+  240, 288 (three call sites). Streaming SIGINT handler at lines 214–217
+  unchanged.
+- `test/integration/repl/basics_test.sh` — +2 regression tests
+  (`test_ctrl_d_exits_cleanly`, `test_ctrl_c_at_prompt_exits_cleanly`) using
+  tmux to verify process death within 1s.
+
+**回退方式**:
+- Revert `lib/par_code_repl.ml` to pre-v0.7.1 state. The `exit_normally`
+  helper is purely a refactoring extract; removing it just inlines the code
+  back.
+
+**已知限制**:
+- Exact reproduction of the original double-extraction bug was not captured
+  in tmux before the fix (the bug was intermittent and depended on signal
+  delivery timing). The new regression tests verify the FIXED behavior
+  (process exits within 1s of Ctrl+D / Ctrl+C); they don't retroactively
+  prove the old bug existed. The user's transcript from the original report
+  is the primary evidence.
+
 ## [2026-08-10] PAR SDK Feedback: parallel tool-call error loses tool_call_id
 
 **Tag**: PAR SDK Feedback

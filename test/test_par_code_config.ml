@@ -45,6 +45,7 @@ let test_json_roundtrip () =
     checkpoint_enabled = false;
     checkpoint_interval = 5;
     context_budget_tokens = 50000;
+    planner_max_iterations = 30;
   } in
   let json = to_json cfg in
   match of_json json with
@@ -61,7 +62,8 @@ let test_json_roundtrip () =
     Alcotest.(check bool) "auto_extract roundtrip" false loaded.auto_extract;
     Alcotest.(check bool) "checkpoint_enabled roundtrip" false loaded.checkpoint_enabled;
     Alcotest.(check int) "checkpoint_interval roundtrip" 5 loaded.checkpoint_interval;
-    Alcotest.(check int) "context_budget_tokens roundtrip" 50000 loaded.context_budget_tokens
+    Alcotest.(check int) "context_budget_tokens roundtrip" 50000 loaded.context_budget_tokens;
+    Alcotest.(check int) "planner_max_iterations roundtrip" 30 loaded.planner_max_iterations
 
 let test_json_optional_fields_missing () =
   let json_str = {|{"provider":"anthropic","api_key":"sk-xyz","model":"claude-3","persistence":"sqlite","temperature":0.8,"system_prompt":"hello","max_iterations":30,"parallel_tool_execution":true,"event_retention_days":7.0,"auto_extract":true,"embedding_dimension":1536,"checkpoint_enabled":true,"checkpoint_interval":10,"context_budget_tokens":100000}|} in
@@ -228,6 +230,11 @@ let test_update_int_max_iterations () =
   setup_test_home (fun _ ->
     let r = update_field ~field:"max_iterations" ~value:"100" in
     Alcotest.(check int) "max_iterations set" 100 r.max_iterations)
+
+let test_update_int_planner_max_iterations () =
+  setup_test_home (fun _ ->
+    let r = update_field ~field:"planner_max_iterations" ~value:"20" in
+    Alcotest.(check int) "planner_max_iterations set" 20 r.planner_max_iterations)
 
 let test_update_int_checkpoint_interval () =
   setup_test_home (fun _ ->
@@ -459,7 +466,8 @@ let test_unknown_field_lists_all () =
         "embedding_base_url"; "embedding_dimension"; "embedding_model";
         "event_retention_days";
         "max_iterations"; "max_tokens"; "model";
-        "parallel_tool_execution"; "persistence"; "provider";
+        "parallel_tool_execution"; "persistence"; "planner_max_iterations";
+        "provider";
         "system_prompt"; "temperature"; "top_p";
       ] in
       List.iter (fun field ->
@@ -511,6 +519,7 @@ let () =
         Alcotest.test_case "optional_float_set"         `Quick test_update_optional_float_set;
         Alcotest.test_case "optional_float_clear"       `Quick test_update_optional_float_clear;
         Alcotest.test_case "int_max_iterations"         `Quick test_update_int_max_iterations;
+        Alcotest.test_case "int_planner_max_iterations" `Quick test_update_int_planner_max_iterations;
         Alcotest.test_case "int_checkpoint_interval"    `Quick test_update_int_checkpoint_interval;
         Alcotest.test_case "int_context_budget"         `Quick test_update_int_context_budget;
         Alcotest.test_case "optional_int_set"           `Quick test_update_optional_int_set;

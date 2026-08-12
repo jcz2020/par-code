@@ -10,9 +10,13 @@ type-safe bash, skills, streaming, persistence — to both ship a useful agent a
 prove out the PAR SDK in anger. (MCP client and Workflow engine are PAR SDK
 primitives par-code does not yet wire — see roadmap items v0.10.0 / v0.11.0.)
 
-**Status:** `v0.7.0` — Goal-driven autonomy: `/goal` command + independent judge
-model + doom-loop detection. Judge-supervised mode (evaluates after each turn;
-full autonomous chaining in v0.7.1). PAR SDK 0.9.1. Pre-built binaries with a
+**Status:** `v0.7.1` — Planner iteration budget fix + REPL exit-path fix.
+Dedicated `planner_max_iterations` config field (default 15) replaces the
+hardcoded cap of 8 that was starving the planner mid-investigation; planner
+now uses `early_stopping_method = Generate` so an exhausted budget still
+yields a synthesized "best answer" instead of a hard error. Ctrl+D and Ctrl+C
+at the REPL prompt now go through a unified `exit_normally ()` helper — no
+more double memory-extraction on exit. PAR SDK 0.9.1. Pre-built binaries with a
 one-line installer (`curl | bash`) for Linux x86_64/arm64 + macOS arm64, plus
 `par upgrade` self-update. No OCaml or opam needed for end users.
 
@@ -348,6 +352,7 @@ Version numbers stay minimal (no 1.0 until core parity is earned).
 | **v0.6.1** ✅ | Install/upgrade fixes — stale-binary permission guard in install.sh + `par upgrade` source-fallback parity (no-prebuilt platforms now self-update via source recompile) + `Filename.temp_file` hygiene. *"Intel Mac upgrade no longer dead-ends."* |
 | **v0.6.2** ✅ | UTF-8 REPL input (linenoise) — CJK backspace no longer garbles (raw-mode wcwidth-aware editing) + Ctrl+C-crash fixes (REPL + config wizard) + slash-command stdout-flush fix. New bundled-C `linenoise` dep. *"Type and edit Chinese cleanly."* |
 | **v0.7.0** ✅ | Goal-driven autonomy — `/goal` command + independent judge model + doom-loop detection + `goal_done` agent tool + `--goal` CLI flag. Judge-supervised mode (evaluates after each turn; full autonomous chaining in v0.7.1). PAR SDK 0.8.6. *"It won't declare done until the goal is truly met."* |
+| **v0.7.1** ✅ | Planner budget + REPL exit-path hotfix — dedicated `planner_max_iterations` config field (default 15, was hardcoded 8) + `early_stopping_method = Generate` on planner (synthesizes a best answer instead of error on budget exhaustion) + unified `exit_normally ()` across `/exit`/Ctrl+D/Ctrl+C (kills the double-extraction-on-exit bug). *"Planner stops running out of steam mid-thought; exit actually exits."* |
 | **v0.8.0** | Best-of-N reasoning — max-mode (parallel candidates + judge selection). *"It tries several approaches and picks the best."* |
 | **v0.9.0** | Self-improvement — `/dream` + `/distill` + custom slash commands. *"It turns my repeated workflows into reusable skills."* |
 | **v0.10.0** | Compose mode — spec-driven orchestration with plan/execute/review/tdd/debug/verify/merge skills. *"Give a spec, it designs, codes, reviews, and tests end-to-end."* |

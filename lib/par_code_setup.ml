@@ -438,7 +438,8 @@ This is the LAST thing you do. The user will be asked to confirm.
        ~model:model_cfg
        ~tools:planner_descriptors
        ~middleware:[think_tag_strip_middleware]
-       ~max_iterations:(min cfg.Par_code_config.max_iterations 8)
+       ~max_iterations:cfg.Par_code_config.planner_max_iterations
+       ~early_stopping_method:Types.Generate
        ()
       with
     | Error e ->

@@ -245,9 +245,21 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
 - **v0.7.0 ✅ shipped** — Goal-driven autonomy: `/goal`
   command, independent judge model, doom-loop detection, `goal_done` agent
   tool, `--goal` CLI flag. Judge-supervised mode (evaluates after each turn;
-  full autonomous chaining deferred to v0.7.1). PAR SDK bumped 0.8.3 → 0.8.6.
+  full autonomous chaining deferred). PAR SDK bumped 0.8.3 → 0.8.6.
   300 tests passing. 4 new modules, 29 new unit tests.
-- **v0.7.1 (next)** — Full autonomous goal chaining (invokes without user
+- **v0.7.1 ✅ shipped** — Hotfix. Two regressions from v0.7.0 plan-mode
+  walkthrough: (a) planner `max_iterations` was capped at `min cfg.max_iterations 8`
+  — exactly equal to the prescribed 7-tool workflow + 1 closing response, so
+  any LLM "thinking" iteration burned the budget and the planner fell through
+  to the empty-plan auto-save fallback; fixed by adding a dedicated
+  `planner_max_iterations` config field (default 15) and switching
+  `early_stopping_method` from `Force` to `Generate` so an exhausted budget
+  still yields a synthesized best answer. (b) Three of four REPL exit paths
+  (`/exit`, Ctrl+D, Ctrl+C at prompt) had inconsistent code — only `/exit`
+  called `exit 0`, causing the loop to re-enter and memory extraction to run
+  twice on exit; fixed by routing all three through a shared `exit_normally ()`
+  helper. +3 unit tests, +2 integration tests.
+- **v0.7.2 (next)** — Full autonomous goal chaining (invokes without user
   input), doom-loop pattern detection (A-B-A-B), PAR SDK feedback filings
   (doom-loop primitive, nested invoke depth-limiting).
 - v0.8.0+ — best-of-N reasoning, self-improvement, compose mode, ecosystem,

@@ -62,9 +62,37 @@ test_quit_command() {
   SESSION_ID=""
 }
 
-test_case "startup banner"            test_startup_banner
-test_case "/help lists commands"      test_help_command
-test_case "/session shows info"       test_session_command
-test_case "/cost shows token usage"   test_cost_command
-test_case "/quit exits cleanly"       test_quit_command
+# Regression: v0.7.1 — Ctrl+D (EOF) at prompt must terminate the process.
+test_ctrl_d_exits_cleanly() {
+  setup_home; trap teardown_home EXIT
+  tmux_spawn
+  tmux_wait_for 'par>' 8
+  tmux send-keys -t "$SESSION_ID" C-d
+  sleep 1
+  if tmux has-session -t "$SESSION_ID" 2>/dev/null; then
+    fail "tmux session still alive 1s after Ctrl+D (process did not exit)"
+  fi
+  SESSION_ID=""
+}
+
+# Regression: v0.7.1 — Ctrl+C at prompt must terminate the process.
+test_ctrl_c_at_prompt_exits_cleanly() {
+  setup_home; trap teardown_home EXIT
+  tmux_spawn
+  tmux_wait_for 'par>' 8
+  tmux send-keys -t "$SESSION_ID" C-c
+  sleep 1
+  if tmux has-session -t "$SESSION_ID" 2>/dev/null; then
+    fail "tmux session still alive 1s after Ctrl+C at prompt (process did not exit)"
+  fi
+  SESSION_ID=""
+}
+
+test_case "startup banner"                   test_startup_banner
+test_case "/help lists commands"             test_help_command
+test_case "/session shows info"              test_session_command
+test_case "/cost shows token usage"          test_cost_command
+test_case "/quit exits cleanly"              test_quit_command
+test_case "Ctrl+D exits cleanly"             test_ctrl_d_exits_cleanly
+test_case "Ctrl+C at prompt exits cleanly"   test_ctrl_c_at_prompt_exits_cleanly
 run_tests "$@"
