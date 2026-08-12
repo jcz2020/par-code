@@ -242,7 +242,7 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
   commands were swallowed). Three review rounds; two post-migration
   regressions (config-wizard Ctrl+C crash, slash-command output) caught and
   fixed before release.
-- **v0.7.0 ✅ implemented (unreleased)** — Goal-driven autonomy: `/goal`
+- **v0.7.0 ✅ shipped** — Goal-driven autonomy: `/goal`
   command, independent judge model, doom-loop detection, `goal_done` agent
   tool, `--goal` CLI flag. Judge-supervised mode (evaluates after each turn;
   full autonomous chaining deferred to v0.7.1). PAR SDK bumped 0.8.3 → 0.8.6.

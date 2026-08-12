@@ -10,10 +10,11 @@ type-safe bash, skills, streaming, persistence — to both ship a useful agent a
 prove out the PAR SDK in anger. (MCP client and Workflow engine are PAR SDK
 primitives par-code does not yet wire — see roadmap items v0.10.0 / v0.11.0.)
 
-**Status:** `v0.6.2` — UTF-8 REPL input (linenoise): CJK backspace no longer
-garbles, plus Ctrl+C-crash fixes. Pre-built binaries with a one-line installer
-(`curl | bash`) for Linux x86_64/arm64 + macOS arm64, plus `par upgrade`
-self-update. No OCaml or opam needed for end users.
+**Status:** `v0.7.0` — Goal-driven autonomy: `/goal` command + independent judge
+model + doom-loop detection. Judge-supervised mode (evaluates after each turn;
+full autonomous chaining in v0.7.1). PAR SDK 0.9.1. Pre-built binaries with a
+one-line installer (`curl | bash`) for Linux x86_64/arm64 + macOS arm64, plus
+`par upgrade` self-update. No OCaml or opam needed for end users.
 
 ---
 

@@ -2,7 +2,7 @@
 
 ## v0.7.0 — Goal-driven autonomy
 
-> **Status**: In development. Core feature implemented (judge-supervised mode);
+> **Status**: Shipped. Goal-driven autonomy with judge-supervised mode;
 > full autonomous chaining deferred to v0.7.1.
 
 ### Added — Goal-driven autonomy
