@@ -99,7 +99,7 @@ let cmd_config_set field_opt value_opt =
     let _cfg = Par_code_config.update_field ~field ~value in
     Par_code_ui.render_notice ui (Printf.sprintf "Set %s = %s" field value)
   | None, None ->
-    Par_code_config.run_wizard ()
+    Par_code_config_wizard.run_wizard ()
   | Some _, None ->
     Par_code_ui.render_error ui "Usage: par config set <field> <value>";
     exit 1

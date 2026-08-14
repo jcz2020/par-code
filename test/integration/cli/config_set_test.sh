@@ -26,9 +26,10 @@ declare -a FIELDS=(
   "checkpoint_enabled true checkpoint_enabled.*true"
   "default_mode plan plan"
   "bash_approval auto_project auto_project"
+  "goal_auto_chain false goal_auto_chain.*false"
 )
 
-test_all_21_fields_set_and_show() {
+test_all_22_fields_set_and_show() {
   setup_home; trap teardown_home EXIT
   for entry in "${FIELDS[@]}"; do
     local field value pattern
@@ -164,6 +165,12 @@ test_set_bash_approval() {
   par_cli config show 2>&1 | assert_contains 'auto_project'
 }
 
+test_set_goal_auto_chain() {
+  setup_home; trap teardown_home EXIT
+  par_cli config set goal_auto_chain false 2>&1
+  par_cli config show 2>&1 | assert_contains 'goal_auto_chain.*false'
+}
+
 test_bash_approval_invalid_rejected() {
   setup_home; trap teardown_home EXIT
   local output rc=0
@@ -238,7 +245,7 @@ test_context_budget_tokens_500_rejected() {
   echo "$output" | assert_contains 'must be >= 1000'
 }
 
-test_case "all 21 fields set+show round-trip"  test_all_21_fields_set_and_show
+test_case "all 22 fields set+show round-trip"  test_all_22_fields_set_and_show
 
 test_case "set provider"                       test_set_provider
 test_case "set api_key"                        test_set_api_key
@@ -261,6 +268,7 @@ test_case "set auto_extract"                   test_set_auto_extract
 test_case "set checkpoint_enabled"             test_set_checkpoint_enabled
 test_case "set default_mode"                   test_set_default_mode
 test_case "set bash_approval"                  test_set_bash_approval
+test_case "set goal_auto_chain"                test_set_goal_auto_chain
 test_case "bash_approval invalid rejected"     test_bash_approval_invalid_rejected
 
 test_case "clear top_p with none"              test_clear_top_p_with_none

@@ -46,6 +46,7 @@ let test_json_roundtrip () =
     checkpoint_interval = 5;
     context_budget_tokens = 50000;
     planner_max_iterations = 30;
+    goal_auto_chain = false;
   } in
   let json = to_json cfg in
   match of_json json with
@@ -63,7 +64,8 @@ let test_json_roundtrip () =
     Alcotest.(check bool) "checkpoint_enabled roundtrip" false loaded.checkpoint_enabled;
     Alcotest.(check int) "checkpoint_interval roundtrip" 5 loaded.checkpoint_interval;
     Alcotest.(check int) "context_budget_tokens roundtrip" 50000 loaded.context_budget_tokens;
-    Alcotest.(check int) "planner_max_iterations roundtrip" 30 loaded.planner_max_iterations
+    Alcotest.(check int) "planner_max_iterations roundtrip" 30 loaded.planner_max_iterations;
+    Alcotest.(check bool) "goal_auto_chain roundtrip" false loaded.goal_auto_chain
 
 let test_json_optional_fields_missing () =
   let json_str = {|{"provider":"anthropic","api_key":"sk-xyz","model":"claude-3","persistence":"sqlite","temperature":0.8,"system_prompt":"hello","max_iterations":30,"parallel_tool_execution":true,"event_retention_days":7.0,"auto_extract":true,"embedding_dimension":1536,"checkpoint_enabled":true,"checkpoint_interval":10,"context_budget_tokens":100000}|} in
@@ -481,6 +483,47 @@ let test_system_prompt_exists () =
   Alcotest.(check bool) "system_prompt field exists" true
     (String.length default.system_prompt > 0)
 
+(* ── goal_auto_chain ──────────────────────────────────────────────────── *)
+
+let test_goal_auto_chain_default () =
+  Alcotest.(check bool) "default goal_auto_chain is true" true default.goal_auto_chain
+
+let test_goal_auto_chain_roundtrip_true () =
+  let cfg = { default with goal_auto_chain = true } in
+  let json = to_json cfg in
+  match of_json json with
+  | Error msg -> Alcotest.fail (Printf.sprintf "of_json failed: %s" msg)
+  | Ok loaded ->
+    Alcotest.(check bool) "goal_auto_chain roundtrip true" true loaded.goal_auto_chain
+
+let test_goal_auto_chain_roundtrip_false () =
+  let cfg = { default with goal_auto_chain = false } in
+  let json = to_json cfg in
+  match of_json json with
+  | Error msg -> Alcotest.fail (Printf.sprintf "of_json failed: %s" msg)
+  | Ok loaded ->
+    Alcotest.(check bool) "goal_auto_chain roundtrip false" false loaded.goal_auto_chain
+
+let test_goal_auto_chain_absent_defaults_true () =
+  let json_str = {|{"provider":"openai","api_key":"","model":"gpt-4o","persistence":"sqlite","temperature":0.7,"system_prompt":"hello","max_iterations":50,"parallel_tool_execution":true,"event_retention_days":7.0,"auto_extract":true,"embedding_dimension":1536,"checkpoint_enabled":true,"checkpoint_interval":10,"context_budget_tokens":100000}|} in
+  let json = Yojson.Safe.from_string json_str in
+  match of_json json with
+  | Error msg -> Alcotest.fail (Printf.sprintf "of_json failed: %s" msg)
+  | Ok loaded ->
+    Alcotest.(check bool) "absent goal_auto_chain defaults to true" true loaded.goal_auto_chain
+
+let test_update_goal_auto_chain () =
+  setup_test_home (fun _ ->
+    let r = update_field ~field:"goal_auto_chain" ~value:"false" in
+    Alcotest.(check bool) "set false" false r.goal_auto_chain;
+    let r2 = update_field ~field:"goal_auto_chain" ~value:"true" in
+    Alcotest.(check bool) "set true" true r2.goal_auto_chain)
+
+let test_show_goal_auto_chain () =
+  let cfg = { default with api_key = "x"; goal_auto_chain = true } in
+  let output = capture_stdout (fun () -> show cfg) in
+  Alcotest.(check bool) "shows goal_auto_chain" true (string_contains output "goal_auto_chain:")
+
 (* ── Test runner ──────────────────────────────────────────────────────── *)
 
 let () =
@@ -546,5 +589,13 @@ let () =
         Alcotest.test_case "invalid_default_mode"       `Quick test_update_invalid_default_mode;
         Alcotest.test_case "unknown_field_lists_all"    `Quick test_unknown_field_lists_all;
         Alcotest.test_case "system_prompt_exists"       `Quick test_system_prompt_exists;
+      ];
+      "goal_auto_chain", [
+        Alcotest.test_case "default_is_true"            `Quick test_goal_auto_chain_default;
+        Alcotest.test_case "roundtrip_true"             `Quick test_goal_auto_chain_roundtrip_true;
+        Alcotest.test_case "roundtrip_false"            `Quick test_goal_auto_chain_roundtrip_false;
+        Alcotest.test_case "absent_defaults_true"       `Quick test_goal_auto_chain_absent_defaults_true;
+        Alcotest.test_case "update_field"               `Quick test_update_goal_auto_chain;
+        Alcotest.test_case "show_output"                `Quick test_show_goal_auto_chain;
       ];
     ]

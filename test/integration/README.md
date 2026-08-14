@@ -15,7 +15,7 @@ bash test/integration/run.sh
 | File | Surface | Bug caught |
 |------|---------|------------|
 | `cli/version_config_test.sh` | `par --version`, `par config show` | — |
-| `cli/config_set_test.sh` | `par config set` all 20 fields | P1 #5: "Unknown config field" |
+| `cli/config_set_test.sh` | `par config set` all 22 fields | P1 #5: "Unknown config field" |
 | `cli/memory_test.sh` | `par memory` CRUD + search + prune | v0.5.6 prune --dry-run regression |
 | `cli/plan_test.sh` | `par plan` list/show/prune | — |
 | `cli/session_test.sh` | `par session` list/show/fork | P0 #2: empty session list |
