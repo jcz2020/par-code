@@ -1,5 +1,38 @@
 # Decisions
 
+## [2026-08-15] v0.7.2 范围：autonomous goal chaining 推迟一版，改为 goal 可用性收尾
+
+**Tag**: Roadmap / 范围级变更
+
+**变更前**: STRATEGY.md roadmap 排定 v0.7.2 = 全自主 goal chaining（judge
+验证通过后自动续 turn，无需用户输入）。
+
+**变更后**: v0.7.2 = goal/plan 可用性收尾（`docs/v0.7.2-ROADMAP.md`，
+W0–W7）；chaining 移至 v0.7.3，前置条件为 v0.7.2 验收全绿。
+
+**原因**: 两轮真实 LLM 实测证明 goal mode 在真实写任务上完全不可用：
+- v0.7.1 后代跑 QA（生产主力模型）：plan mode 落盘 117 字节客套话；
+  goal mode 静默放弃；doom-loop Abort 只打印不中止
+- 同模型双 agent 对照走查（同端点同模型、专用 fixture、双副本同任务）：
+  三个隐形等待点（bash 确认与 plan 闸门渲染后不 flush 永不可见，后者还会
+  吃掉用户下一句输入；推理模型思考期零输出）+ goal 漂移零防护（agent 修错
+  任务后自报完成，护栏全程沉默）。对照 agent 三局全胜且全部胜在 harness
+  层而非模型层
+在单轮跑不通、用户看不到等待点的地基上叠加自动续轮会放大 judge 误判与
+成本失控。机制根因均已锚定到 file:line（详见 ROADMAP §1.3）。
+
+**影响范围**: 排期推迟一版；v0.7.2 工作量（W0–W7，10 个原子 commit）与
+chaining 原估相当；产生 3 条 PAR SDK Feedback（write 工具错误文本出路
+指引、invoke 内取消 API、Workspace 路径包含判定 API 语义确认）。
+
+**回退方式**: v0.7.2 提前完成且 dogfood 良好 → v0.7.3 chaining 直接开工，
+无结构性锁定；本决策无代码耦合，纯排期变更。
+
+**已知限制**: `auto_project` 审批判定是 argv+正则近似而非语法解析级 AST
+判定（对齐目标 harness 用后者；引入解析器的成本留待 v0.13.0 完整规则引擎
+时评估）；轮内强制终止依赖 PAR SDK 反馈进度（当前降级为轮间拦截）；
+思考计时行与跨会话记忆召回的最终验证依赖人工 dogfood。
+
 ## [2026-08-12] v0.7.1: Dedicated `planner_max_iterations` config + `Generate` early-stop
 
 **Tag**: Architecture / Config
