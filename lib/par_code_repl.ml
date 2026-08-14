@@ -27,16 +27,48 @@ let make_stream_cb ui =
   in
   cb, streamed_text
 
-let make_tool_event_callback (ui : Par_code_ui.backend) ?(doom = None) () =
+let make_tool_event_callback (ui : Par_code_ui.backend) ?(doom = None)
+    ?(on_doom_action : Par_code_doom_loop.action -> unit = fun _ -> ()) () =
   let start_times : (string, float) Hashtbl.t = Hashtbl.create 8 in
+  let tool_args_buf : (string, string) Hashtbl.t = Hashtbl.create 8 in
   fun (evt : Types.event) ->
     (match evt, doom with
-     | Types.Tool_invoked { tool_name; _ }, Some d ->
-       let action = Par_code_doom_loop.record_tool_call d tool_name in
+     | Types.Bash_invoked { task_id; argv; _ }, Some _ ->
+       Hashtbl.replace tool_args_buf (Types.Task_id.to_string task_id)
+         (String.concat " " argv)
+     | Types.Tool_invoked { task_id; _ }, Some _ ->
+       Hashtbl.replace tool_args_buf (Types.Task_id.to_string task_id) ""
+     | Types.Tool_completed { task_id; tool_name; result_preview; _ }, Some d ->
+       let tid = Types.Task_id.to_string task_id in
+       let args_str = Hashtbl.find_opt tool_args_buf tid |> Option.value ~default:"" in
+       Hashtbl.remove tool_args_buf tid;
+       let action = Par_code_doom_loop.record d {
+         tool_name; args_json = `String args_str;
+         output = result_preview; failed = false
+       } in
        (match action with
-        | Nudge msg -> Par_code_ui.render_warning ui msg
-        | Force_judge msg -> Par_code_ui.render_warning ui msg
-        | Abort msg -> Par_code_ui.render_error ui msg
+        | Par_code_doom_loop.Nudge msg -> Par_code_ui.render_warning ui msg
+        | Force_judge msg -> on_doom_action (Force_judge msg); Par_code_ui.render_warning ui msg
+        | Abort msg ->
+          on_doom_action (Abort msg);
+          Par_code_ui.render_error ui
+            (Printf.sprintf "\xe2\x9c\x97 goal aborted (doom loop) \xe2\x80\x94 current turn will finish, no further turns: %s" msg)
+        | Continue -> ())
+     | Types.Tool_failed { task_id; tool_name; _ }, Some d ->
+       let tid = Types.Task_id.to_string task_id in
+       let args_str = Hashtbl.find_opt tool_args_buf tid |> Option.value ~default:"" in
+       Hashtbl.remove tool_args_buf tid;
+       let action = Par_code_doom_loop.record d {
+         tool_name; args_json = `String args_str;
+         output = None; failed = true
+       } in
+       (match action with
+        | Par_code_doom_loop.Nudge msg -> Par_code_ui.render_warning ui msg
+        | Force_judge msg -> on_doom_action (Force_judge msg); Par_code_ui.render_warning ui msg
+        | Abort msg ->
+          on_doom_action (Abort msg);
+          Par_code_ui.render_error ui
+            (Printf.sprintf "\xe2\x9c\x97 goal aborted (doom loop) \xe2\x80\x94 current turn will finish, no further turns: %s" msg)
         | Continue -> ())
      | _ -> ());
     match evt with
@@ -189,6 +221,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
   let goal_feedback : string option ref = ref None in
   let invoke_start_time = ref 0.0 in
   let hit_cap = ref false in
+  let no_progress_streak = ref 0 in
   let loaded_cfg = Par_code_config.load () in
   let ckpt_enabled = match loaded_cfg with Some c -> c.Par_code_config.checkpoint_enabled | None -> true in
   let ckpt_interval = match loaded_cfg with Some c -> c.Par_code_config.checkpoint_interval | None -> 10 in
@@ -239,8 +272,21 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
          | None -> ())
       with _ -> ())
    | None -> ());
-  let doom_detector = Par_code_doom_loop.create ~threshold:5 () in
- let on_tool_event = make_tool_event_callback ui ~doom:(Some doom_detector) () in
+  let doom_detector = Par_code_doom_loop.create
+    ?bash_retries:(Option.map (fun c -> c.Par_code_config.doom_bash_retries) loaded_cfg)
+    ?edit_matches:(Option.map (fun c -> c.Par_code_config.doom_edit_matches) loaded_cfg)
+    ?action_streak:(Option.map (fun c -> c.Par_code_config.doom_action_streak) loaded_cfg)
+    () in
+  let doom_force_judge = ref false in
+  let doom_abort_msg = ref None in
+  let doom_abort = ref false in
+ let on_tool_event = make_tool_event_callback ui ~doom:(Some doom_detector)
+     ~on_doom_action:(fun act ->
+       match act with
+       | Par_code_doom_loop.Abort msg ->
+         doom_abort := true; doom_abort_msg := Some msg
+       | Par_code_doom_loop.Force_judge _ -> doom_force_judge := true
+       | _ -> ()) () in
    Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ ->
      let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in
      Par_code_ui.render_notice ui "\nBye!";
@@ -463,6 +509,10 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                let mode_before_invoke = !Par_code_mode.current in
                invoke_start_time := Unix.gettimeofday ();
                hit_cap := false;
+               let tool_count_before = match !conv with
+                 | Some c -> List.length c.Types.messages
+                 | None -> 0
+               in
                let stream_cb, streamed_text = make_stream_cb ui in
               let invoke_result = Runtime.invoke rt
                 ~agent_id:(Par_code_mode.agent_id_for !Par_code_mode.current)
@@ -529,42 +579,205 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                      | None -> ())
                   | None -> ())
                 end);
+               let run_judge g =
+                 let verify_result =
+                   match goal_verify_cmd with
+                   | Some cmd ->
+                     let ic = Unix.open_process_in cmd in
+                     let buf = Buffer.create 256 in
+                     (try while true do
+                        Buffer.add_channel buf ic 256
+                      done with End_of_file -> ());
+                     let _ = Unix.close_process_in ic in
+                     Buffer.contents buf
+                   | None -> ""
+                 in
+                 (match Par_code_judge.evaluate_goal ~rt
+                    ~goal:g.Par_code_goal.objective ?conv:!conv ~verify_result () with
+                  | Ok v when v.goal_met ->
+                    Par_code_goal.mark_status Met;
+                    Par_code_goal.clear_goal ();
+                    Par_code_ui.render_success ui
+                      (Printf.sprintf "Goal verified as complete: %s" v.reasoning)
+                  | Ok v ->
+                    goal_feedback := Some v.reasoning;
+                    Par_code_ui.render_warning ui
+                      (Printf.sprintf "[judge: goal not yet met — %s]" v.reasoning)
+                  | Error msg ->
+                    Par_code_ui.render_warning ui
+                      (Printf.sprintf "[judge evaluation failed: %s]" msg))
+               in
+               if !doom_abort then begin
+                 Par_code_goal.mark_status Aborted;
+                 let reason = match !doom_abort_msg with
+                   | Some m -> m | None -> "doom loop abort triggered" in
+                 ignore (Par_code_doom_loop.write_incident
+                   ~signal:"doom_loop" ~reason
+                   ~normalized:"" ~original:"");
+                 doom_abort := false;
+                 doom_force_judge := false
+               end else if !doom_force_judge then begin
+                 (match !Par_code_goal.current with
+                  | Some g when g.Par_code_goal.status = Par_code_goal.Active -> run_judge g
+                  | _ -> ());
+                 doom_force_judge := false
+               end else
                (match !Par_code_goal.current with
                 | Some g when g.Par_code_goal.status = Active
                              && !Par_code_mode.current = Par_code_mode.Build ->
                   let step = Par_code_goal.advance_step () in
                   let triggered_by_done = !Par_code_goal.done_signal <> None in
                   Par_code_goal.clear_done_signal ();
+                  let tool_calls_this_turn =
+                    match !conv with
+                    | Some c ->
+                      let new_msgs =
+                        let rec drop l n =
+                          if n <= 0 then l
+                          else match l with [] -> [] | _ :: t -> drop t (n - 1)
+                        in
+                        drop c.Types.messages tool_count_before
+                      in
+                      List.fold_left (fun acc (m : Types.message) ->
+                        if m.Types.role = Types.Tool then acc + 1 else acc) 0 new_msgs
+                    | None -> 0
+                  in
+                  let last_assistant_text =
+                    match !conv with
+                    | Some c ->
+                      let rec walk = function
+                        | [] -> ""
+                        | (m : Types.message) :: rest ->
+                          if m.Types.role = Types.Assistant then begin
+                            let buf = Buffer.create 256 in
+                            List.iter (function
+                              | Types.Text_block { text; _ } ->
+                                if Buffer.length buf > 0 then Buffer.add_char buf '\n';
+                                Buffer.add_string buf text
+                              | _ -> ()) m.Types.content_blocks;
+                            let t = Buffer.contents buf in
+                            if t <> "" then t else walk rest
+                          end else walk rest
+                      in
+                      walk (List.rev c.Types.messages)
+                    | None -> ""
+                  in
+                  let assistant_text_len = String.length last_assistant_text in
+                  let is_no_progress = Par_code_progress.no_progress
+                    ~tool_calls:tool_calls_this_turn
+                    ~goal_done:triggered_by_done
+                    ~text_len:assistant_text_len
+                  in
                   if step >= g.Par_code_goal.max_steps then begin
                     Par_code_goal.mark_status Aborted;
                     Par_code_ui.render_warning ui "[goal aborted: max steps reached]"
-                  end else if triggered_by_done || step mod 3 = 0 then begin
-                    let verify_result =
-                      match goal_verify_cmd with
-                      | Some cmd ->
-                        let ic = Unix.open_process_in cmd in
-                        let buf = Buffer.create 256 in
-                        (try while true do
-                           Buffer.add_channel buf ic 256
-                         done with End_of_file -> ());
-                        let _ = Unix.close_process_in ic in
-                        Buffer.contents buf
-                      | None -> ""
+                  end else if is_no_progress then begin
+                    no_progress_streak := !no_progress_streak + 1;
+                    let reason =
+                      if !no_progress_streak >= 2 then "no_progress_x2"
+                      else "no_progress"
                     in
-                    (match Par_code_judge.evaluate_goal ~rt
-                       ~goal:g.Par_code_goal.objective ?conv:!conv ~verify_result () with
-                     | Ok v when v.goal_met ->
-                       Par_code_goal.mark_status Met;
-                       Par_code_goal.clear_goal ();
-                       Par_code_ui.render_success ui
-                         (Printf.sprintf "Goal verified as complete: %s" v.reasoning)
-                     | Ok v ->
-                        goal_feedback := Some v.reasoning;
-                        Par_code_ui.render_warning ui
-                          (Printf.sprintf "[judge: goal not yet met — %s]" v.reasoning)
-                     | Error msg ->
-                       Par_code_ui.render_warning ui
-                         (Printf.sprintf "[judge evaluation failed: %s]" msg))
+                    Par_code_goal.block_goal reason;
+                    let streak_note =
+                      if !no_progress_streak >= 2 then " (x2)" else ""
+                    in
+                    Par_code_ui.render_warning ui
+                      (Printf.sprintf "[goal: no progress this round%s \xe2\x80\x94 blocked; /goal resume to retry, /goal clear to abort]" streak_note)
+                  end else begin
+                    no_progress_streak := 0;
+                    let claims_done =
+                      Par_code_progress.claims_completion last_assistant_text
+                    in
+                    let ran_verify = ref false in
+                    let verify_exit_ok = ref false in
+                    let verify_output = ref "" in
+                    (match goal_verify_cmd with
+                     | Some cmd when (claims_done || triggered_by_done) && cmd <> "" ->
+                       ran_verify := true;
+                       let full_cmd =
+                         "sh -c " ^ Filename.quote cmd ^ " 2>&1"
+                       in
+                       let ic = Unix.open_process_in full_cmd in
+                       let buf = Buffer.create 256 in
+                       (try while true do
+                          Buffer.add_channel buf ic 256
+                        done with End_of_file -> ());
+                       let status = Unix.close_process_in ic in
+                       let output = Buffer.contents buf in
+                       verify_output := output;
+                       (match status with
+                        | Unix.WEXITED 0 ->
+                          verify_exit_ok := true;
+                          if triggered_by_done then begin
+                            Par_code_goal.mark_status Met;
+                            Par_code_goal.clear_goal ();
+                            Par_code_ui.render_success ui
+                              "\xe2\x9c\x93 goal verified by command"
+                          end
+                        | _ ->
+                          let excerpt =
+                            if String.length output > 120
+                            then String.sub output 0 120 ^ "..."
+                            else output
+                          in
+                          Par_code_goal.block_goal ("verify_failed: " ^ excerpt);
+                          goal_feedback := Some
+                            (Printf.sprintf
+                               "verify command failed: %s. Continue working toward the goal; address the failure."
+                               excerpt);
+                          Par_code_ui.render_warning ui
+                            (Printf.sprintf
+                               "[goal: verify command failed \xe2\x80\x94 blocked]\n%s"
+                               excerpt))
+                     | _ -> ());
+                    let goal_blocked_now =
+                      match !Par_code_goal.current with
+                      | Some g' ->
+                        g'.Par_code_goal.status <> Par_code_goal.Active
+                      | None -> true
+                    in
+                    if goal_blocked_now then ()
+                    else if !ran_verify && !verify_exit_ok && triggered_by_done
+                    then ()
+                    else if triggered_by_done || claims_done || step mod 3 = 0
+                    then begin
+                      let verify_result =
+                        if !ran_verify then !verify_output
+                        else match goal_verify_cmd with
+                        | Some cmd when cmd <> "" ->
+                          let full_cmd =
+                            "sh -c " ^ Filename.quote cmd ^ " 2>&1"
+                          in
+                          let ic = Unix.open_process_in full_cmd in
+                          let buf = Buffer.create 256 in
+                          (try while true do
+                             Buffer.add_channel buf ic 256
+                           done with End_of_file -> ());
+                          let _ = Unix.close_process_in ic in
+                          Buffer.contents buf
+                        | _ -> ""
+                      in
+                      (match Par_code_judge.evaluate_goal ~rt
+                         ~goal:g.Par_code_goal.objective
+                         ?conv:!conv ~verify_result ()
+                       with
+                       | Ok v when v.goal_met ->
+                         Par_code_goal.mark_status Met;
+                         Par_code_goal.clear_goal ();
+                         Par_code_ui.render_success ui
+                           (Printf.sprintf "Goal verified as complete: %s"
+                              v.reasoning)
+                       | Ok v ->
+                         goal_feedback := Some v.reasoning;
+                         Par_code_ui.render_warning ui
+                           (Printf.sprintf
+                              "[judge: goal not yet met \xe2\x80\x94 %s]"
+                              v.reasoning)
+                       | Error msg ->
+                         Par_code_ui.render_warning ui
+                           (Printf.sprintf "[judge evaluation failed: %s]"
+                              msg))
+                    end
                   end
                 | _ -> ())
             with ex ->
@@ -575,10 +788,6 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                     Par_code_ui.render_success ui
                       (Printf.sprintf "Plan saved to %s. Switched to BUILD mode." path)
                   | None ->
-                    Printf.eprintf "[W2GATE] mode=%b written_since=%b conv=%b\n%!"
-                      (!Par_code_mode.current = Par_code_mode.Plan)
-                      (Par_code_plan_tools.plan_file_written_since !invoke_start_time)
-                      (!conv <> None);
                     if !Par_code_mode.current = Par_code_mode.Plan
                        && not (Par_code_plan_tools.plan_file_written_since !invoke_start_time)
                     then begin

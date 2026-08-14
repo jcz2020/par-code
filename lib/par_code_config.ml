@@ -40,6 +40,9 @@ type config = {
   goal_verify_command : string option;
   goal_max_steps : int;
   doom_loop_threshold : int;
+  doom_bash_retries : int;
+  doom_edit_matches : int;
+  doom_action_streak : int;
   bash_approval : string;
 }
 
@@ -135,6 +138,9 @@ let default = {
   goal_verify_command = None;
   goal_max_steps = 50;
   doom_loop_threshold = 3;
+  doom_bash_retries = 3;
+  doom_edit_matches = 2;
+  doom_action_streak = 4;
   bash_approval = "ask";
 }
 
@@ -183,6 +189,9 @@ let to_json (cfg : config) : Yojson.Safe.t =
     ("goal_verify_command", opt_str cfg.goal_verify_command);
     ("goal_max_steps", `Int cfg.goal_max_steps);
     ("doom_loop_threshold", `Int cfg.doom_loop_threshold);
+    ("doom_bash_retries", `Int cfg.doom_bash_retries);
+    ("doom_edit_matches", `Int cfg.doom_edit_matches);
+    ("doom_action_streak", `Int cfg.doom_action_streak);
     ("bash_approval", `String cfg.bash_approval);
   ]
 
@@ -235,6 +244,24 @@ let of_json (json : Yojson.Safe.t) : (config, string) result =
       goal_verify_command = get_os "goal_verify_command";
       goal_max_steps = get_i "goal_max_steps" default.goal_max_steps;
       doom_loop_threshold = get_i "doom_loop_threshold" default.doom_loop_threshold;
+      doom_bash_retries =
+        (let raw = json |> member "doom_bash_retries" in
+         match raw with `Null ->
+           let old = json |> member "doom_loop_threshold" in
+           (match old with `Int n -> n | _ -> default.doom_bash_retries)
+         | v -> (match Yojson.Safe.Util.to_int_option v with Some n -> n | None -> default.doom_bash_retries));
+      doom_edit_matches =
+        (let raw = json |> member "doom_edit_matches" in
+         match raw with `Null ->
+           let old = json |> member "doom_loop_threshold" in
+           (match old with `Int n -> n | _ -> default.doom_edit_matches)
+         | v -> (match Yojson.Safe.Util.to_int_option v with Some n -> n | None -> default.doom_edit_matches));
+      doom_action_streak =
+        (let raw = json |> member "doom_action_streak" in
+         match raw with `Null ->
+           let old = json |> member "doom_loop_threshold" in
+           (match old with `Int n -> n | _ -> default.doom_action_streak)
+         | v -> (match Yojson.Safe.Util.to_int_option v with Some n -> n | None -> default.doom_action_streak));
       bash_approval =
         (match json |> member "bash_approval" |> to_string_option with
          | Some s when s = "ask" || s = "auto_project" || s = "always" -> s
@@ -338,6 +365,9 @@ let merge
     goal_verify_command = cfg.goal_verify_command;
     goal_max_steps = cfg.goal_max_steps;
     doom_loop_threshold = cfg.doom_loop_threshold;
+    doom_bash_retries = cfg.doom_bash_retries;
+    doom_edit_matches = cfg.doom_edit_matches;
+    doom_action_streak = cfg.doom_action_streak;
     bash_approval = Option.value bash_approval ~default:cfg.bash_approval;
   }
 
@@ -500,13 +530,42 @@ let update_field ~field ~value =
          Printf.eprintf "Invalid value for goal_max_steps: expected int, got '%s'\n" value;
          exit 1)
     | "doom_loop_threshold" ->
+      Printf.eprintf "doom_loop_threshold is deprecated. Use doom_bash_retries, doom_edit_matches, doom_action_streak.\n";
       (match int_of_string_opt (String.trim value) with
-       | Some n when n >= 1 -> { cfg with doom_loop_threshold = n }
+       | Some n when n >= 1 ->
+         { cfg with doom_loop_threshold = n; doom_bash_retries = n; doom_edit_matches = n; doom_action_streak = n }
        | Some _ ->
          Printf.eprintf "Invalid value for doom_loop_threshold: must be >= 1, got '%s'\n" value;
          exit 1
        | None ->
          Printf.eprintf "Invalid value for doom_loop_threshold: expected int, got '%s'\n" value;
+         exit 1)
+    | "doom_bash_retries" ->
+      (match int_of_string_opt (String.trim value) with
+       | Some n when n >= 1 -> { cfg with doom_bash_retries = n }
+       | Some _ ->
+         Printf.eprintf "Invalid value for doom_bash_retries: must be >= 1, got '%s'\n" value;
+         exit 1
+       | None ->
+         Printf.eprintf "Invalid value for doom_bash_retries: expected int, got '%s'\n" value;
+         exit 1)
+    | "doom_edit_matches" ->
+      (match int_of_string_opt (String.trim value) with
+       | Some n when n >= 1 -> { cfg with doom_edit_matches = n }
+       | Some _ ->
+         Printf.eprintf "Invalid value for doom_edit_matches: must be >= 1, got '%s'\n" value;
+         exit 1
+       | None ->
+         Printf.eprintf "Invalid value for doom_edit_matches: expected int, got '%s'\n" value;
+         exit 1)
+    | "doom_action_streak" ->
+      (match int_of_string_opt (String.trim value) with
+       | Some n when n >= 1 -> { cfg with doom_action_streak = n }
+       | Some _ ->
+         Printf.eprintf "Invalid value for doom_action_streak: must be >= 1, got '%s'\n" value;
+         exit 1
+       | None ->
+         Printf.eprintf "Invalid value for doom_action_streak: expected int, got '%s'\n" value;
          exit 1)
     (* ── Enum ── *)
     | "default_mode" ->
@@ -535,7 +594,7 @@ let update_field ~field ~value =
           "bash_approval";
           "checkpoint_enabled"; "checkpoint_interval";
           "context_budget_tokens"; "db_uri"; "default_mode";
-          "doom_loop_threshold";
+          "doom_action_streak"; "doom_bash_retries"; "doom_edit_matches";
           "embedding_base_url"; "embedding_dimension"; "embedding_model";
           "event_retention_days";
           "goal_max_steps"; "goal_verify_command";
@@ -584,7 +643,9 @@ let show ?(ui=Par_code_ui.create_backend ()) (cfg : config) =
     line "judge_api_base:" (match cfg.judge_api_base with Some s -> s | None -> "<inherit>");
     line "goal_verify_command:" (match cfg.goal_verify_command with Some s -> s | None -> "<none>");
     line "goal_max_steps:" (string_of_int cfg.goal_max_steps);
-    line "doom_loop_threshold:" (string_of_int cfg.doom_loop_threshold);
+    line "doom_bash_retries:" (string_of_int cfg.doom_bash_retries);
+    line "doom_edit_matches:" (string_of_int cfg.doom_edit_matches);
+    line "doom_action_streak:" (string_of_int cfg.doom_action_streak);
     line "bash_approval:" cfg.bash_approval;
   ] in
   render_line ui image
@@ -783,6 +844,9 @@ let run_wizard ?(ui=Par_code_ui.create_backend ()) () =
     goal_verify_command = default.goal_verify_command;
     goal_max_steps = default.goal_max_steps;
     doom_loop_threshold = default.doom_loop_threshold;
+    doom_bash_retries = default.doom_bash_retries;
+    doom_edit_matches = default.doom_edit_matches;
+    doom_action_streak = default.doom_action_streak;
     bash_approval;
   } in
   save cfg;
