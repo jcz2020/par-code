@@ -1,5 +1,83 @@
 # CHANGES
 
+## v0.7.2 — Goal usability hardening
+
+> **Status**: Implemented; pending release. Full spec: `docs/v0.7.2-ROADMAP.md`.
+
+### Fixed — Invisible confirmation prompts (the 717-second hangouts)
+
+- bash confirmations and the plan→build gate rendered without flushing and
+  blocked on `/dev/tty` — the user never saw what was being asked (observed:
+  717s and 112s hangs; the gate also consumed the user's next input as its
+  answer). Both now route through a shared `prompt_confirm` that flushes
+  before reading. Verified live: prompts appear within seconds.
+- The plan gate's declined branch now returns `reason: switch_not_confirmed`
+  instead of `user_declined: true` — agents misread the old wording as
+  "user cancelled the plan" and re-planned.
+- Reasoning models: a dim `✻ thinking · Ns` line now closes each thinking
+  window instead of minutes of zero output.
+
+### Added — bash_approval three-state policy
+
+- `bash_approval : ask | auto_project | always` (default `ask`, unchanged
+  behavior). `auto_project` classifies argv paths + redirect targets via
+  `Par.Workspace.admit` — in-workspace commands run freely; external or
+  sensitive or unparsable commands ask with the offending paths listed.
+  Goal-active upgrades `ask` to `auto_project`. `[y/a/N]`: `a` persists a
+  `cmd *` pattern to `.par/approvals.json` (honored across processes).
+- New module `Par_code_approvals`.
+
+### Added — Goal lifecycle (verbs, blocked, disk flush, memory-only activation)
+
+- Status gains `Blocked of string` (resumable) distinct from `Aborted`
+  (one-way). Verbs: set/pause/resume/block/clear. Every transition flushes to
+  `.par/goals/current.json` (previously only `set` did — `/goal clear` left
+  stale state on disk). Startup restores a saved goal but never
+  auto-continues: `/goal resume` is explicit.
+
+### Added — Doom-loop detector v2 (three signals, real abort)
+
+- bash_retry (normalized argv+output identical-failure streaks), edit_repeat
+  (3-line shingles, Jaccard > 0.8, 12-window — catches A-B-A-B the old hash
+  detector missed), action_streak (kind-classified). Escalation
+  nudge → forced judge → real abort: goal marked Aborted on disk + incident
+  JSON in `.par/goals/incidents/` + no further turns. Thresholds configurable
+  (`doom_bash_retries`/`doom_edit_matches`/`doom_action_streak`; legacy
+  `doom_loop_threshold` inherits when new fields unset). In-invoke
+  cancellation remains a PAR SDK feedback item — abort lands between turns.
+
+### Added — No-progress + completion-claim guards
+
+- A turn with zero tools, no `goal_done`, < 200-char reply blocks the goal
+  with a visible notice (x2 on the second consecutive occurrence).
+- `goal_verify_command` (v0.7.0 field) is finally wired: completion claims
+  are verified by running it; exit 0 → `met`, failure → blocked with output
+  injected as feedback. Without it, a claim forces an immediate judge pass.
+- New module `Par_code_progress`.
+
+### Fixed — Planner fallback saves real plans
+
+- A planner that stops without calling `write_plan_file`/`plan_submit` used
+  to auto-save its raw preamble (observed: a 117-byte "I have enough
+  context" file) under a misleading "reached step limit" message. Now a
+  dedicated no-tool `plan-synthesizer` agent runs ONE synthesis pass
+  (discovered: `invoke_generate` rejects tool-carrying agents); six-section
+  output is saved with an accurate message, failures save raw output with an
+  explicit warning. The plan gate prompt is also visibly flushed (W0).
+
+### Known Limitations
+
+- `auto_project` is argv+regex approximation, not AST-level classification
+  (fail-closed on anything unparsable). Full ruleset engine remains v0.13.0.
+- Doom-loop abort stops between turns; the in-flight turn completes. If the
+  agent manages to finish the task within that final turn (observed in
+  acceptance: doom aborted mid-flailing, agent self-recovered in the same
+  turn, pytest green), the goal still reads `aborted` — the work is done but
+  the goal state won't flip to `met`. Acceptable conservatism; revisit with
+  v0.7.3 chaining's judge timing.
+- config_set_test has a pre-existing ~2% stale-read flake (overlayfs
+  atomic-rename visibility; reproduces on pre-v0.7.2 binaries too).
+
 ## v0.7.1 — Planner budget + REPL exit-path hotfix
 
 ### Fixed — Planner exhausted its iteration budget before producing a plan

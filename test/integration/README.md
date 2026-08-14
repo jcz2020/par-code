@@ -19,7 +19,8 @@ bash test/integration/run.sh
 | `cli/memory_test.sh` | `par memory` CRUD + search + prune | v0.5.6 prune --dry-run regression |
 | `cli/plan_test.sh` | `par plan` list/show/prune | — |
 | `cli/session_test.sh` | `par session` list/show/fork | P0 #2: empty session list |
-| `repl/basics_test.sh` | `/help` `/session` `/cost` `/quit` | — |
+| `repl/basics_test.sh` | `/help` `/session` `/cost` `/quit` Ctrl+D/Ctrl+C exits | v0.7.1 double-extraction |
+| `repl/resume_test.sh` | `--resume` banner+prompt ≤3s, `/session` history | v0.7.2 blank-pane QA observation |
 | `repl/modes_test.sh` | `/plan` `/build` prompt switch | P0 #1: plan mode surface |
 | `repl/startup_test.sh` | PAR_NO_UPDATE_CHECK silence | P0 #3: version notice always fires |
 

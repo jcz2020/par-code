@@ -1,5 +1,37 @@
 # Decisions
 
+## [2026-08-15] v0.7.2 实现期决策：invoke_generate 拒绝带工具 agent → 专用 plan-synthesizer
+
+**Tag**: PAR SDK 边界 / 架构
+
+**变更前**: W2 计划让综合兜底复用 planner agent 调 `invoke_generate`。
+**变更后**: 注册专用 `plan-synthesizer` agent（tools=[]、六节形状 system
+prompt、max_iterations=1），综合调用指向它。
+**原因**: 带上调试日志实测发现 PAR SDK `invoke_generate` 对带工具集的
+agent 直接返回 `Invalid_input "... generate mode requires tool-free..."`。
+planner 必须带只读工具集，二者不可兼得。extractor（无工具）从未踩过此坑。
+**影响范围**: lib/par_code_plan_tools.ml（agent id）、lib/par_code_setup.ml
+（注册，镜像 extractor 模板）。
+**回退方式**: 若 SDK 未来放开限制，可切回 planner；专用 agent 无耦合。
+**已知限制**: 多一个常驻 agent 注册（纯生成，无成本直到被调用）。
+
+## [2026-08-15] v0.7.2 实现期决策：doom 回调经 on_doom_action hook 设 flag（而非回调内直接改 goal）
+
+**Tag**: 架构 / 并发
+
+**变更前**: 首版 W3 实现里回调只渲染消息——`doom_abort`/`doom_force_judge`
+有消费端无生产端，升级阶梯形同虚设（orchestrator 实测发现）。
+**变更后**: `make_tool_event_callback` 增加 `?on_doom_action` hook；
+Abort/Force_judge 时经闭包设置 run 局部 flag（Abort 同时携带 msg ref 供
+incident 落盘）；between-turns 拦截消费 flag 并落 goal 状态。
+**原因**: 回调是模块级函数拿不到 run 的局部 ref；直接传 ref 列表会随
+信号种类膨胀。单一 hook 让"检测"（模块级）与"后果"（run 局部）解耦，
+测试时可注入 no-op。
+**影响范围**: lib/par_code_repl.ml（callback 签名 + run 接线）。
+**回退方式**: hook 有默认 no-op，可整体移除而不动检测器。
+**已知限制**: 轮内（invoke 进行中）仍只能渲染消息，真正的状态落盘在
+invoke 返回后（诚实文案已声明 "current turn will finish"）。
+
 ## [2026-08-15] v0.7.2 范围：autonomous goal chaining 推迟一版，改为 goal 可用性收尾
 
 **Tag**: Roadmap / 范围级变更

@@ -269,6 +269,58 @@ In addition to the session-end extraction (v0.3.1), memories are now extracted
 mid-session at each checkpoint cycle. Facts discovered during a long session
 appear in the memory index without waiting for the session to end.
 
+## Goal Mode
+
+`/goal <objective>` sets an objective the agent works toward, with an
+independent judge model evaluating progress (v0.7.0). v0.7.2 hardens the
+lifecycle:
+
+```
+/goal <objective>   set objective (switches to build mode)
+/goal               status (step N/M, incl. blocked reason)
+/goal pause         pause (agent stops evaluating)
+/goal resume        resume from paused/blocked
+/goal clear         drop the goal
+```
+
+- **Statuses**: `active` → `met` / `aborted` (one-way) or `blocked: <reason>`
+  (soft-stopped, resumable). Every transition flushes to
+  `.par/goals/current.json`.
+- **Activation is memory-only**: after restart or `--resume`, a saved goal is
+  restored as status-only — the agent never auto-continues; you must
+  `/goal resume`.
+- **No-progress guard**: a turn with zero tool calls, no `goal_done`, and a
+  short reply blocks the goal (`blocked: no_progress`) with a visible notice.
+- **Completion-claim guard**: configure `goal_verify_command` (e.g.
+  `python3 -m pytest tests/ -q`) and the claim "已完成/done" is verified by
+  running it — exit 0 marks the goal `met`; failure blocks it with the output
+  injected as next-turn feedback. Without a verify command, a completion claim
+  forces a judge evaluation immediately (self-reported completion is never
+  trusted).
+- **Doom-loop guard** (v0.7.2): three detectors — identical-failing-bash
+  streaks (normalized), near-identical edits (shingle Jaccard), and
+  same-kind action streaks — escalate nudge → forced judge → abort. Abort is
+  real: the goal is marked `aborted` on disk and an incident record lands in
+  `.par/goals/incidents/`. Thresholds configurable (`doom_bash_retries`,
+  `doom_edit_matches`, `doom_action_streak`).
+
+## Bash approval
+
+`bash_approval` controls how bash commands are confirmed (default `ask`):
+
+| Mode | Behavior |
+|---|---|
+| `ask` | every non-trivial command asks `[y/a/N]` |
+| `auto_project` | commands whose paths/redirects stay inside the workspace root run freely; anything touching outside (or unparsable) asks, listing the offending paths |
+| `always` | everything runs without confirmation |
+
+With a goal active, `ask` is upgraded to `auto_project` — the agent can work,
+but external writes still require you. Answering `a` persists a
+`<command> *` pattern to `.par/approvals.json`; matching commands skip
+confirmation in future sessions. Classification uses the PAR SDK workspace
+admission check, so the auto-approved scope is exactly the write-tool
+sandbox scope.
+
 ## Plan Mode
 
 par-code v0.5.0 introduces Plan Mode, a read-only planning mode that runs
