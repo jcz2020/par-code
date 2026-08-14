@@ -32,6 +32,8 @@ let error_to_string (e : Types.error_category) =
   | Types.Permission_denied s -> Printf.sprintf "Permission denied: %s" s
   | Types.Internal s -> Printf.sprintf "Internal error: %s" s
   | Types.Embedding_unsupported -> "Embedding not supported"
+  | Types.Cancelled Types.User_cancelled -> "Cancelled by user"
+  | Types.Cancelled (Types.Guard_cancelled reason) -> Printf.sprintf "Cancelled by guard: %s" reason
 
 let delegate_input_schema : Yojson.Safe.t =
   `Assoc

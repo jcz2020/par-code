@@ -430,6 +430,8 @@ let try_synthesize_plan (rt : Runtime.runtime) (conv : Types.conversation)
         | Types.Permission_denied s -> Printf.sprintf "Permission denied: %s" s
         | Types.Internal s -> Printf.sprintf "Internal error: %s" s
         | Types.Embedding_unsupported -> "Embedding unsupported"
+        | Types.Cancelled Types.User_cancelled -> "Cancelled by user"
+        | Types.Cancelled (Types.Guard_cancelled reason) -> Printf.sprintf "Cancelled by guard: %s" reason
       in
       Error msg
     | Ok result ->

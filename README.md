@@ -19,7 +19,7 @@ blocked/resume states with disk flush and memory-only activation, doom-loop
 detection v2 (three normalized signals, real abort with incident records),
 no-progress and completion-claim guardrails (`goal_verify_command` wired),
 and the planner fallback synthesizes real six-section plans instead of saving
-raw preambles. PAR SDK 0.9.1. Pre-built binaries with a
+raw preambles. PAR SDK 0.10.0. Pre-built binaries with a
 one-line installer (`curl | bash`) for Linux x86_64/arm64 + macOS arm64, plus
 `par upgrade` self-update. No OCaml or opam needed for end users.
 
