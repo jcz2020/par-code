@@ -2,7 +2,9 @@
 
 ## v0.7.2 — Goal usability hardening
 
-> **Status**: Implemented; pending release. Full spec: `docs/v0.7.2-ROADMAP.md`.
+> **Status**: Shipped. Every claim live-tested with a real LLM during the
+> implementation session (see DECISIONS.md entries of 2026-08-15). Full spec:
+> `docs/v0.7.2-ROADMAP.md`.
 
 ### Fixed — Invisible confirmation prompts (the 717-second hangouts)
 

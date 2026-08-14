@@ -259,7 +259,7 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
   called `exit 0`, causing the loop to re-enter and memory extraction to run
   twice on exit; fixed by routing all three through a shared `exit_normally ()`
   helper. +3 unit tests, +2 integration tests.
-- **v0.7.2 (next)** — Goal autonomy usability hardening. Two rounds of
+- **v0.7.2 ✅ shipped** — Goal autonomy usability hardening. Two rounds of
   real-LLM testing (post-release QA + same-model dual-agent walkthrough
   against a reference harness) showed `/goal` fails end-to-end on real write
   tasks: invisible confirmation prompts (bash confirm + plan gate never
@@ -270,7 +270,7 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
   + W4 goal lifecycle (verbs, blocked status, disk flush, activation
   memory-only) + W5 no-progress & completion-claim detection + W6 resume
   regression test. Full spec: `docs/v0.7.2-ROADMAP.md`.
-- **v0.7.3** — Full autonomous goal chaining (invokes without user input),
+- **v0.7.3 (next)** — Full autonomous goal chaining (invokes without user input),
   PAR SDK feedback filings (in-invoke cancellation API, nested invoke
   depth-limiting). Prerequisite: v0.7.2 acceptance criteria all green.
 - v0.8.0+ — best-of-N reasoning, self-improvement, compose mode, ecosystem,
