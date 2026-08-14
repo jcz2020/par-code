@@ -196,6 +196,23 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
          | Some c -> Par_code_mode.current := c.Par_code_config.default_mode
          | None -> ())));
   at_exit Par_code_mode.save_current_mode_to_disk;
+  (* W4: restore goal from disk on startup — memory-only, no auto-continue *)
+  (match resume with
+   | No_prior -> ()
+   | Resume_most_recent | Resume_of _ ->
+     (match Par_code_goal.load_goal_from_disk () with
+      | Some g ->
+        Par_code_goal.restore_goal g;
+        let obj_display =
+          if String.length g.Par_code_goal.objective > 60 then
+            String.sub g.Par_code_goal.objective 0 57 ^ "..."
+          else g.Par_code_goal.objective
+        in
+        Par_code_ui.render_notice ui
+          (Printf.sprintf "[goal restored: %s (step %d/%d, %s) — /goal resume to continue]"
+             obj_display g.Par_code_goal.step_count g.Par_code_goal.max_steps
+             (Par_code_goal.status_label g.Par_code_goal.status))
+      | None -> ()));
   (* Session brief on resume *)
   (match !conv with
    | Some _ ->
@@ -333,6 +350,14 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
               Par_code_goal.clear_goal ();
               Par_code_goal.clear_done_signal ();
               Par_code_ui.render_notice ui "[goal cleared]"
+            end else if rest = "pause" then begin
+              Par_code_goal.pause_goal ();
+              Par_code_ui.render_notice ui "[goal paused]"
+            end else if rest = "resume" then begin
+              if Par_code_goal.resume_goal () then
+                Par_code_ui.render_notice ui "[goal resumed — agent will continue next turn]"
+              else
+                Par_code_ui.render_warning ui "[cannot resume: goal not paused/blocked]"
             end else if rest = "" then
               (match !Par_code_goal.current with
                | Some g -> Par_code_ui.render_notice ui

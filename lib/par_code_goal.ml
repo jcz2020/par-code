@@ -1,4 +1,4 @@
-type status = Active | Met | Aborted | Paused
+type status = Active | Met | Aborted | Paused | Blocked of string
 
 type goal_state = {
   objective : string;
@@ -14,6 +14,7 @@ let status_label = function
   | Met -> "met"
   | Aborted -> "aborted"
   | Paused -> "paused"
+  | Blocked r -> "blocked: " ^ r
 
 let goal_file_path = ".par/goals/current.json"
 
@@ -38,11 +39,15 @@ let of_json (json : Yojson.Safe.t) : goal_state option =
     let step_count = json |> member "step_count" |> to_int in
     let max_steps = json |> member "max_steps" |> to_int in
     let status_str = json |> member "status" |> to_string in
-    let status = match status_str with
-      | "met" -> Met
-      | "aborted" -> Aborted
-      | "paused" -> Paused
-      | _ -> Active
+    let status =
+      if String.length status_str > 9 && String.sub status_str 0 9 = "blocked: " then
+        Blocked (String.sub status_str 9 (String.length status_str - 9))
+      else match status_str with
+        | "met" -> Met
+        | "aborted" -> Aborted
+        | "paused" -> Paused
+        | "active" -> Active
+        | _ -> Active
     in
     Some { objective; step_count; max_steps; status }
   with _ -> None
@@ -84,13 +89,44 @@ let advance_step () =
   | Some g ->
     let g' = { g with step_count = g.step_count + 1 } in
     current := Some g';
+    save_current_goal_to_disk ();
     g'.step_count
   | None -> 0
 
 let mark_status s =
   match !current with
-  | Some g -> current := Some { g with status = s }
+  | Some g ->
+    current := Some { g with status = s };
+    save_current_goal_to_disk ()
   | None -> ()
+
+let pause_goal () =
+  match !current with
+  | Some g ->
+    current := Some { g with status = Paused };
+    save_current_goal_to_disk ()
+  | None -> ()
+
+let resume_goal () : bool =
+  match !current with
+  | Some g ->
+    (match g.status with
+     | Paused | Blocked _ ->
+       current := Some { g with status = Active };
+       save_current_goal_to_disk ();
+       true
+     | _ -> false)
+  | None -> false
+
+let block_goal (reason : string) =
+  match !current with
+  | Some g ->
+    current := Some { g with status = Blocked reason };
+    save_current_goal_to_disk ()
+  | None -> ()
+
+let restore_goal (g : goal_state) =
+  current := Some g
 
 let done_signal : string option ref = ref None
 
