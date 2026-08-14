@@ -171,13 +171,17 @@ let consume_submitted_plan () =
   | Some path -> last_submitted_plan := None; Some path
   | None -> None
 
-let read_confirm_tty () =
-  try
-    let tty = open_in "/dev/tty" in
-    Fun.protect ~finally:(fun () -> close_in tty)
-      (fun () -> input_line tty)
-  with Sys_error _ ->
-    input_line stdin
+(** Pure gate-response function — separated for testability. *)
+let gate_response ~confirmed path =
+  if confirmed then begin
+    last_submitted_plan := Some path;
+    ignore (Par_code_mode.switch Build);
+    `Assoc [ ("plan_saved_to", `String path)
+           ; ("mode", `String "build") ]
+  end else
+    `Assoc [ ("plan_saved_to", `String path)
+           ; ("mode", `String "plan")
+           ; ("reason", `String "switch_not_confirmed") ]
 
 let make_plan_submit_tool ~(ui : Par_code_ui.backend Lazy.t) : Types.tool_binding =
   let open Types in
@@ -221,21 +225,13 @@ let make_plan_submit_tool ~(ui : Par_code_ui.backend Lazy.t) : Types.tool_bindin
         let backend = Lazy.force ui in
         Par_code_ui.render_notice backend
           (Printf.sprintf "Plan saved to %s" path);
-        Par_code_ui.render backend
-          (Par_code_ui.textf ~style:(Par_code_ui.style ~fg:Yellow ~bold:true ())
-             "\nSwitch to build mode? [y/N] ");
-        let answer = read_confirm_tty () in
-        if String.lowercase_ascii (String.trim answer) = "y" then begin
-          last_submitted_plan := Some path;
-          let _ = Par_code_mode.switch Build in
-          Success
-            (`Assoc [ ("plan_saved_to", `String path)
-                    ; ("mode", `String "build") ])
-        end else
-          Success
-            (`Assoc [ ("plan_saved_to", `String path)
-                    ; ("mode", `String "plan")
-                    ; ("user_declined", `Bool true) ])
+        let sty = Par_code_ui.style ~fg:Yellow ~bold:true () in
+        let confirmed = match Par_code_ui.prompt_confirm
+            ~backend ~style:sty "\nSwitch to build mode? [y/N] " with
+          | Some "y" -> true
+          | _ -> false
+        in
+        Success (gate_response ~confirmed path)
       with Sys_error _ ->
         Error
           { category = External_failure "plan_submit"

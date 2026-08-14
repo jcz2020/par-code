@@ -532,25 +532,14 @@ This is the LAST thing you do. The user will be asked to confirm.
              || List.exists (fun p -> String.length full_cmd >= String.length p
                  && String.sub full_cmd 0 (String.length p) = p) safe_prefixes
            in
-            if is_safe then true
-            else begin
-              ui_render (Par_code_ui.textf ~style:(Par_code_ui.style ~fg:Yellow ~bold:true ()) "\n⚠ bash: %s [y/N] " full_cmd);
-              let read_confirm () =
-                try
-                  (* Read from /dev/tty to avoid contention with REPL's stdin buffer.
-                     If /dev/tty is unavailable (piped/cron), fall back to stdin. *)
-                  let tty = open_in "/dev/tty" in
-                  Fun.protect
-                    ~finally:(fun () -> close_in tty)
-                    (fun () -> input_line tty)
-                with Sys_error _ ->
-                  input_line stdin
-              in
-              (match read_confirm () with
-              | line when String.lowercase_ascii (String.trim line) = "y" -> true
-              | exception _ -> false
-              | _ -> false)
-            end)) Runtime.default_bash_confirm);
+             if is_safe then true
+             else begin
+               let msg = Printf.sprintf "\n⚠ bash: %s [y/N] " full_cmd in
+               let sty = Par_code_ui.style ~fg:Yellow ~bold:true () in
+               (match Par_code_ui.prompt_confirm ~backend:(Lazy.force ui) ~style:sty msg with
+               | Some "y" -> true
+               | _ -> false)
+             end)) Runtime.default_bash_confirm);
     List.iter (fun (desc : Types.skill_descriptor) ->
       ignore (Runtime.register_skill rt desc : (Types.skill_binding, _) result)
     ) Builtin_skills.builtin_skills;

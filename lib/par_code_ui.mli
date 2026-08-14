@@ -104,6 +104,10 @@ val height : image -> int
 
 (** {1 Backend} *)
 
+(** Create a backend writing to a specific output channel.
+    Useful for testing (pipe/Buffer). *)
+val create_backend_out : out_channel -> backend
+
 (** Create a backend.  Auto-detects TTY, [NO_COLOR] env var
     ({https://no-color.org}), and [TERM=dumb]. *)
 val create_backend : unit -> backend
@@ -134,6 +138,11 @@ val render_error : backend -> string -> unit
 val render_warning : backend -> string -> unit
 val render_notice : backend -> string -> unit
 val render_success : backend -> string -> unit
+
+(** Render [msg], flush, then read one line from /dev/tty (stdin fallback).
+    Returns [Some trimmed_input] on success, [None] on EOF/error.
+    The flush is load-bearing — without it the prompt stays block-buffered. *)
+val prompt_confirm : ?backend:backend -> ?style:style -> string -> string option
 
 (** Render a PAR SDK LLM response chunk.  Handles all 5 variants:
     - [Text_delta]: feeds through markdown state machine

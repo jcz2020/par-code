@@ -24,6 +24,7 @@ type backend = {
   mutable size : (int * int) option;
   mutable markdown_state : Par_code_ui_markdown.state;
   think_buf : Buffer.t;
+  mutable thinking_start : float option;
 }
 
 let no_style = {
@@ -250,10 +251,13 @@ let detect_size () =
   | Some c, Some r -> (try (int_of_string c, int_of_string r) with _ -> (80, 24))
   | _ -> (80, 24)
 
-let create_backend () =
-  { out = stdout; color = None; size = None;
+let create_backend_out oc =
+  { out = oc; color = None; size = None;
     markdown_state = Par_code_ui_markdown.initial;
-    think_buf = Buffer.create 256 }
+    think_buf = Buffer.create 256;
+    thinking_start = None }
+
+let create_backend () = create_backend_out stdout
 
 let color_of b =
   match b.color with
@@ -313,6 +317,24 @@ let render_notice backend msg =
 let render_success backend msg =
   render_line backend (textf "✓ %s" msg ~style:(style ~fg:Green ()))
 
+(** Render + FLUSH + read one line from /dev/tty (stdin fallback).
+    The flush is load-bearing: without it the prompt stays in stdout's
+    block buffer while we block on input — the user never sees it. *)
+let prompt_confirm ?(backend=create_backend ()) ?style msg =
+  (match style with
+   | Some s -> render backend (text ~style:s msg)
+   | None -> render backend (text msg));
+  flush backend.out;
+  let read_tty () =
+    try
+      let tty = open_in "/dev/tty" in
+      Fun.protect ~finally:(fun () -> close_in tty) (fun () -> input_line tty)
+    with Sys_error _ -> input_line stdin
+  in
+  match read_tty () with
+  | line -> Some (String.lowercase_ascii (String.trim line))
+  | exception _ -> None
+
 (* B. LLM chunk rendering *)
 
 (* Streaming think-tag strip state machine.
@@ -371,6 +393,9 @@ let strip_think_streaming buf chunk =
   to_render
 
 let flush_markdown backend =
+  (match backend.thinking_start with
+   | Some _ -> backend.thinking_start <- None
+   | None -> ());
   let leftover = Buffer.contents backend.think_buf in
   Buffer.clear backend.think_buf;
   if leftover <> "" then begin
@@ -404,8 +429,22 @@ let flush_markdown backend =
   backend.markdown_state <- Par_code_ui_markdown.initial
 
 let render_llm_chunk backend (chunk : Par.Types.llm_response_chunk) =
+  let close_thinking_window () =
+    match backend.thinking_start with
+    | Some t0 ->
+      let elapsed = int_of_float (Unix.gettimeofday () -. t0) in
+      backend.thinking_start <- None;
+      render backend (textf "✻ thinking · %ds" elapsed ~style:(style ~dim:true ()));
+      render backend (text "\n");
+      flush backend.out
+    | None -> ()
+  in
   match chunk with
+  | Reasoning_delta _ ->
+    if backend.thinking_start = None then
+      backend.thinking_start <- Some (Unix.gettimeofday ())
   | Text_delta { text } ->
+    close_thinking_window ();
     let safe_text = strip_think_streaming backend.think_buf text in
     if safe_text <> "" then begin
       let new_state, output =
@@ -417,21 +456,15 @@ let render_llm_chunk backend (chunk : Par.Types.llm_response_chunk) =
         flush backend.out
       end
     end
-  | Reasoning_delta _ ->
-    (* v0.5.5: reasoning model chain-of-thought deltas (o1/o3/etc.).
-       Hide from user-visible output — PAR SDK 0.8.3 captures the full
-       reasoning in [llm_response.reasoning_content] for callers that
-       want to display it. *)
-    ()
   | Tool_call_start { tool_call_id = _; name } ->
+    close_thinking_window ();
     render backend (textf "→ %s..." name ~style:(style ~dim:true ()))
-  | Tool_call_delta { tool_call_id = _; args_json = _ } ->
-    (* Tool args streaming — no-op (could show spinner update) *)
-    ()
+  | Tool_call_delta _ ->
+    close_thinking_window ()
   | Usage_update _ ->
-    (* Token usage update — no-op (could update a live counter) *)
-    ()
+    close_thinking_window ()
   | Done { finish_reason = _ } ->
+    close_thinking_window ();
     flush_markdown backend
 
 (* C. Tool event rendering *)
