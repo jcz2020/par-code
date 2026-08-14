@@ -304,6 +304,193 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
      LNoise.history_load ~filename:(Filename.concat (Par_code_config.config_dir ()) "history")
      |> ignore
    with _ -> ());
+  (* v0.7.3 W4: the turn body, extracted verbatim from loop()'s
+     normal-input branch so the chaining driver (W6) can invoke it
+     without user input. Closes over the run-scoped refs (conv,
+     turn_count, session_id, ...) on purpose — no parameterization.
+     Behavior-identical pure motion; returns Chain_stop for now,
+     chaining lands in W6. history_add/history_save stay in loop()'s
+     input branch — chained messages are not user input. *)
+  let execute_turn (message : string) : Par_code_chain.turn_outcome =
+           (try
+              (match !conv with
+              | Some c ->
+                let estimated = Par_code_context.token_estimate c in
+                if estimated > ctx_budget then begin
+                  let summary = match !session_id, mem_db with
+                    | Some sid, Some t ->
+                      (match Par_code_checkpoint.most_recent_checkpoint t ~session_id:sid with
+                       | Ok (Some entry) -> entry.Par_code_checkpoint.task
+                       | _ -> "Session in progress")
+                    | _ -> "Session in progress"
+                  in
+                  let compacted = Par_code_context.compact c ~budget_tokens:ctx_budget ~summary () in
+                  let after = Par_code_context.token_estimate compacted in
+                  if after < estimated then begin
+                    Par_code_context.compaction_notice ~turn:!turn_count
+                      ~before_tokens:estimated ~after_tokens:after;
+                    conv := Some compacted
+                  end
+                end
+              | None -> ());
+             let memory_appendix =
+                let mem_app = build_memory_appendix mem_db in
+                match !is_first_turn, !first_turn_appendix with
+                | true, Some brief ->
+                  is_first_turn := false;
+                  (match mem_app with Some ma -> Some (brief ^ ma) | None -> Some brief)
+                | _ -> mem_app
+              in
+              let plan_appendix = match !last_plan_path with
+                | Some path ->
+                  (try
+                    let ic = open_in path in
+                    let len = in_channel_length ic in
+                    let buf = Bytes.create len in
+                    really_input ic buf 0 len;
+                    close_in ic;
+                    let plan_text = Bytes.to_string buf in
+            Some (Printf.sprintf
+                       "\n\n## Mode Switch: Plan -> Build\n\nYour operational mode has changed from plan to build. The plan below was produced in plan mode and approved by the user. Execute it now.\n\n%s" plan_text)
+                  with Sys_error _ ->
+                    Some (Printf.sprintf
+                      "\n\n## Plan Reference\n\nYour plan was saved to `%s`." path))
+                | None -> None
+              in
+              let goal_appendix =
+                match !goal_feedback, !Par_code_goal.current with
+                | Some feedback, _ ->
+                  goal_feedback := None;
+                  Some (Printf.sprintf
+                    "\n\n## Goal Status\n\nYou are working toward a goal. The judge evaluated your last turn and found the goal NOT YET MET.\n\nJudge feedback: %s\n\nContinue working toward the goal. Address the judge's feedback." feedback)
+                | None, Some g when g.Par_code_goal.status = Par_code_goal.Active ->
+                  Some (Printf.sprintf
+                    "\n\n## Active Goal\n\nYou are working toward this goal: %s\n\nWork toward this goal. When you believe it is complete, call the goal_done tool with a summary of what you accomplished." g.Par_code_goal.objective)
+                | _ -> None
+              in
+              let combined_appendix = match memory_appendix, plan_appendix, goal_appendix with
+                | None, None, None -> None
+                | Some m, None, None -> Some m
+                | None, Some p, None -> Some p
+                | None, None, Some g -> Some g
+                | Some m, Some p, None -> Some (m ^ p)
+                | Some m, None, Some g -> Some (m ^ g)
+                | None, Some p, Some g -> Some (p ^ g)
+                | Some m, Some p, Some g -> Some (m ^ p ^ g)
+              in
+               let mode_before_invoke = !Par_code_mode.current in
+               invoke_start_time := Unix.gettimeofday ();
+               hit_cap := false;
+               let tool_count_before = match !conv with
+                 | Some c -> List.length c.Types.messages
+                 | None -> 0
+               in
+               let stream_cb, streamed_text = make_stream_cb ui in
+              let invoke_result = Runtime.invoke rt
+                ~agent_id:(Par_code_mode.agent_id_for !Par_code_mode.current)
+                ~message
+                ?conversation:!conv
+                ~on_tool_event
+                ~on_chunk:(Some stream_cb)
+                ~enable_handoff:true
+                ?system_prompt_appendix:combined_appendix
+                ()
+              in
+              last_plan_path := None;
+              (match invoke_result with
+              | Error (e, recovered_conv) ->
+                 conv := Some recovered_conv;
+                 Par_code_ui.flush_markdown ui;
+                 if string_contains_i
+                      ~haystack:(Par_code_setup.error_to_string e)
+                      ~needle:"max iterations exceeded"
+                 then hit_cap := true;
+                 Par_code_ui.render_error ui (Par_code_setup.error_to_string e);
+                 let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in ()
+              | Ok { Types.response = resp; conversation = returned_conv; _ } ->
+                 conv := Some returned_conv;
+                 Par_code_ui.flush_markdown ui;
+                  if not !streamed_text then begin
+                    (match resp.Types.text with
+                     | Some text when text <> "" ->
+                       Par_code_ui.render ui (Par_code_ui.text text)
+                     | Some _ | None ->
+                       let reason = match resp.Types.finish_reason with
+                         | Types.Content_filter -> " (content filter)"
+                         | Types.Max_tokens -> " (max tokens)"
+                         | _ -> ""
+                       in
+                       Par_code_ui.render_warning ui
+                         (Printf.sprintf "[model returned no text%s]" reason))
+                  end;
+                 Par_code_ui.render_line ui Par_code_ui.empty;
+                cost := add_usage !cost resp.Types.usage;
+                let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in ();
+                incr turn_count;
+                if !session_id = None then begin
+                  (try session_id := Some (Runtime.get_session_id rt) with _ -> ())
+                end;
+                 if not env_no_ckpt && ckpt_enabled then begin
+                   (match mem_db, !conv, !session_id with
+                    | Some t, Some c, Some sid ->
+                      let pid = Par_code_memory.resolve_project_id () in
+                      Par_code_checkpoint.maybe_checkpoint ~rt t
+                        ~in_flight:in_flight_checkpoint
+                        ~session_id:sid ~project_id:pid c
+                        ~turn_number:!turn_count ~enabled:ckpt_enabled ~interval:ckpt_interval
+                    | _ -> ())
+                 end);
+              (if mode_before_invoke = Par_code_mode.Plan
+                && !Par_code_mode.current = Par_code_mode.Build then begin
+                 (match !conv with
+                  | Some c ->
+                    (match Par_code_plan_tools.persist_plan_file c with
+                     | Some path ->
+                       last_plan_path := Some path;
+                       Par_code_ui.render_notice ui (Printf.sprintf "Plan saved to %s" path)
+                     | None -> ())
+                  | None -> ())
+                end);
+               Par_code_chain.run_goal_evaluation
+                 ~rt ~ui ~conv ~goal_feedback ~no_progress_streak
+                 ~goal_verify_cmd ~doom_abort ~doom_abort_msg ~doom_force_judge
+                 ~tool_count_before ()
+            with ex ->
+             Par_code_ui.render_error ui (Printf.sprintf "\n[error] %s" (Printexc.to_string ex)));
+                (match Par_code_plan_tools.consume_submitted_plan () with
+                  | Some path ->
+                    last_plan_path := Some path;
+                    Par_code_ui.render_success ui
+                      (Printf.sprintf "Plan saved to %s. Switched to BUILD mode." path)
+                  | None ->
+                    if !Par_code_mode.current = Par_code_mode.Plan
+                       && not (Par_code_plan_tools.plan_file_written_since !invoke_start_time)
+                    then begin
+                      (match !conv with
+                       | Some c ->
+                         (match Par_code_plan_tools.try_synthesize_plan rt c with
+                          | Ok text when Par_code_plan_tools.has_six_sections text ->
+                            (match Par_code_plan_tools.persist_text text with
+                             | Some path ->
+                               last_plan_path := Some path;
+                               let prefix = if !hit_cap
+                                 then "planner hit iteration cap"
+                                 else "planner stopped early"
+                               in
+                               Par_code_ui.render_notice ui
+                                 (Printf.sprintf "%s \xe2\x80\x94 synthesized plan saved to %s" prefix path)
+                             | None -> ())
+                          | _ ->
+                            (match Par_code_plan_tools.persist_plan_file c with
+                             | Some path ->
+                               last_plan_path := Some path;
+                               Par_code_ui.render_warning ui
+                                 (Printf.sprintf "[plan synthesis failed \xe2\x80\x94 saved raw planner output to %s]" path)
+                             | None -> ()))
+                       | None -> ())
+                    end);
+           Par_code_chain.Chain_stop
+  in
   let rec loop () =
     (* linenoise writes the prompt directly to fd 1, bypassing OCaml's stdout
        buffer — flush first so rendered output (slash commands via render,
@@ -440,381 +627,8 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
              ~filename:(Filename.concat (Par_code_config.config_dir ()) "history")
              |> ignore
            with _ -> ());
-           (try
-              (match !conv with
-              | Some c ->
-                let estimated = Par_code_context.token_estimate c in
-                if estimated > ctx_budget then begin
-                  let summary = match !session_id, mem_db with
-                    | Some sid, Some t ->
-                      (match Par_code_checkpoint.most_recent_checkpoint t ~session_id:sid with
-                       | Ok (Some entry) -> entry.Par_code_checkpoint.task
-                       | _ -> "Session in progress")
-                    | _ -> "Session in progress"
-                  in
-                  let compacted = Par_code_context.compact c ~budget_tokens:ctx_budget ~summary () in
-                  let after = Par_code_context.token_estimate compacted in
-                  if after < estimated then begin
-                    Par_code_context.compaction_notice ~turn:!turn_count
-                      ~before_tokens:estimated ~after_tokens:after;
-                    conv := Some compacted
-                  end
-                end
-              | None -> ());
-             let memory_appendix =
-                let mem_app = build_memory_appendix mem_db in
-                match !is_first_turn, !first_turn_appendix with
-                | true, Some brief ->
-                  is_first_turn := false;
-                  (match mem_app with Some ma -> Some (brief ^ ma) | None -> Some brief)
-                | _ -> mem_app
-              in
-              let plan_appendix = match !last_plan_path with
-                | Some path ->
-                  (try
-                    let ic = open_in path in
-                    let len = in_channel_length ic in
-                    let buf = Bytes.create len in
-                    really_input ic buf 0 len;
-                    close_in ic;
-                    let plan_text = Bytes.to_string buf in
-            Some (Printf.sprintf
-                       "\n\n## Mode Switch: Plan -> Build\n\nYour operational mode has changed from plan to build. The plan below was produced in plan mode and approved by the user. Execute it now.\n\n%s" plan_text)
-                  with Sys_error _ ->
-                    Some (Printf.sprintf
-                      "\n\n## Plan Reference\n\nYour plan was saved to `%s`." path))
-                | None -> None
-              in
-              let goal_appendix =
-                match !goal_feedback, !Par_code_goal.current with
-                | Some feedback, _ ->
-                  goal_feedback := None;
-                  Some (Printf.sprintf
-                    "\n\n## Goal Status\n\nYou are working toward a goal. The judge evaluated your last turn and found the goal NOT YET MET.\n\nJudge feedback: %s\n\nContinue working toward the goal. Address the judge's feedback." feedback)
-                | None, Some g when g.Par_code_goal.status = Par_code_goal.Active ->
-                  Some (Printf.sprintf
-                    "\n\n## Active Goal\n\nYou are working toward this goal: %s\n\nWork toward this goal. When you believe it is complete, call the goal_done tool with a summary of what you accomplished." g.Par_code_goal.objective)
-                | _ -> None
-              in
-              let combined_appendix = match memory_appendix, plan_appendix, goal_appendix with
-                | None, None, None -> None
-                | Some m, None, None -> Some m
-                | None, Some p, None -> Some p
-                | None, None, Some g -> Some g
-                | Some m, Some p, None -> Some (m ^ p)
-                | Some m, None, Some g -> Some (m ^ g)
-                | None, Some p, Some g -> Some (p ^ g)
-                | Some m, Some p, Some g -> Some (m ^ p ^ g)
-              in
-               let mode_before_invoke = !Par_code_mode.current in
-               invoke_start_time := Unix.gettimeofday ();
-               hit_cap := false;
-               let tool_count_before = match !conv with
-                 | Some c -> List.length c.Types.messages
-                 | None -> 0
-               in
-               let stream_cb, streamed_text = make_stream_cb ui in
-              let invoke_result = Runtime.invoke rt
-                ~agent_id:(Par_code_mode.agent_id_for !Par_code_mode.current)
-                ~message:trimmed
-                ?conversation:!conv
-                ~on_tool_event
-                ~on_chunk:(Some stream_cb)
-                ~enable_handoff:true
-                ?system_prompt_appendix:combined_appendix
-                ()
-              in
-              last_plan_path := None;
-              (match invoke_result with
-              | Error (e, recovered_conv) ->
-                 conv := Some recovered_conv;
-                 Par_code_ui.flush_markdown ui;
-                 if string_contains_i
-                      ~haystack:(Par_code_setup.error_to_string e)
-                      ~needle:"max iterations exceeded"
-                 then hit_cap := true;
-                 Par_code_ui.render_error ui (Par_code_setup.error_to_string e);
-                 let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in ()
-              | Ok { Types.response = resp; conversation = returned_conv; _ } ->
-                 conv := Some returned_conv;
-                 Par_code_ui.flush_markdown ui;
-                  if not !streamed_text then begin
-                    (match resp.Types.text with
-                     | Some text when text <> "" ->
-                       Par_code_ui.render ui (Par_code_ui.text text)
-                     | Some _ | None ->
-                       let reason = match resp.Types.finish_reason with
-                         | Types.Content_filter -> " (content filter)"
-                         | Types.Max_tokens -> " (max tokens)"
-                         | _ -> ""
-                       in
-                       Par_code_ui.render_warning ui
-                         (Printf.sprintf "[model returned no text%s]" reason))
-                  end;
-                 Par_code_ui.render_line ui Par_code_ui.empty;
-                cost := add_usage !cost resp.Types.usage;
-                let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in ();
-                incr turn_count;
-                if !session_id = None then begin
-                  (try session_id := Some (Runtime.get_session_id rt) with _ -> ())
-                end;
-                 if not env_no_ckpt && ckpt_enabled then begin
-                   (match mem_db, !conv, !session_id with
-                    | Some t, Some c, Some sid ->
-                      let pid = Par_code_memory.resolve_project_id () in
-                      Par_code_checkpoint.maybe_checkpoint ~rt t
-                        ~in_flight:in_flight_checkpoint
-                        ~session_id:sid ~project_id:pid c
-                        ~turn_number:!turn_count ~enabled:ckpt_enabled ~interval:ckpt_interval
-                    | _ -> ())
-                 end);
-              (if mode_before_invoke = Par_code_mode.Plan
-                && !Par_code_mode.current = Par_code_mode.Build then begin
-                 (match !conv with
-                  | Some c ->
-                    (match Par_code_plan_tools.persist_plan_file c with
-                     | Some path ->
-                       last_plan_path := Some path;
-                       Par_code_ui.render_notice ui (Printf.sprintf "Plan saved to %s" path)
-                     | None -> ())
-                  | None -> ())
-                end);
-               let run_judge g =
-                 let verify_result =
-                   match goal_verify_cmd with
-                   | Some cmd ->
-                     let ic = Unix.open_process_in cmd in
-                     let buf = Buffer.create 256 in
-                     (try while true do
-                        Buffer.add_channel buf ic 256
-                      done with End_of_file -> ());
-                     let _ = Unix.close_process_in ic in
-                     Buffer.contents buf
-                   | None -> ""
-                 in
-                 (match Par_code_judge.evaluate_goal ~rt
-                    ~goal:g.Par_code_goal.objective ?conv:!conv ~verify_result () with
-                  | Ok v when v.goal_met ->
-                    Par_code_goal.mark_status Met;
-                    Par_code_goal.clear_goal ();
-                    Par_code_ui.render_success ui
-                      (Printf.sprintf "Goal verified as complete: %s" v.reasoning)
-                  | Ok v ->
-                    goal_feedback := Some v.reasoning;
-                    Par_code_ui.render_warning ui
-                      (Printf.sprintf "[judge: goal not yet met — %s]" v.reasoning)
-                  | Error msg ->
-                    Par_code_ui.render_warning ui
-                      (Printf.sprintf "[judge evaluation failed: %s]" msg))
-               in
-               if !doom_abort then begin
-                 Par_code_goal.mark_status Aborted;
-                 let reason = match !doom_abort_msg with
-                   | Some m -> m | None -> "doom loop abort triggered" in
-                 ignore (Par_code_doom_loop.write_incident
-                   ~signal:"doom_loop" ~reason
-                   ~normalized:"" ~original:"");
-                 doom_abort := false;
-                 doom_force_judge := false
-               end else if !doom_force_judge then begin
-                 (match !Par_code_goal.current with
-                  | Some g when g.Par_code_goal.status = Par_code_goal.Active -> run_judge g
-                  | _ -> ());
-                 doom_force_judge := false
-               end else
-               (match !Par_code_goal.current with
-                | Some g when g.Par_code_goal.status = Active
-                             && !Par_code_mode.current = Par_code_mode.Build ->
-                  let step = Par_code_goal.advance_step () in
-                  let triggered_by_done = !Par_code_goal.done_signal <> None in
-                  Par_code_goal.clear_done_signal ();
-                  let tool_calls_this_turn =
-                    match !conv with
-                    | Some c ->
-                      let new_msgs =
-                        let rec drop l n =
-                          if n <= 0 then l
-                          else match l with [] -> [] | _ :: t -> drop t (n - 1)
-                        in
-                        drop c.Types.messages tool_count_before
-                      in
-                      List.fold_left (fun acc (m : Types.message) ->
-                        if m.Types.role = Types.Tool then acc + 1 else acc) 0 new_msgs
-                    | None -> 0
-                  in
-                  let last_assistant_text =
-                    match !conv with
-                    | Some c ->
-                      let rec walk = function
-                        | [] -> ""
-                        | (m : Types.message) :: rest ->
-                          if m.Types.role = Types.Assistant then begin
-                            let buf = Buffer.create 256 in
-                            List.iter (function
-                              | Types.Text_block { text; _ } ->
-                                if Buffer.length buf > 0 then Buffer.add_char buf '\n';
-                                Buffer.add_string buf text
-                              | _ -> ()) m.Types.content_blocks;
-                            let t = Buffer.contents buf in
-                            if t <> "" then t else walk rest
-                          end else walk rest
-                      in
-                      walk (List.rev c.Types.messages)
-                    | None -> ""
-                  in
-                  let assistant_text_len = String.length last_assistant_text in
-                  let is_no_progress = Par_code_progress.no_progress
-                    ~tool_calls:tool_calls_this_turn
-                    ~goal_done:triggered_by_done
-                    ~text_len:assistant_text_len
-                  in
-                  if step >= g.Par_code_goal.max_steps then begin
-                    Par_code_goal.mark_status Aborted;
-                    Par_code_ui.render_warning ui "[goal aborted: max steps reached]"
-                  end else if is_no_progress then begin
-                    no_progress_streak := !no_progress_streak + 1;
-                    let reason =
-                      if !no_progress_streak >= 2 then "no_progress_x2"
-                      else "no_progress"
-                    in
-                    Par_code_goal.block_goal reason;
-                    let streak_note =
-                      if !no_progress_streak >= 2 then " (x2)" else ""
-                    in
-                    Par_code_ui.render_warning ui
-                      (Printf.sprintf "[goal: no progress this round%s \xe2\x80\x94 blocked; /goal resume to retry, /goal clear to abort]" streak_note)
-                  end else begin
-                    no_progress_streak := 0;
-                    let claims_done =
-                      Par_code_progress.claims_completion last_assistant_text
-                    in
-                    let ran_verify = ref false in
-                    let verify_exit_ok = ref false in
-                    let verify_output = ref "" in
-                    (match goal_verify_cmd with
-                     | Some cmd when (claims_done || triggered_by_done) && cmd <> "" ->
-                       ran_verify := true;
-                       let full_cmd =
-                         "sh -c " ^ Filename.quote cmd ^ " 2>&1"
-                       in
-                       let ic = Unix.open_process_in full_cmd in
-                       let buf = Buffer.create 256 in
-                       (try while true do
-                          Buffer.add_channel buf ic 256
-                        done with End_of_file -> ());
-                       let status = Unix.close_process_in ic in
-                       let output = Buffer.contents buf in
-                       verify_output := output;
-                       (match status with
-                        | Unix.WEXITED 0 ->
-                          verify_exit_ok := true;
-                          if triggered_by_done then begin
-                            Par_code_goal.mark_status Met;
-                            Par_code_goal.clear_goal ();
-                            Par_code_ui.render_success ui
-                              "\xe2\x9c\x93 goal verified by command"
-                          end
-                        | _ ->
-                          let excerpt =
-                            if String.length output > 120
-                            then String.sub output 0 120 ^ "..."
-                            else output
-                          in
-                          Par_code_goal.block_goal ("verify_failed: " ^ excerpt);
-                          goal_feedback := Some
-                            (Printf.sprintf
-                               "verify command failed: %s. Continue working toward the goal; address the failure."
-                               excerpt);
-                          Par_code_ui.render_warning ui
-                            (Printf.sprintf
-                               "[goal: verify command failed \xe2\x80\x94 blocked]\n%s"
-                               excerpt))
-                     | _ -> ());
-                    let goal_blocked_now =
-                      match !Par_code_goal.current with
-                      | Some g' ->
-                        g'.Par_code_goal.status <> Par_code_goal.Active
-                      | None -> true
-                    in
-                    if goal_blocked_now then ()
-                    else if !ran_verify && !verify_exit_ok && triggered_by_done
-                    then ()
-                    else if triggered_by_done || claims_done || step mod 3 = 0
-                    then begin
-                      let verify_result =
-                        if !ran_verify then !verify_output
-                        else match goal_verify_cmd with
-                        | Some cmd when cmd <> "" ->
-                          let full_cmd =
-                            "sh -c " ^ Filename.quote cmd ^ " 2>&1"
-                          in
-                          let ic = Unix.open_process_in full_cmd in
-                          let buf = Buffer.create 256 in
-                          (try while true do
-                             Buffer.add_channel buf ic 256
-                           done with End_of_file -> ());
-                          let _ = Unix.close_process_in ic in
-                          Buffer.contents buf
-                        | _ -> ""
-                      in
-                      (match Par_code_judge.evaluate_goal ~rt
-                         ~goal:g.Par_code_goal.objective
-                         ?conv:!conv ~verify_result ()
-                       with
-                       | Ok v when v.goal_met ->
-                         Par_code_goal.mark_status Met;
-                         Par_code_goal.clear_goal ();
-                         Par_code_ui.render_success ui
-                           (Printf.sprintf "Goal verified as complete: %s"
-                              v.reasoning)
-                       | Ok v ->
-                         goal_feedback := Some v.reasoning;
-                         Par_code_ui.render_warning ui
-                           (Printf.sprintf
-                              "[judge: goal not yet met \xe2\x80\x94 %s]"
-                              v.reasoning)
-                       | Error msg ->
-                         Par_code_ui.render_warning ui
-                           (Printf.sprintf "[judge evaluation failed: %s]"
-                              msg))
-                    end
-                  end
-                | _ -> ())
-            with ex ->
-             Par_code_ui.render_error ui (Printf.sprintf "\n[error] %s" (Printexc.to_string ex)));
-                (match Par_code_plan_tools.consume_submitted_plan () with
-                  | Some path ->
-                    last_plan_path := Some path;
-                    Par_code_ui.render_success ui
-                      (Printf.sprintf "Plan saved to %s. Switched to BUILD mode." path)
-                  | None ->
-                    if !Par_code_mode.current = Par_code_mode.Plan
-                       && not (Par_code_plan_tools.plan_file_written_since !invoke_start_time)
-                    then begin
-                      (match !conv with
-                       | Some c ->
-                         (match Par_code_plan_tools.try_synthesize_plan rt c with
-                          | Ok text when Par_code_plan_tools.has_six_sections text ->
-                            (match Par_code_plan_tools.persist_text text with
-                             | Some path ->
-                               last_plan_path := Some path;
-                               let prefix = if !hit_cap
-                                 then "planner hit iteration cap"
-                                 else "planner stopped early"
-                               in
-                               Par_code_ui.render_notice ui
-                                 (Printf.sprintf "%s \xe2\x80\x94 synthesized plan saved to %s" prefix path)
-                             | None -> ())
-                          | _ ->
-                            (match Par_code_plan_tools.persist_plan_file c with
-                             | Some path ->
-                               last_plan_path := Some path;
-                               Par_code_ui.render_warning ui
-                                 (Printf.sprintf "[plan synthesis failed \xe2\x80\x94 saved raw planner output to %s]" path)
-                             | None -> ()))
-                       | None -> ())
-                    end);
-        loop ()
+           ignore (execute_turn trimmed);
+           loop ()
       end
   in
   (match goal with
