@@ -51,8 +51,8 @@ let make_tool_event_callback (ui : Par_code_ui.backend) ?(doom = None)
         | Force_judge msg -> on_doom_action (Force_judge msg); Par_code_ui.render_warning ui msg
         | Abort msg ->
           on_doom_action (Abort msg);
-          Par_code_ui.render_error ui
-            (Printf.sprintf "\xe2\x9c\x97 goal aborted (doom loop) \xe2\x80\x94 current turn will finish, no further turns: %s" msg)
+           Par_code_ui.render_error ui
+             (Printf.sprintf "\xe2\x9c\x97 goal aborted (doom loop) \xe2\x80\x94 cancelling this turn: %s" msg)
         | Continue -> ())
      | Types.Tool_failed { task_id; tool_name; _ }, Some d ->
        let tid = Types.Task_id.to_string task_id in
@@ -67,8 +67,8 @@ let make_tool_event_callback (ui : Par_code_ui.backend) ?(doom = None)
         | Force_judge msg -> on_doom_action (Force_judge msg); Par_code_ui.render_warning ui msg
         | Abort msg ->
           on_doom_action (Abort msg);
-          Par_code_ui.render_error ui
-            (Printf.sprintf "\xe2\x9c\x97 goal aborted (doom loop) \xe2\x80\x94 current turn will finish, no further turns: %s" msg)
+           Par_code_ui.render_error ui
+             (Printf.sprintf "\xe2\x9c\x97 goal aborted (doom loop) \xe2\x80\x94 cancelling this turn: %s" msg)
         | Continue -> ())
      | _ -> ());
     match evt with
@@ -280,16 +280,57 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
   let doom_force_judge = ref false in
   let doom_abort_msg = ref None in
   let doom_abort = ref false in
- let on_tool_event = make_tool_event_callback ui ~doom:(Some doom_detector)
-     ~on_doom_action:(fun act ->
-       match act with
-       | Par_code_doom_loop.Abort msg ->
-         doom_abort := true; doom_abort_msg := Some msg
-       | Par_code_doom_loop.Force_judge _ -> doom_force_judge := true
-       | _ -> ()) () in
-   Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ ->
-     let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in
-     Par_code_ui.render_notice ui "\nBye!";
+  (* v0.7.3 W5: per-invoke cancellation state. turn_token_ref holds the
+     current turn's token while Runtime.invoke is in flight (cleared in a
+     Fun.protect finally, Oracle R3(b)); in_invoke/cancel_pending drive the
+     SIGINT ladder (reset at every execute_turn entry). *)
+  let turn_token_ref : Types.cancellation_token option ref = ref None in
+  let in_invoke = ref false in
+  let cancel_pending = ref false in
+  let on_tool_event = make_tool_event_callback ui ~doom:(Some doom_detector)
+      ~on_doom_action:(fun act ->
+        match act with
+        | Par_code_doom_loop.Abort msg ->
+          doom_abort := true; doom_abort_msg := Some msg;
+          (* W5: doom abort is REAL now — cancel the in-flight invoke
+             (Guard_cancelled, PAR SDK 0.10.0). The between-turns flag
+             consumption in run_goal_evaluation stays as the idempotent
+             fallback when no token is in flight. *)
+          (match !turn_token_ref with
+           | Some tok ->
+             Par.Cancellation.request_cancel tok
+               (Types.Guard_cancelled ("doom-loop: " ^ msg))
+           | None -> ())
+        | Par_code_doom_loop.Force_judge _ -> doom_force_judge := true
+        | _ -> ()) () in
+  (* W5: SIGINT ladder — 1st Ctrl+C during an invoke cancels the turn
+     (goal pauses on return), 2nd force-exits (Signal_ignore closes the
+     reentrant save window first, Oracle R4). At the prompt / outside a
+     model turn it still saves + exits (v0.5.4 behavior). The judge
+     window has no token — Ctrl+C there exits (documented design). *)
+  Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ ->
+    match Par_code_chain.sigint_action
+            ~in_invoke:!in_invoke ~cancel_pending:!cancel_pending with
+    | Par_code_chain.Request_cancel ->
+      (match !turn_token_ref with
+       | Some tok ->
+         cancel_pending := true;
+         Par.Cancellation.request_cancel tok Types.User_cancelled;
+         Par_code_ui.render_notice ui
+           "\n[cancelling \xe2\x80\x94 Ctrl+C again to force exit]"
+       | None ->
+         (* tiny race: invoke just returned; treat as prompt-time *)
+         let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in
+         Par_code_ui.render_notice ui "\nBye!";
+         exit 0)
+    | Par_code_chain.Force_exit ->
+      Sys.set_signal Sys.sigint Sys.Signal_ignore;
+      let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in
+      Par_code_ui.render_notice ui "\nBye!";
+      exit 0
+    | Par_code_chain.Exit_now ->
+      let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in
+      Par_code_ui.render_notice ui "\nBye!";
       exit 0));
    let exit_normally () =
      let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in
@@ -311,8 +352,10 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
      Behavior-identical pure motion; returns Chain_stop for now,
      chaining lands in W6. history_add/history_save stay in loop()'s
      input branch — chained messages are not user input. *)
-  let execute_turn (message : string) : Par_code_chain.turn_outcome =
-           (try
+   let execute_turn (message : string) : Par_code_chain.turn_outcome =
+            cancel_pending := false;
+            in_invoke := true;
+            (try
               (match !conv with
               | Some c ->
                 let estimated = Par_code_context.token_estimate c in
@@ -385,21 +428,50 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                  | Some c -> List.length c.Types.messages
                  | None -> 0
                in
-               let stream_cb, streamed_text = make_stream_cb ui in
-              let invoke_result = Runtime.invoke rt
-                ~agent_id:(Par_code_mode.agent_id_for !Par_code_mode.current)
-                ~message
-                ?conversation:!conv
-                ~on_tool_event
-                ~on_chunk:(Some stream_cb)
-                ~enable_handoff:true
-                ?system_prompt_appendix:combined_appendix
-                ()
-              in
-              last_plan_path := None;
-              (match invoke_result with
-              | Error (e, recovered_conv) ->
-                 conv := Some recovered_conv;
+                let stream_cb, streamed_text = make_stream_cb ui in
+               let invoke_result =
+                 let turn_token =
+                   Par.Cancellation.create_token (Par.Runtime.cancellation_root rt) in
+                 turn_token_ref := Some turn_token;
+                 Fun.protect
+                   ~finally:(fun () -> turn_token_ref := None; in_invoke := false)
+                   (fun () ->
+                      Runtime.invoke rt
+                        ~agent_id:(Par_code_mode.agent_id_for !Par_code_mode.current)
+                        ~message
+                        ?conversation:!conv
+                        ~on_tool_event
+                        ~on_chunk:(Some stream_cb)
+                        ~enable_handoff:true
+                        ?system_prompt_appendix:combined_appendix
+                        ~cancellation_token:turn_token
+                        ())
+               in
+               last_plan_path := None;
+               (match invoke_result with
+               | Error (Types.Cancelled reason, recovered_conv) ->
+                  conv := Some recovered_conv;
+                  Par_code_ui.flush_markdown ui;
+                  let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in ();
+                  incr turn_count;
+                  (match Par_code_chain.cancel_outcome reason with
+                   | Par_code_chain.Pause_goal ->
+                     (match !Par_code_goal.current with
+                      | Some g when g.Par_code_goal.status = Par_code_goal.Active ->
+                        Par_code_goal.pause_goal ();
+                        Par_code_ui.render_notice ui
+                          "[goal paused \xe2\x80\x94 /goal resume to continue]"
+                      | _ -> Par_code_ui.render_notice ui "[cancelled by user]")
+                   | Par_code_chain.Abort_goal r ->
+                     Par_code_goal.mark_status Par_code_goal.Aborted;
+                     ignore (Par_code_doom_loop.write_incident
+                               ~signal:"doom_loop" ~reason:r ~normalized:"" ~original:"");
+                     Par_code_ui.render_error ui
+                       ("\xe2\x9c\x97 goal aborted (doom loop) \xe2\x80\x94 " ^ r));
+                  doom_abort := false; doom_force_judge := false;
+                  cancel_pending := false
+               | Error (e, recovered_conv) ->
+                  conv := Some recovered_conv;
                  Par_code_ui.flush_markdown ui;
                  if string_contains_i
                       ~haystack:(Par_code_setup.error_to_string e)
