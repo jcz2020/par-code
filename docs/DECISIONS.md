@@ -1,5 +1,77 @@
 # Decisions
 
+### Open PAR SDK feedback
+
+- Mode concept → [2026-07-27] First-class mode concept
+- Plan/task primitive → [2026-07-27] Plan/task primitive
+- `set_session_id` mutex → [2026-07-19] 3 items surfaced by v0.4.1 async work
+- `last_llm_call` atomicity → [2026-07-19] 3 items surfaced by v0.4.1 async work
+- `invoke_async` `?save`/`?update_current` → [2026-07-19] 3 items surfaced by v0.4.1 async work
+- `Think_tag_strip` facade → [2026-08-15] Think_tag_strip not re-exported via Par facade
+- Nested-invoke depth-limiting — anticipated for v0.7.0+, still unfilled, no par-code pain yet
+
+## [2026-08-15] PAR SDK Feedback: v0.7.2 trio — consumed by PAR SDK 0.10.0
+
+**Tag**: PAR SDK Feedback
+
+**变更前**: Three gaps filed during v0.7.2 (referenced in the v0.7.2 scope
+decision): (1) write-tool absolute-path error lacked actionable guidance —
+the agent saw a raw `Permission denied` or `No such file or directory` when
+attempting to write outside the workspace, with no structured metadata or
+remediation hint; (2) in-invoke cancellation API missing — there was no
+first-class way to signal cancellation mid-turn from par-code's doom-loop
+abort or user-initiated Ctrl+C pause; (3) workspace path-admission semantics
+unconfirmed — par-code's `auto_project` classifier used argv+regex heuristics
+to decide whether a bash command's paths stay inside the workspace, but the
+PAR SDK had no canonical admission-check API to validate against.
+
+**变更后**: All three gaps consumed by PAR SDK 0.10.0:
+1. **Actionable tool errors**: PAR 0.10.0 ships instructive path-rejection
+   messages with metadata codes (e.g. `METADATA:workspace_violation`) on
+   write-tool attempts outside the workspace. Agent sees clear guidance
+   instead of raw OS errors.
+2. **First-class cancellation**: PAR 0.10.0 introduces `Types.cancel_reason`,
+   a `Cancellation` module, and per-iteration/tool/chunk cancellation
+   checkpoints. par-code v0.7.3 consumes this for doom-loop abort (Guard
+   cancel) and Ctrl+C pause.
+3. **Workspace path-admission**: PAR 0.10.0 exposes `Par.Workspace.admit` +
+   `workspace_*` metadata codes. par-code's `auto_project` classifier already
+   consumes `admit` for bash approval classification.
+
+**原因**: v0.7.2 scope decision identified these as blockers for goal-mode
+autonomous chaining. PAR SDK 0.10.0 shipped all three primitives, closing
+every gap.
+
+**影响范围**: lib/par_code_setup.ml (write-tool error surfacing),
+lib/par_code_repl.ml (doom abort + Ctrl+C cancellation wiring),
+lib/par_code_config.ml (bash approval auto_project classifier).
+
+**回退方式**: N/A (upstream shipped; workarounds removed).
+
+**已知限制**: none open.
+
+## [2026-08-15] PAR SDK Feedback: Think_tag_strip not re-exported via Par facade
+
+**Tag**: PAR SDK Feedback
+
+**变更前**: par-code carries a local 23-line `think_tag_strip` middleware
+(lib/par_code_setup.ml:18-40, 8 agent-registration sites) because PAR ships
+`lib/middleware/think_tag_strip.ml` but omits it from the Par facade module
+list (lib/par.ml).
+
+**变更后**: filed as open feedback — trivial upstream ask: add
+`module Think_tag_strip = Think_tag_strip` to the facade.
+
+**原因**: single source of truth; par-code duplicates logic PAR already
+maintains.
+
+**影响范围**: PAR lib/par.ml only; retirement on par-code side = replace
+local middleware with `Par.Think_tag_strip.create ()`.
+
+**回退方式**: N/A (filing only).
+
+**已知限制**: severity trivial; no par-code pain beyond duplication.
+
 ## [2026-08-15] v0.7.2 实现期决策：invoke_generate 拒绝带工具 agent → 专用 plan-synthesizer
 
 **Tag**: PAR SDK 边界 / 架构
@@ -196,6 +268,8 @@ mid-response.
 
 **Tag**: PAR SDK Feedback
 
+> **Retired [2026-08-15]**: fixed in PAR SDK 0.9.1 (tool_call_id correlation, 5 bugs). Retirement trigger met — the plan auto-save fallback it mandated was already superseded by the v0.7.2 synthesis fallback (kept as a quality feature, not a workaround).
+
 **变更前**: par-code v0.7.0 plan mode walkthrough with MiniMax-M3 found that
 when the LLM makes parallel tool calls and some fail, the subsequent API
 request returns 400 with `"invalid params, tool result's tool id
@@ -336,12 +410,9 @@ code in the production streaming path before 0.8.6) are now reachable.
   Superseded marker added today**. PAR v0.8.1 exposed `last_used_at` /
   `usage_count` on the public type; `lib/par_code_memory.ml:304-305` reads
   them directly. The v0.4.3 supplementary-SQL fetch is gone.
-- **C5 (streaming error propagation)** — **retirement-eligible but not yet
-  consumed**. PAR v0.8.6 fix is in `Http_client`, but `lib/par_code_repl.ml:407,469`
-  still shows the generic `"[no response text received — provider streaming
-  may be broken]"` fallback. To retire: surface PAR SDK's `error_category`
-  (now populated for non-2xx streaming) instead of the generic message.
-  Defer to v0.7.0 cycle.
+- **C5 (streaming error propagation)** — **Retired [2026-08-15] (consumed)**.
+  Fallback string removed from `lib/` (grep-verified); `error_category` surfaced at
+  all rendering sites.
 
 **D. Two PAR SDK gaps anticipated for v0.7.0** (NOT yet filed as formal
 feedback — per `par-sdk-feedback` skill, file when implementation actually
@@ -878,6 +949,7 @@ source changes from this entry alone.
      retirement plan: revert to Runtime API once upstream ships.
 
 2. **`openai_provider` streaming omits `stream_options.include_usage`**
+   > **Retired [2026-08-15]**: fixed in PAR SDK 0.8.3 (stream_options.include_usage + empty-choices usage propagation); /cost add_usage consumes streamed usage since v0.5.6.
    (`/root/dev/PAR/lib/providers/openai_provider.ml:259`). The provider
    adds `("stream", `Bool true)` to the request body but never adds
    `("stream_options", `Assoc [("include_usage", `Bool true)])`. Per
