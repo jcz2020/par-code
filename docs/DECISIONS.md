@@ -10,6 +10,119 @@
 - `Think_tag_strip` facade → [2026-08-15] Think_tag_strip not re-exported via Par facade
 - Nested-invoke depth-limiting — anticipated for v0.7.0+, still unfilled, no par-code pain yet
 
+## [2026-08-15] v0.7.3 架构: Chaining structure (D1) + judge cadence freeze (D5)
+
+**Tag**: v0.7.3 架构
+
+**变更前**: Turn body was inline in `loop()`, no continuation type, no
+chaining driver. Judge cadence was implicitly "after every turn."
+
+**变更后**: Extracted `execute_turn` (returns `Chain_continue of string |
+Chain_stop`) and `run_chain` (tail-recursive driver). Continuation message
+is a generic nudge ("Continue working toward the goal.") with no feedback
+parameter. Judge cadence frozen: every 3 steps + on completion claims +
+on `goal_done` signal. New module `Par_code_chain` with pure decision
+functions + IO companion `run_goal_evaluation`.
+
+**原因**: Testability (pure functions in chain.ml), file-size limit
+(repl.ml stays under 800), single seam for both prompt-initiated and
+chain-initiated turns. Cadence freeze controls cost (chaining multiplies
+turns, unlimited judge calls would blow budget).
+
+**影响范围**: lib/par_code_chain.ml (new), lib/par_code_repl.ml
+(extract + wiring), lib/par_code_chain.mli.
+
+**回退方式**: Revert commits 6 and 8 independently; repl.ml returns
+to inline turn body.
+
+**已知限制**: none open.
+
+## [2026-08-15] v0.7.3 架构: SIGINT ladder (D2) + doom guard-cancel (D3) + cancelled-conv handling (D4)
+
+**Tag**: v0.7.3 架构
+
+**变更前**: Ctrl+C always saved and exited. Doom-loop abort set a
+between-turns flag only ("current turn will finish"). Cancelled invokes
+died, conversation lost.
+
+**变更后**: Stateful SIGINT ladder — 1st Ctrl+C during invoke cancels the
+turn (goal pauses), 2nd force-exits (Signal_ignore closes reentrant-save
+window). Doom abort sends `Guard_cancelled` through the per-invoke
+cancellation token for real mid-invoke unwind. Cancelled turns save the
+recovered conversation, increment turn_count, render a reason-distinct
+notice (`User_cancelled` → paused, `Guard_cancelled` → aborted +
+incident), and never auto-resume.
+
+**原因**: v0.7.2 shipped a lying abort text; PAR SDK 0.10.0 provides
+real cancellation checkpoints. Preserving recovered conversation follows
+PAR's replay-validity contract. Ctrl+C escape hatch is essential for
+stuck-tool scenarios in a synchronous REPL.
+
+**影响范围**: lib/par_code_repl.ml (signal handler, execute_turn,
+cancelled arm), lib/par_code_chain.ml (sigint_action, cancel_outcome).
+
+**回退方式**: Revert commit 7; Ctrl+C returns to save+exit, doom
+returns to between-turns flag.
+
+**已知限制**: synchronous REPL means no mid-chain steering between
+turns (steering queue noted as future option).
+
+## [2026-08-15] v0.7.3 架构: --goal auto-start (D6) + goal_auto_chain kill switch (D7)
+
+**Tag**: v0.7.3 架构
+
+**变更前**: `--goal` set the objective but idled at the prompt.
+Chaining was the only behavior; no kill switch.
+
+**变更后**: `--goal <objective>` auto-starts the autonomous chain
+immediately. `/goal <objective>` from the prompt also chains after the
+next build turn. Restored goals from disk stay memory-only (no
+auto-continue). `goal_auto_chain : bool = true` config field (default
+true; false = v0.7.2 single-turn judge-supervised semantics) added at
+all 9 config touchpoints (type, default, JSON, merge, update_field,
+wizard, show, valid-keys, display).
+
+**原因**: Makes `--goal` honest (user expects autonomy). Kill switch
+preserves escape hatch for debugging or cost-sensitive environments.
+
+**影响范围**: lib/par_code_repl.ml (run_chain call site),
+bin/cli_args.ml (--goal docstring), lib/par_code_config.ml (+wizard).
+
+**回退方式**: Set `goal_auto_chain=false` or revert commits 4/9.
+
+**已知限制**: none open.
+
+## [2026-08-15] v0.7.3 行为: Error-streak guard + R1 ladder-skip + N3 retry note
+
+**Tag**: v0.7.3 架构
+
+**变更前**: Only `goal_max_steps` (50) bounded chain length. Error
+turns ran the full goal ladder (advance_step, no_progress, claims,
+judge), misattributing "no_progress" from stale/empty assistant text.
+
+**变更后**: 2 consecutive non-cancelled, non-hit-cap invoke errors
+→ `blocked: llm_error_x2`, chain stops. Non-cancelled error turns
+skip the entire goal evaluation ladder (Oracle R1) — no_progress/judge
+semantics presume a real assistant reply, and an errored turn produced
+none. Doom-flag consumption always runs so mid-turn doom aborts are
+honored even on errored turns.
+
+**原因**: Dead endpoints should not churn 50 wasted LLM calls in CI
+or production. Ladder-on-Error caused nondeterministic blocking (fresh
+session: 1 error → no_progress; ongoing session: 2 errors →
+llm_error_x2).
+
+**影响范围**: lib/par_code_chain.ml (should_continue, counts_invoke_error,
+run_goal_evaluation ~skip_ladder), lib/par_code_repl.ml (streak wiring,
+llm_error_x2 block path).
+
+**回退方式**: Revert commit 8 (hunk-level).
+
+**已知限制**: PAR ships a Retry middleware (retry on
+Timeout/Rate_limited/External_failure) but par-code does NOT wire it —
+so x2 blocks on transient provider blips. Wiring retry is a future scope
+call; the block is soft/resumable via `/goal resume`.
+
 ## [2026-08-15] PAR SDK Feedback: v0.7.2 trio — consumed by PAR SDK 0.10.0
 
 **Tag**: PAR SDK Feedback

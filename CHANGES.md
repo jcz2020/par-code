@@ -1,5 +1,66 @@
 # CHANGES
 
+## v0.7.3 (unreleased)
+
+> **Status**: Implementation complete. Live-tested with a real LLM pending
+> dogfood gate (W10).
+
+### Added — Autonomous goal chaining
+
+- `run_chain` driver: after each turn, the chaining decision checks goal
+  status, mode, auto_chain flag, doom/cancel state, and error streak. On
+  `Chain_continue`, the next turn fires automatically with a generic nudge
+  message ("Continue working toward the goal."). Judge feedback rides the
+  goal appendix on the following turn, not the continuation message.
+- `--goal <objective>` auto-starts the chain immediately with the objective
+  as the first message. Restored goals from disk never auto-continue; `/goal
+  resume` is explicit.
+- `goal_auto_chain` config field (default `true`). Set to `false` for
+  v0.7.2 single-turn judge-supervised semantics (feedback printed, waits at
+  prompt).
+- New module `Par_code_chain` — pure chain-decision functions
+  (`should_continue`, `continuation_message`, `cancel_outcome`,
+  `sigint_action`, `counts_invoke_error`) + IO companion
+  (`run_goal_evaluation`).
+
+### Added — Real in-invoke cancellation (PAR SDK 0.10.0)
+
+- Doom-loop abort now sends `Guard_cancelled` through the per-invoke
+  cancellation token, cancelling the current turn mid-invoke (seconds, not
+  turn-end). The between-turns flag fallback remains as an idempotent path.
+- Ctrl+C during a model/tool turn: first press cancels gracefully, pauses
+  the goal, saves the recovered conversation, and returns to the prompt.
+  Second press force-exits immediately (`Sys.Signal_ignore` closes the
+  reentrant-save window first).
+- Cancelled turns save the recovered conversation, increment `turn_count`,
+  and set `User_cancelled` → goal paused / `Guard_cancelled` → goal
+  aborted with incident.
+
+### Added — Error-streak guard
+
+- Two consecutive non-cancelled invoke errors (excluding iteration-cap
+  hits) → `blocked: llm_error_x2`, chain stops. The block is soft and
+  resumable via `/goal resume`.
+- Non-cancelled error turns skip the goal evaluation ladder entirely (no
+  no_progress, no judge, no completion-claim check) — an errored turn
+  produced no real assistant reply.
+
+### Changed — Doom abort rendering
+
+- Doom abort text is now honest: "cancelling this turn" (was misleading
+  about timing in v0.7.2).
+
+### Documentation — PAR SDK feedback
+
+- Retired: tool_call_id correlation (PAR 0.9.1), `include_usage` streaming
+  option (PAR 0.8.6), C5 streaming error propagation (PAR 0.8.6).
+- Consumed: v0.7.2 trio (write error guidance, in-invoke cancellation,
+  workspace admission) by PAR SDK 0.10.0.
+- Filed: `Think_tag_strip` facade gap (trivial, no par-code pain).
+- PAR SDK floor bumped to `>= 0.10.0`.
+
+---
+
 ## v0.7.2 — Goal usability hardening
 
 > **Status**: Shipped. Every claim live-tested with a real LLM during the

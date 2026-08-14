@@ -275,16 +275,68 @@ appear in the memory index without waiting for the session to end.
 ## Goal Mode
 
 `/goal <objective>` sets an objective the agent works toward, with an
-independent judge model evaluating progress (v0.7.0). v0.7.2 hardens the
-lifecycle:
+independent judge model evaluating progress. v0.7.3 adds autonomous chaining:
+once a goal is set, the agent chains turns without waiting for user input,
+continuing until the judge verifies completion, a stop condition fires, or
+you hit Ctrl+C.
+
+### Commands
 
 ```
-/goal <objective>   set objective (switches to build mode)
+/goal <objective>   set objective (switches to build mode; starts chain)
 /goal               status (step N/M, incl. blocked reason)
 /goal pause         pause (agent stops evaluating)
 /goal resume        resume from paused/blocked
 /goal clear         drop the goal
 ```
+
+### Autonomous chaining
+
+When you set a goal (via `/goal` or `--goal`), the agent enters a chain: it
+executes a turn, the chain driver decides whether to continue, and if so the
+next turn fires automatically with a generic continuation nudge. Judge
+feedback is injected via the goal appendix on the following turn, not in the
+continuation message itself.
+
+`--goal <objective>` auto-starts the chain immediately with the objective as
+the first message. Restored goals from disk never auto-continue, you must
+`/goal resume` explicitly.
+
+### Stop conditions
+
+The chain stops (prompt returns) when any of these hold:
+
+- **Goal met** (judge verdict or verify command pass)
+- **Aborted** (doom-loop abort)
+- **Blocked** (`no_progress`, completion-claim failure, or `llm_error_x2`)
+- **Paused** (Ctrl+C)
+- **Max steps** reached
+- **Mode left Build** (switched to Plan)
+- **`goal_auto_chain` = false** (config kill switch, see below)
+
+### Error-streak guard
+
+Two consecutive non-cancelled invoke errors (excluding iteration-cap hits)
+trigger `blocked: llm_error_x2`. The chain stops, the goal is resumable
+via `/goal resume`. Non-cancelled error turns skip the entire goal evaluation
+ladder (no no_progress, no judge, no completion-claim check) because an
+errored turn produced no real assistant reply.
+
+### Ctrl+C semantics
+
+- **During a model/tool turn**: first Ctrl+C cancels the current turn
+  gracefully, pauses the goal, saves the recovered conversation, and returns
+  to the prompt. Second Ctrl+C force-exits immediately (signal ignored,
+  conversation saved). The notice reads `[goal paused — /goal resume to continue]`.
+- **At the prompt, during the judge window, or between turns**: saves and
+  exits (v0.5.4 behavior, unchanged).
+
+### Mid-chain input
+
+While the chain runs the REPL is synchronous. Only Ctrl+C reaches it. Slash
+commands and normal input resume at the prompt after the chain stops.
+
+### Lifecycle and statuses
 
 - **Statuses**: `active` → `met` / `aborted` (one-way) or `blocked: <reason>`
   (soft-stopped, resumable). Every transition flushes to
@@ -292,6 +344,9 @@ lifecycle:
 - **Activation is memory-only**: after restart or `--resume`, a saved goal is
   restored as status-only — the agent never auto-continues; you must
   `/goal resume`.
+
+### Guardrails
+
 - **No-progress guard**: a turn with zero tool calls, no `goal_done`, and a
   short reply blocks the goal (`blocked: no_progress`) with a visible notice.
 - **Completion-claim guard**: configure `goal_verify_command` (e.g.
@@ -302,10 +357,19 @@ lifecycle:
   trusted).
 - **Doom-loop guard** (v0.7.2): three detectors — identical-failing-bash
   streaks (normalized), near-identical edits (shingle Jaccard), and
-  same-kind action streaks — escalate nudge → forced judge → abort. Abort is
-  real: the goal is marked `aborted` on disk and an incident record lands in
+  same-kind action streaks — escalate nudge → forced judge → real mid-invoke
+  abort (PAR SDK 0.10.0 cancellation). The current turn is cancelled, the goal
+  is marked `aborted` on disk, and an incident record lands in
   `.par/goals/incidents/`. Thresholds configurable (`doom_bash_retries`,
   `doom_edit_matches`, `doom_action_streak`).
+
+### Config fields
+
+| Field | Default | Purpose |
+|---|---|---|
+| `goal_auto_chain` | `true` | Autonomous chaining on/off. `false` gives v0.7.2 single-turn judge-supervised semantics (feedback printed, waits at prompt). |
+| `goal_max_steps` | `50` | Maximum turns before forced abort. |
+| `goal_verify_command` | (none) | Shell command to verify completion claims. |
 
 ## Bash approval
 
@@ -409,6 +473,7 @@ Version numbers stay minimal (no 1.0 until core parity is earned).
 | **v0.7.0** ✅ | Goal-driven autonomy — `/goal` command + independent judge model + doom-loop detection + `goal_done` agent tool + `--goal` CLI flag. Judge-supervised mode (evaluates after each turn; full autonomous chaining in v0.7.1). PAR SDK 0.8.6. *"It won't declare done until the goal is truly met."* |
 | **v0.7.1** ✅ | Planner budget + REPL exit-path hotfix — dedicated `planner_max_iterations` config field (default 15, was hardcoded 8) + `early_stopping_method = Generate` on planner (synthesizes a best answer instead of error on budget exhaustion) + unified `exit_normally ()` across `/exit`/Ctrl+D/Ctrl+C (kills the double-extraction-on-exit bug). *"Planner stops running out of steam mid-thought; exit actually exits."* |
 | **v0.7.2** ✅ | Goal usability hardening — visible confirmation prompts (bash + plan gate), reasoning-model thinking timer, three-class bash approval (`ask`/`auto_project`/`always`) with always-pattern persistence, planner synthesis fallback, doom-loop v2 (three signals + real abort + incident records), goal lifecycle (blocked status + disk flush + memory-only activation), no-progress & completion-claim guardrails. *"It can actually finish a goal — and you can see what it's waiting for."* |
+| **v0.7.3** | Autonomous goal chaining — give it a goal, it works until the judge verifies it, and Ctrl+C actually stops it mid-stride. |
 | **v0.8.0** | Best-of-N reasoning — max-mode (parallel candidates + judge selection). *"It tries several approaches and picks the best."* |
 | **v0.9.0** | Self-improvement — `/dream` + `/distill` + custom slash commands. *"It turns my repeated workflows into reusable skills."* |
 | **v0.10.0** | Compose mode — spec-driven orchestration with plan/execute/review/tdd/debug/verify/merge skills. *"Give a spec, it designs, codes, reviews, and tests end-to-end."* |
