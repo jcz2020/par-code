@@ -347,10 +347,33 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
        () with
      | Error e ->
        ui_render_warning (Printf.sprintf "Warning: extractor agent not registered: %s" (error_to_string e))
-        | Ok extractor ->
-        (match Runtime.register_agent rt extractor with
-         | Error e -> ui_render_warning (Printf.sprintf "Warning: extractor agent registration failed: %s" (error_to_string e))
-         | Ok () -> ()));
+         | Ok extractor ->
+         (match Runtime.register_agent rt extractor with
+          | Error e -> ui_render_warning (Printf.sprintf "Warning: extractor agent registration failed: %s" (error_to_string e))
+          | Ok () -> ()));
+    (* Register the plan-synthesizer agent (v0.7.2 W2). Tools=[] —
+       invoke_generate rejects tool-carrying agents, so the synthesis fallback
+       needs a dedicated no-tool agent with a plan-shape system prompt. *)
+    (match Runtime.make_agent
+       ~id:Par_code_plan_tools.synthesizer_agent_id
+       ~system_prompt:(Types.stable_prompt
+         "You are a plan synthesizer. You receive a coding agent's investigation \
+          transcript and must output the COMPLETE implementation plan as markdown. \
+          The plan MUST contain exactly six sections in this order: ## Goal, \
+          ## Approach, ## Files to Touch, ## Risks, ## Open Questions, ## Steps. \
+          Never ask questions. Never investigate. Output only the plan markdown.")
+       ~model:model_cfg
+       ~tools:[]
+       ~middleware:[think_tag_strip_middleware]
+       ~max_iterations:1
+       ()
+      with
+     | Error e ->
+       ui_render_warning (Printf.sprintf "Warning: plan-synthesizer agent not registered: %s" (error_to_string e))
+     | Ok synthesizer ->
+       (match Runtime.register_agent rt synthesizer with
+        | Error e -> ui_render_warning (Printf.sprintf "Warning: plan-synthesizer agent registration failed: %s" (error_to_string e))
+        | Ok () -> ()));
     (match Runtime.make_agent
        ~id:Par_code_checkpoint.checkpoint_writer_agent_id
        ~system_prompt:(Types.stable_prompt Par_code_checkpoint.checkpoint_writer_system_prompt)
@@ -400,26 +423,15 @@ Call at most 5 tools TOTAL. Each tool call should gather specific information.
 STOP investigating after 5 tool calls. Do NOT call a 6th tool.
 
 ## Phase 2: Write Plan
-Call write_plan_file with your complete plan. Use a descriptive filename
-(e.g. "add-feature.md"). The content MUST include these markdown sections:
-
+Call write_plan_file with filename="<feature-name>.md" and content=the complete
+plan markdown. The content MUST be exactly these six sections in order:
 ## Goal
-<one-paragraph restatement>
-
 ## Approach
-<strategy with rationale>
-
 ## Files to Touch
-<file paths with notes>
-
 ## Risks
-<potential issues>
-
 ## Open Questions
-<decisions needing user input>
-
 ## Steps
-<numbered implementation steps>
+This call is mandatory before plan_submit — never skip it.
 
 ## Phase 3: Submit
 Call plan_submit with your final plan as the "plan" argument.

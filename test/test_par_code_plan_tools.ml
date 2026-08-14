@@ -494,4 +494,74 @@ let () =
           let r = Par_code_plan_tools.sanitize_plan_filename "a/b/c.md" in
           Alcotest.(check bool) "no slashes" true (not (String.contains r '/')));
       ];
+      "has_six_sections", [
+        Alcotest.test_case "positive_all_present" `Quick (fun () ->
+          let text = "## Goal\nDo the thing\n\n## Approach\nUse the force\n\n\
+                      ## Files to Touch\nfoo.ml\n\n## Risks\nNone\n\n\
+                      ## Open Questions\nTBD\n\n## Steps\n1. Write code\n" in
+          Alcotest.(check bool) "six sections" true
+            (Par_code_plan_tools.has_six_sections text));
+        Alcotest.test_case "positive_case_insensitive" `Quick (fun () ->
+          let text = "## goal\n\n## APPROACH\n\n## Files To Touch\n\n\
+                      ## RISKS\n\n## open questions\n\n## STEPS\n" in
+          Alcotest.(check bool) "case insensitive" true
+            (Par_code_plan_tools.has_six_sections text));
+        Alcotest.test_case "negative_missing_one" `Quick (fun () ->
+          let text = "## Goal\n\n## Approach\n\n## Files to Touch\n\n\
+                      ## Risks\n\n## Open Questions\n" in
+          Alcotest.(check bool) "missing steps" false
+            (Par_code_plan_tools.has_six_sections text));
+        Alcotest.test_case "negative_empty" `Quick (fun () ->
+          Alcotest.(check bool) "empty" false
+            (Par_code_plan_tools.has_six_sections ""));
+        Alcotest.test_case "negative_preamble_only" `Quick (fun () ->
+          Alcotest.(check bool) "preamble" false
+            (Par_code_plan_tools.has_six_sections "I have enough context to proceed."));
+      ];
+      "plan_file_written_since", [
+        Alcotest.test_case "file_after_since" `Quick (fun () ->
+          with_temp_dir (fun tmpdir ->
+            let old_cwd = Sys.getcwd () in
+            Sys.chdir tmpdir;
+            Fun.protect ~finally:(fun () -> Sys.chdir old_cwd) (fun () ->
+              let plans_dir = make_plans_dir tmpdir in
+              let path = Filename.concat plans_dir "test.md" in
+              write_file path "content";
+              let since = Unix.gettimeofday () -. 10.0 in
+              Alcotest.(check bool) "file after since" true
+                (Par_code_plan_tools.plan_file_written_since since))));
+        Alcotest.test_case "file_before_since" `Quick (fun () ->
+          with_temp_dir (fun tmpdir ->
+            let old_cwd = Sys.getcwd () in
+            Sys.chdir tmpdir;
+            Fun.protect ~finally:(fun () -> Sys.chdir old_cwd) (fun () ->
+              let plans_dir = make_plans_dir tmpdir in
+              let path = Filename.concat plans_dir "test.md" in
+              write_file path "content";
+              Unix.utimes path 1000.0 1000.0;
+              let since = Unix.gettimeofday () in
+              Alcotest.(check bool) "file before since" false
+                (Par_code_plan_tools.plan_file_written_since since))));
+        Alcotest.test_case "no_dir" `Quick (fun () ->
+          with_temp_dir (fun tmpdir ->
+            let old_cwd = Sys.getcwd () in
+            Sys.chdir tmpdir;
+            Fun.protect ~finally:(fun () -> Sys.chdir old_cwd) (fun () ->
+              Alcotest.(check bool) "no plans dir" false
+                (Par_code_plan_tools.plan_file_written_since 0.0))));
+      ];
+      "persist_text", [
+        Alcotest.test_case "writes_text" `Quick (fun () ->
+          with_temp_dir (fun tmpdir ->
+            let old_cwd = Sys.getcwd () in
+            Sys.chdir tmpdir;
+            Fun.protect ~finally:(fun () -> Sys.chdir old_cwd) (fun () ->
+              match Par_code_plan_tools.persist_text "## Goal\nTest plan" with
+              | Some path ->
+                Alcotest.(check bool) "file exists" true (Sys.file_exists path);
+                let content = In_channel.with_open_bin path In_channel.input_all in
+                Alcotest.(check bool) "content" true
+                  (string_contains content "## Goal")
+              | None -> Alcotest.fail "persist_text returned None")));
+      ];
     ]

@@ -5,6 +5,17 @@
 
 open Par
 
+let string_contains_i ~haystack ~needle =
+  let h = String.lowercase_ascii haystack in
+  let n = String.lowercase_ascii needle in
+  let lh = String.length h and ln = String.length n in
+  let rec go i =
+    if i + ln > lh then false
+    else if String.sub h i ln = n then true
+    else go (i + 1)
+  in
+  ln = 0 || go 0
+
 let stream_print_chunk (ui : Par_code_ui.backend) (chunk : Types.llm_response_chunk) =
   Par_code_ui.render_llm_chunk ui chunk
 
@@ -176,6 +187,8 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
   let cost = ref empty_cost in
   let last_plan_path : string option ref = ref None in
   let goal_feedback : string option ref = ref None in
+  let invoke_start_time = ref 0.0 in
+  let hit_cap = ref false in
   let loaded_cfg = Par_code_config.load () in
   let ckpt_enabled = match loaded_cfg with Some c -> c.Par_code_config.checkpoint_enabled | None -> true in
   let ckpt_interval = match loaded_cfg with Some c -> c.Par_code_config.checkpoint_interval | None -> 10 in
@@ -447,8 +460,10 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                 | None, Some p, Some g -> Some (p ^ g)
                 | Some m, Some p, Some g -> Some (m ^ p ^ g)
               in
-              let mode_before_invoke = !Par_code_mode.current in
-              let stream_cb, streamed_text = make_stream_cb ui in
+               let mode_before_invoke = !Par_code_mode.current in
+               invoke_start_time := Unix.gettimeofday ();
+               hit_cap := false;
+               let stream_cb, streamed_text = make_stream_cb ui in
               let invoke_result = Runtime.invoke rt
                 ~agent_id:(Par_code_mode.agent_id_for !Par_code_mode.current)
                 ~message:trimmed
@@ -464,6 +479,10 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
               | Error (e, recovered_conv) ->
                  conv := Some recovered_conv;
                  Par_code_ui.flush_markdown ui;
+                 if string_contains_i
+                      ~haystack:(Par_code_setup.error_to_string e)
+                      ~needle:"max iterations exceeded"
+                 then hit_cap := true;
                  Par_code_ui.render_error ui (Par_code_setup.error_to_string e);
                  let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in ()
               | Ok { Types.response = resp; conversation = returned_conv; _ } ->
@@ -551,21 +570,41 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
             with ex ->
              Par_code_ui.render_error ui (Printf.sprintf "\n[error] %s" (Printexc.to_string ex)));
                 (match Par_code_plan_tools.consume_submitted_plan () with
-                 | Some path ->
-                   last_plan_path := Some path;
-                   Par_code_ui.render_success ui
-                     (Printf.sprintf "Plan saved to %s. Switched to BUILD mode." path)
-                 | None ->
-                   if !Par_code_mode.current = Par_code_mode.Plan then
-                     (match !conv with
-                      | Some c ->
-                        (match Par_code_plan_tools.persist_plan_file c with
-                         | Some path ->
-                           last_plan_path := Some path;
-                           Par_code_ui.render_notice ui
-                             (Printf.sprintf "Plan auto-saved to %s (planner reached step limit)." path)
-                         | None -> ())
-                      | None -> ()));
+                  | Some path ->
+                    last_plan_path := Some path;
+                    Par_code_ui.render_success ui
+                      (Printf.sprintf "Plan saved to %s. Switched to BUILD mode." path)
+                  | None ->
+                    Printf.eprintf "[W2GATE] mode=%b written_since=%b conv=%b\n%!"
+                      (!Par_code_mode.current = Par_code_mode.Plan)
+                      (Par_code_plan_tools.plan_file_written_since !invoke_start_time)
+                      (!conv <> None);
+                    if !Par_code_mode.current = Par_code_mode.Plan
+                       && not (Par_code_plan_tools.plan_file_written_since !invoke_start_time)
+                    then begin
+                      (match !conv with
+                       | Some c ->
+                         (match Par_code_plan_tools.try_synthesize_plan rt c with
+                          | Ok text when Par_code_plan_tools.has_six_sections text ->
+                            (match Par_code_plan_tools.persist_text text with
+                             | Some path ->
+                               last_plan_path := Some path;
+                               let prefix = if !hit_cap
+                                 then "planner hit iteration cap"
+                                 else "planner stopped early"
+                               in
+                               Par_code_ui.render_notice ui
+                                 (Printf.sprintf "%s \xe2\x80\x94 synthesized plan saved to %s" prefix path)
+                             | None -> ())
+                          | _ ->
+                            (match Par_code_plan_tools.persist_plan_file c with
+                             | Some path ->
+                               last_plan_path := Some path;
+                               Par_code_ui.render_warning ui
+                                 (Printf.sprintf "[plan synthesis failed \xe2\x80\x94 saved raw planner output to %s]" path)
+                             | None -> ()))
+                       | None -> ())
+                    end);
         loop ()
       end
   in

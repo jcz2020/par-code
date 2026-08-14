@@ -321,6 +321,120 @@ let write_plan_file_tool : Types.tool_binding =
   in
   { descriptor; handler }
 
+(* -- W2: Force-synthesis helpers ------------------------------------------- *)
+
+let string_contains_i ~(haystack : string) ~(needle : string) : bool =
+  let h = String.lowercase_ascii haystack in
+  let n = String.lowercase_ascii needle in
+  let lh = String.length h and ln = String.length n in
+  let rec go i =
+    if i + ln > lh then false
+    else if String.sub h i ln = n then true
+    else go (i + 1)
+  in
+  ln = 0 || go 0
+
+(** [has_six_sections text] returns [true] if [text] contains all six required
+    plan section headings (case-insensitive). *)
+let has_six_sections (text : string) : bool =
+  let sections = [
+    "## goal"; "## approach"; "## files to touch";
+    "## risks"; "## open questions"; "## steps";
+  ] in
+  List.for_all (fun sec -> string_contains_i ~haystack:text ~needle:sec) sections
+
+(** [plan_file_written_since ts] returns [true] if any file in [.par/plans/]
+    has an mtime ≥ [ts]. *)
+let plan_file_written_since (since : float) : bool =
+  try
+    let plans_dir = ".par/plans" in
+    if not (Sys.file_exists plans_dir) then false
+    else
+      let files = Sys.readdir plans_dir in
+      Array.exists (fun f ->
+        let path = Filename.concat plans_dir f in
+        try (Unix.stat path).Unix.st_mtime >= since
+        with Unix.Unix_error _ -> false
+      ) files
+  with Sys_error _ -> false
+
+(** [persist_text text] writes [text] directly to a new timestamped plan file.
+    Returns [Some path] on success, [None] on error. *)
+let persist_text (text : string) : string option =
+  let text = Json_extract.strip_think_tags text in
+  try
+    let plans_dir = ensure_plans_dir () in
+    let filename = format_timestamp () ^ ".md" in
+    let path = Filename.concat plans_dir filename in
+    let oc = open_out path in
+    Fun.protect ~finally:(fun () -> close_out oc)
+      (fun () -> output_string oc text);
+    Some path
+  with Sys_error _ -> None
+
+(* -- Synthesis (W2 force-fallback) ----------------------------------------- *)
+
+let synthesizer_agent_id = "plan-synthesizer"
+
+let serialize_for_synthesis (conv : Types.conversation) : string =
+  let user_assistant_msgs =
+    List.filter (fun (m : Types.message) ->
+      match m.Types.role with
+      | Types.User | Types.Assistant -> true
+      | Types.System | Types.Tool -> false
+    ) conv.Types.messages
+  in
+  if List.length user_assistant_msgs < 2 then ""
+  else
+    let buf = Buffer.create 4096 in
+    List.iter (fun (m : Types.message) ->
+      let role = match m.Types.role with
+        | Types.User -> "User"
+        | Types.Assistant -> "Assistant"
+        | _ -> assert false
+      in
+      let text = extract_text_from_blocks m.Types.content_blocks in
+      if text <> "" then
+        Buffer.add_string buf (Printf.sprintf "## %s\n\n%s\n\n" role text)
+    ) user_assistant_msgs;
+    let full = Buffer.contents buf in
+    let len = String.length full in
+    if len > 8000 then String.sub full (len - 8000) 8000 else full
+
+let synthesis_prompt =
+  "FINAL INSTRUCTION — this overrides everything above, including any pending \
+   clarifying question. Do NOT ask questions. Do NOT investigate further. \
+   Based on the investigation above, produce the COMPLETE plan NOW. It MUST \
+   contain all six sections as markdown headings: ## Goal, ## Approach, ## Files \
+   to Touch, ## Risks, ## Open Questions, ## Steps. Output ONLY the plan \
+   markdown, nothing else."
+
+(** [try_synthesize_plan rt conv] — single [invoke_generate] call to produce
+    a complete plan from the planner's investigation context.
+    Returns [Ok text] on success or [Error msg] on failure. *)
+let try_synthesize_plan (rt : Runtime.runtime) (conv : Types.conversation)
+    : (string, string) result =
+  let transcript = serialize_for_synthesis conv in
+  if transcript = "" then Error "no conversation context"
+  else
+    let message = transcript ^ "\n\n---\n\n" ^ synthesis_prompt in
+    match Runtime.invoke_generate rt
+            ~agent_id:synthesizer_agent_id
+            ~save:false ~update_current:false ~message () with
+    | Error (e, _) ->
+      let msg = match e with
+        | Types.Timeout -> "Timeout"
+        | Types.Invalid_input s -> Printf.sprintf "Invalid input: %s" s
+        | Types.External_failure s -> Printf.sprintf "External failure: %s" s
+        | Types.Rate_limited -> "Rate limited"
+        | Types.Permission_denied s -> Printf.sprintf "Permission denied: %s" s
+        | Types.Internal s -> Printf.sprintf "Internal error: %s" s
+        | Types.Embedding_unsupported -> "Embedding unsupported"
+      in
+      Error msg
+    | Ok result ->
+      Ok (Json_extract.strip_think_tags result.Types.text)
+
 (* -- Plan file management -------------------------------------------------- *)
 
 type plan_entry = { filename : string; size : int; timestamp : float option }

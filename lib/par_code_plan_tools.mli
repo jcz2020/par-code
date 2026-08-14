@@ -10,6 +10,11 @@ val write_plan_file_tool : Types.tool_binding
 val sanitize_plan_filename : string -> string
 val last_submitted_plan : string option ref
 val consume_submitted_plan : unit -> string option
+val has_six_sections : string -> bool
+val plan_file_written_since : float -> bool
+val persist_text : string -> string option
+val synthesizer_agent_id : string
+val try_synthesize_plan : Runtime.runtime -> Types.conversation -> (string, string) result
 val persist_plan_file : Types.conversation -> string option
 
 type plan_entry = { filename : string; size : int; timestamp : float option }
