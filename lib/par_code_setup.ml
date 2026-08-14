@@ -521,25 +521,74 @@ This is the LAST thing you do. The user will be asked to confirm.
              "git status"; "git log"; "git diff"; "git show";
              "git branch"; "git tag"; "git remote";
            ] in
-           let full_cmd =
+           let argv =
              try
                let json = Yojson.Safe.from_string cmd in
                let open Yojson.Safe.Util in
-               String.concat " " (List.map to_string (json |> member "argv" |> to_list))
-             with _ -> cmd
+               List.map to_string (json |> member "argv" |> to_list)
+             with _ -> [cmd]
            in
+           let full_cmd = String.concat " " argv in
            let is_safe = List.mem first_word safe_commands
              || List.exists (fun p -> String.length full_cmd >= String.length p
                  && String.sub full_cmd 0 (String.length p) = p) safe_prefixes
            in
-             if is_safe then true
-             else begin
-               let msg = Printf.sprintf "\n⚠ bash: %s [y/N] " full_cmd in
-               let sty = Par_code_ui.style ~fg:Yellow ~bold:true () in
-               (match Par_code_ui.prompt_confirm ~backend:(Lazy.force ui) ~style:sty msg with
-               | Some "y" -> true
-               | _ -> false)
-             end)) Runtime.default_bash_confirm);
+           if is_safe then true
+           else
+             let effective_mode =
+               let goal_active = match !Par_code_goal.current with
+                 | Some g -> g.Par_code_goal.status = Par_code_goal.Active
+                 | None -> false
+               in
+               if goal_active && cfg.Par_code_config.bash_approval = "ask" then "auto_project"
+               else cfg.Par_code_config.bash_approval
+             in
+             match effective_mode with
+             | "always" -> true
+             | _ ->
+               let patterns = Par_code_approvals.load () in
+               if Par_code_approvals.matches patterns full_cmd then true
+               else
+               let ask_user ?(suffix="") () =
+                 let msg = Printf.sprintf "\n\xe2\x9a\xa0 bash: %s%s [y/a/N] " full_cmd suffix in
+                 let sty = Par_code_ui.style ~fg:Yellow ~bold:true () in
+                 match Par_code_ui.prompt_confirm ~backend:(Lazy.force ui) ~style:sty msg with
+                 | Some "y" -> true
+                 | Some "a" ->
+                   let pattern = first_word ^ " *" in
+                   Par_code_approvals.add pattern;
+                   true
+                 | _ -> false
+               in
+               match effective_mode with
+               | "ask" -> ask_user ()
+               | "auto_project" ->
+                 let has_git_root =
+                   let rec find_git dir =
+                     let git_path = Filename.concat dir ".git" in
+                     if Sys.file_exists git_path then true
+                     else
+                       let parent = Filename.dirname dir in
+                       if parent = dir then false
+                       else find_git parent
+                   in
+                   find_git (Sys.getcwd ())
+                 in
+                 if not has_git_root then ask_user ()
+                 else
+                   (match Workspace.of_cwd () with
+                    | Error _ -> ask_user ()
+                    | Ok ws ->
+                      (match Par_code_approvals.classify ws ~argv with
+                       | Par_code_approvals.In_project -> true
+                       | Par_code_approvals.Unknown -> ask_user ~suffix:" (unparsed command)" ()
+                       | Par_code_approvals.Sensitive paths ->
+                         ask_user ~suffix:(Printf.sprintf " \xe2\x80\x94 touches sensitive path(s): %s"
+                           (String.concat ", " paths)) ()
+                        | Par_code_approvals.External_path paths ->
+                          ask_user ~suffix:(Printf.sprintf " \xe2\x80\x94 outside project: %s"
+                            (String.concat ", " paths)) ()))
+               | _ -> ask_user ())) Runtime.default_bash_confirm);
     List.iter (fun (desc : Types.skill_descriptor) ->
       ignore (Runtime.register_skill rt desc : (Types.skill_binding, _) result)
     ) Builtin_skills.builtin_skills;

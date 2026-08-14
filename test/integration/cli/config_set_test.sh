@@ -25,9 +25,10 @@ declare -a FIELDS=(
   "auto_extract false auto_extract.*false"
   "checkpoint_enabled true checkpoint_enabled.*true"
   "default_mode plan plan"
+  "bash_approval auto_project auto_project"
 )
 
-test_all_20_fields_set_and_show() {
+test_all_21_fields_set_and_show() {
   setup_home; trap teardown_home EXIT
   for entry in "${FIELDS[@]}"; do
     local field value pattern
@@ -157,6 +158,20 @@ test_set_default_mode() {
   par_cli config show 2>&1 | assert_contains 'plan'
 }
 
+test_set_bash_approval() {
+  setup_home; trap teardown_home EXIT
+  par_cli config set bash_approval auto_project 2>&1
+  par_cli config show 2>&1 | assert_contains 'auto_project'
+}
+
+test_bash_approval_invalid_rejected() {
+  setup_home; trap teardown_home EXIT
+  local output rc=0
+  output=$(par_cli config set bash_approval bogus 2>&1) || rc=$?
+  [ "$rc" -ne 0 ] || fail "bash_approval bogus should exit non-zero"
+  echo "$output" | assert_contains 'Invalid bash_approval'
+}
+
 test_clear_top_p_with_none() {
   setup_home; trap teardown_home EXIT
   par_cli config set top_p 0.9 2>&1
@@ -223,7 +238,7 @@ test_context_budget_tokens_500_rejected() {
   echo "$output" | assert_contains 'must be >= 1000'
 }
 
-test_case "all 20 fields set+show round-trip"  test_all_20_fields_set_and_show
+test_case "all 21 fields set+show round-trip"  test_all_21_fields_set_and_show
 
 test_case "set provider"                       test_set_provider
 test_case "set api_key"                        test_set_api_key
@@ -245,6 +260,8 @@ test_case "set parallel_tool_execution"        test_set_parallel_tool_execution
 test_case "set auto_extract"                   test_set_auto_extract
 test_case "set checkpoint_enabled"             test_set_checkpoint_enabled
 test_case "set default_mode"                   test_set_default_mode
+test_case "set bash_approval"                  test_set_bash_approval
+test_case "bash_approval invalid rejected"     test_bash_approval_invalid_rejected
 
 test_case "clear top_p with none"              test_clear_top_p_with_none
 test_case "clear max_tokens with none"         test_clear_max_tokens_with_none

@@ -40,6 +40,7 @@ type config = {
   goal_verify_command : string option;
   goal_max_steps : int;
   doom_loop_threshold : int;
+  bash_approval : string;
 }
 
 let default_system_prompt = {|
@@ -134,6 +135,7 @@ let default = {
   goal_verify_command = None;
   goal_max_steps = 50;
   doom_loop_threshold = 3;
+  bash_approval = "ask";
 }
 
 let config_dir () =
@@ -181,6 +183,7 @@ let to_json (cfg : config) : Yojson.Safe.t =
     ("goal_verify_command", opt_str cfg.goal_verify_command);
     ("goal_max_steps", `Int cfg.goal_max_steps);
     ("doom_loop_threshold", `Int cfg.doom_loop_threshold);
+    ("bash_approval", `String cfg.bash_approval);
   ]
 
 let of_json (json : Yojson.Safe.t) : (config, string) result =
@@ -232,6 +235,10 @@ let of_json (json : Yojson.Safe.t) : (config, string) result =
       goal_verify_command = get_os "goal_verify_command";
       goal_max_steps = get_i "goal_max_steps" default.goal_max_steps;
       doom_loop_threshold = get_i "doom_loop_threshold" default.doom_loop_threshold;
+      bash_approval =
+        (match json |> member "bash_approval" |> to_string_option with
+         | Some s when s = "ask" || s = "auto_project" || s = "always" -> s
+         | _ -> default.bash_approval);
     }
   with exn -> Error (Printexc.to_string exn)
 
@@ -299,7 +306,7 @@ let merge
     ?(embedding_dimension = None)
     ?(checkpoint_enabled = None) ?(checkpoint_interval = None)
     ?(context_budget_tokens = None)
-    ?(default_mode = None) () =
+    ?(default_mode = None) ?(bash_approval = None) () =
   {
     provider = Option.value provider ~default:cfg.provider;
     api_key = Option.value api_key ~default:cfg.api_key;
@@ -331,6 +338,7 @@ let merge
     goal_verify_command = cfg.goal_verify_command;
     goal_max_steps = cfg.goal_max_steps;
     doom_loop_threshold = cfg.doom_loop_threshold;
+    bash_approval = Option.value bash_approval ~default:cfg.bash_approval;
   }
 
 let require_config () =
@@ -508,6 +516,12 @@ let update_field ~field ~value =
        | other ->
          Printf.eprintf "Invalid mode '%s'. Use 'plan' or 'build'.\n" other;
          exit 1)
+    | "bash_approval" ->
+      (match String.lowercase_ascii (String.trim value) with
+       | "ask" | "auto_project" | "always" as v -> { cfg with bash_approval = v }
+       | other ->
+         Printf.eprintf "Invalid bash_approval '%s'. Use 'ask', 'auto_project', or 'always'.\n" other;
+         exit 1)
     (* ── Excluded ── *)
     | "system_prompt" ->
       Printf.eprintf "system_prompt is multiline; set it via 'par config' wizard instead.\n";
@@ -518,6 +532,7 @@ let update_field ~field ~value =
       Printf.eprintf "Supported fields:\n";
       List.iter (fun f -> Printf.eprintf "  %s\n" f)
         [ "api_base"; "api_key"; "auto_extract";
+          "bash_approval";
           "checkpoint_enabled"; "checkpoint_interval";
           "context_budget_tokens"; "db_uri"; "default_mode";
           "doom_loop_threshold";
@@ -570,6 +585,7 @@ let show ?(ui=Par_code_ui.create_backend ()) (cfg : config) =
     line "goal_verify_command:" (match cfg.goal_verify_command with Some s -> s | None -> "<none>");
     line "goal_max_steps:" (string_of_int cfg.goal_max_steps);
     line "doom_loop_threshold:" (string_of_int cfg.doom_loop_threshold);
+    line "bash_approval:" cfg.bash_approval;
   ] in
   render_line ui image
 
@@ -696,6 +712,19 @@ let run_wizard ?(ui=Par_code_ui.create_backend ()) () =
     | _ -> Par_code_mode.Build
   in
 
+  let bash_approval =
+    let ba_default = match existing with
+      | Some c -> Some c.bash_approval
+      | None -> Some default.bash_approval
+    in
+    let s = prompt_line ui "Bash approval (ask/auto_project/always)" ba_default in
+    let v = String.lowercase_ascii (String.trim s) in
+    let v = (match v with "ask" | "auto_project" | "always" -> v | _ -> "ask") in
+    if v = "always" then
+      render_line ui (text "  \xe2\x9a\xa0 always: ALL bash commands run without confirmation");
+    v
+  in
+
   render_line ui (text "\nEmbedding API (for semantic memory search).");
   render_line ui (text "  Uses your chat provider by default. Configure separately if your");
   render_line ui (text "  provider doesn't support /embeddings or uses a different dimension.");
@@ -754,6 +783,7 @@ let run_wizard ?(ui=Par_code_ui.create_backend ()) () =
     goal_verify_command = default.goal_verify_command;
     goal_max_steps = default.goal_max_steps;
     doom_loop_threshold = default.doom_loop_threshold;
+    bash_approval;
   } in
   save cfg;
   render_notice ui (Printf.sprintf "\nSaved config to %s" (config_path ()))
