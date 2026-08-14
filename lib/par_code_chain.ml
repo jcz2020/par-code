@@ -76,9 +76,12 @@ let counts_invoke_error (e : Types.error_category) : bool =
    no-progress streak, max-steps, completion-claim verify command, judge
    cadence). IO companion to the pure decision functions above — renders
    via Par_code_ui, mutates Par_code_goal state and the passed refs
-   exactly as the inline code did. Runs on BOTH Ok and Error turn
-   results (v0.7.2 semantics; the Error-turn skip is a W6 change per
-   Oracle R1, not this refactor). *)
+   exactly as the inline code did.
+   [v0.7.3 W6, Oracle R1] ~skip_ladder skips the ladder on non-Cancelled
+   Error turns — no_progress/judge semantics presume a real assistant
+   reply, and an errored turn produced none. Doom-flag consumption (abort
+   / force-judge) ALWAYS runs so a mid-turn doom abort is honored even on
+   errored turns. Callers pass ~skip_ladder:false on Ok and Cancelled. *)
 
 let run_goal_evaluation
     ~(rt : Runtime.runtime)
@@ -91,6 +94,7 @@ let run_goal_evaluation
     ~(doom_abort_msg : string option ref)
     ~(doom_force_judge : bool ref)
     ~(tool_count_before : int)
+    ~(skip_ladder : bool)
     () : unit =
                let run_judge g =
                  let verify_result =
@@ -133,9 +137,10 @@ let run_goal_evaluation
                  (match !Par_code_goal.current with
                   | Some g when g.Par_code_goal.status = Par_code_goal.Active -> run_judge g
                   | _ -> ());
-                 doom_force_judge := false
-               end else
-               (match !Par_code_goal.current with
+                  doom_force_judge := false
+                end;
+                if not skip_ladder then
+                (match !Par_code_goal.current with
                 | Some g when g.Par_code_goal.status = Active
                              && !Par_code_mode.current = Par_code_mode.Build ->
                   let step = Par_code_goal.advance_step () in

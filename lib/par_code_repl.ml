@@ -222,11 +222,15 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
   let invoke_start_time = ref 0.0 in
   let hit_cap = ref false in
   let no_progress_streak = ref 0 in
+  (* v0.7.3 W6: invoke-error streak (Oracle R1/B16) — reset on Ok,
+     untouched on Cancelled, blocks the goal at 2. *)
+  let consecutive_invoke_errors = ref 0 in
   let loaded_cfg = Par_code_config.load () in
   let ckpt_enabled = match loaded_cfg with Some c -> c.Par_code_config.checkpoint_enabled | None -> true in
   let ckpt_interval = match loaded_cfg with Some c -> c.Par_code_config.checkpoint_interval | None -> 10 in
   let ctx_budget = match loaded_cfg with Some c -> c.Par_code_config.context_budget_tokens | None -> 100000 in
   let goal_max_steps = match loaded_cfg with Some c -> c.Par_code_config.goal_max_steps | None -> 50 in
+  let goal_auto_chain = match loaded_cfg with Some c -> c.Par_code_config.goal_auto_chain | None -> true in
   let goal_verify_cmd = match loaded_cfg with Some c -> c.Par_code_config.goal_verify_command | None -> None in
   let env_no_ckpt = match Sys.getenv_opt "PAR_NO_CHECKPOINT" with Some "1" | Some "true" -> true | _ -> false in
   (match resume with
@@ -345,16 +349,19 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
      LNoise.history_load ~filename:(Filename.concat (Par_code_config.config_dir ()) "history")
      |> ignore
    with _ -> ());
-  (* v0.7.3 W4: the turn body, extracted verbatim from loop()'s
-     normal-input branch so the chaining driver (W6) can invoke it
-     without user input. Closes over the run-scoped refs (conv,
-     turn_count, session_id, ...) on purpose — no parameterization.
-     Behavior-identical pure motion; returns Chain_stop for now,
-     chaining lands in W6. history_add/history_save stay in loop()'s
-     input branch — chained messages are not user input. *)
-   let execute_turn (message : string) : Par_code_chain.turn_outcome =
-            cancel_pending := false;
-            in_invoke := true;
+   (* v0.7.3 W4: the turn body, extracted verbatim from loop()'s
+      normal-input branch so the chaining driver (W6) can invoke it
+      without user input. Closes over the run-scoped refs (conv,
+      turn_count, session_id, ...) on purpose — no parameterization.
+      [v0.7.3 W6] Returns the chaining outcome (continue only while goal
+      Active + Build + auto_chain + no cancel/doom/exn + errors < 2;
+      Oracle R1 skips the ladder on errored turns). history_add/
+      history_save stay in loop()'s input branch — chained messages are
+      not user input. *)
+    let execute_turn (message : string) : Par_code_chain.turn_outcome =
+             cancel_pending := false;
+             in_invoke := true;
+             let turn_cancelled = ref false and turn_errored = ref false and turn_exn = ref false in
             (try
               (match !conv with
               | Some c ->
@@ -448,9 +455,10 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                         ())
                in
                last_plan_path := None;
-               (match invoke_result with
-               | Error (Types.Cancelled reason, recovered_conv) ->
-                  conv := Some recovered_conv;
+                (match invoke_result with
+                | Error (Types.Cancelled reason, recovered_conv) ->
+                   turn_cancelled := true;
+                   conv := Some recovered_conv;
                   Par_code_ui.flush_markdown ui;
                   let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in ();
                   incr turn_count;
@@ -470,14 +478,17 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                        ("\xe2\x9c\x97 goal aborted (doom loop) \xe2\x80\x94 " ^ r));
                   doom_abort := false; doom_force_judge := false;
                   cancel_pending := false
-               | Error (e, recovered_conv) ->
-                  conv := Some recovered_conv;
-                 Par_code_ui.flush_markdown ui;
-                 if string_contains_i
-                      ~haystack:(Par_code_setup.error_to_string e)
-                      ~needle:"max iterations exceeded"
-                 then hit_cap := true;
-                 Par_code_ui.render_error ui (Par_code_setup.error_to_string e);
+                | Error (e, recovered_conv) ->
+                   conv := Some recovered_conv;
+                  Par_code_ui.flush_markdown ui;
+                  if string_contains_i
+                       ~haystack:(Par_code_setup.error_to_string e)
+                       ~needle:"max iterations exceeded"
+                  then hit_cap := true;
+                  if Par_code_chain.counts_invoke_error e then
+                    incr consecutive_invoke_errors;
+                  turn_errored := true;
+                  Par_code_ui.render_error ui (Par_code_setup.error_to_string e);
                  let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in ()
               | Ok { Types.response = resp; conversation = returned_conv; _ } ->
                  conv := Some returned_conv;
@@ -495,8 +506,9 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                        Par_code_ui.render_warning ui
                          (Printf.sprintf "[model returned no text%s]" reason))
                   end;
-                 Par_code_ui.render_line ui Par_code_ui.empty;
-                cost := add_usage !cost resp.Types.usage;
+                  Par_code_ui.render_line ui Par_code_ui.empty;
+                 cost := add_usage !cost resp.Types.usage;
+                 consecutive_invoke_errors := 0;
                 let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in ();
                 incr turn_count;
                 if !session_id = None then begin
@@ -523,12 +535,13 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                      | None -> ())
                   | None -> ())
                 end);
-               Par_code_chain.run_goal_evaluation
-                 ~rt ~ui ~conv ~goal_feedback ~no_progress_streak
-                 ~goal_verify_cmd ~doom_abort ~doom_abort_msg ~doom_force_judge
-                 ~tool_count_before ()
-            with ex ->
-             Par_code_ui.render_error ui (Printf.sprintf "\n[error] %s" (Printexc.to_string ex)));
+                Par_code_chain.run_goal_evaluation
+                  ~rt ~ui ~conv ~goal_feedback ~no_progress_streak
+                  ~goal_verify_cmd ~doom_abort ~doom_abort_msg ~doom_force_judge
+                  ~tool_count_before ~skip_ladder:!turn_errored ()
+             with ex ->
+              turn_exn := true;
+              Par_code_ui.render_error ui (Printf.sprintf "\n[error] %s" (Printexc.to_string ex)));
                 (match Par_code_plan_tools.consume_submitted_plan () with
                   | Some path ->
                     last_plan_path := Some path;
@@ -560,9 +573,44 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                                  (Printf.sprintf "[plan synthesis failed \xe2\x80\x94 saved raw planner output to %s]" path)
                              | None -> ()))
                        | None -> ())
-                    end);
-           Par_code_chain.Chain_stop
-  in
+                     end);
+                (* v0.7.3 W6: chaining decision — AFTER goal evaluation +
+                   plan fallback so verdicts/blocks/switches are applied.
+                   should_continue covers goal/mode/auto_chain/doom/cancel/
+                   errors<2 (doom_abort reads false — live doom was already
+                   consumed into an Aborted status above). *)
+                let chain_st : Par_code_chain.chain_state = {
+                  Par_code_chain.goal = !Par_code_goal.current;
+                  mode = !Par_code_mode.current;
+                  auto_chain = goal_auto_chain;
+                  doom_aborted = !doom_abort;
+                  cancelled = !turn_cancelled;
+                  consecutive_invoke_errors = !consecutive_invoke_errors;
+                } in
+                if !turn_cancelled || !turn_exn then Par_code_chain.Chain_stop
+                else if Par_code_chain.should_continue chain_st then
+                  Par_code_chain.Chain_continue
+                    (Par_code_chain.continuation_message ())
+                else if !consecutive_invoke_errors >= 2 then begin
+                  (* B16: should_continue said no on the streak — block here. *)
+                  (match !Par_code_goal.current with
+                   | Some g when g.Par_code_goal.status = Par_code_goal.Active ->
+                     Par_code_goal.block_goal "llm_error_x2";
+                     Par_code_ui.render_warning ui
+                       "[goal blocked \xe2\x80\x94 LLM errors x2; check provider config, /goal resume to retry]"
+                   | _ -> ());
+                  Par_code_chain.Chain_stop
+                end
+                else Par_code_chain.Chain_stop
+   in
+   (* v0.7.3 W6: the chaining driver — feeds execute_turn's continuation
+      back in as the next user message; no user input, no history entries.
+      Tail-recursive, bounded by execute_turn's stop conditions. *)
+   let rec run_chain (message : string) : unit =
+     (match execute_turn message with
+      | Par_code_chain.Chain_stop -> ()
+      | Par_code_chain.Chain_continue next -> run_chain next)
+   in
   let rec loop () =
     (* linenoise writes the prompt directly to fd 1, bypassing OCaml's stdout
        buffer — flush first so rendered output (slash commands via render,
@@ -695,12 +743,15 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
          loop ()
        end else begin
            (match LNoise.history_add trimmed with Ok () -> () | Error _ -> ());
-           (try LNoise.history_save
-             ~filename:(Filename.concat (Par_code_config.config_dir ()) "history")
-             |> ignore
-           with _ -> ());
-           ignore (execute_turn trimmed);
-           loop ()
+            (try LNoise.history_save
+              ~filename:(Filename.concat (Par_code_config.config_dir ()) "history")
+              |> ignore
+            with _ -> ());
+            (* Oracle R3(a): user turn may chain; prompt resumes after. *)
+            (match execute_turn trimmed with
+             | Par_code_chain.Chain_stop -> ()
+             | Par_code_chain.Chain_continue next -> run_chain next);
+            loop ()
       end
   in
   (match goal with

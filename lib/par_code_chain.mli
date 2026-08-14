@@ -27,10 +27,13 @@ val sigint_action : in_invoke:bool -> cancel_pending:bool -> sigint_action
 
 val counts_invoke_error : Types.error_category -> bool
 
-(* [v0.7.3 W4] IO companion moved verbatim from par_code_repl.ml: consumes
-   the doom flags and runs the goal evaluation ladder after a turn
-   (v0.7.2 semantics — runs on both Ok and Error invoke results). Mutates
-   Par_code_goal state and the passed refs; renders via the ui backend. *)
+(* [v0.7.3 W4/W6] IO companion moved from par_code_repl.ml: consumes the
+    doom flags and runs the goal evaluation ladder after a turn. Mutates
+    Par_code_goal state and the passed refs; renders via the ui backend.
+    ~skip_ladder (Oracle R1): skip the advance/no-progress/verify/judge
+    ladder — used on non-Cancelled Error turns, where no_progress/judge
+    semantics (which presume a real assistant reply) would misattribute.
+    Doom-flag consumption (abort / force-judge) always runs. *)
 val run_goal_evaluation :
   rt:Runtime.runtime ->
   ui:Par_code_ui.backend ->
@@ -42,5 +45,6 @@ val run_goal_evaluation :
   doom_abort_msg:string option ref ->
   doom_force_judge:bool ref ->
   tool_count_before:int ->
+  skip_ladder:bool ->
   unit ->
   unit
