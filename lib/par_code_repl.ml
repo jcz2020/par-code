@@ -758,7 +758,8 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
    | Some g when g <> "" ->
      Par_code_goal.set_goal ~objective:g ~max_steps:goal_max_steps ();
      Par_code_ui.render_success ui
-       (Printf.sprintf "Goal set: %s\nAgent will be evaluated by the judge after each turn." g)
+       (Printf.sprintf "Goal set: %s\nStarting autonomous chain \xe2\x80\x94 Ctrl+C pauses, second Ctrl+C exits." g);
+     run_chain g
    | _ -> ());
   loop ()
 

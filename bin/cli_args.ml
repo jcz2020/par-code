@@ -90,7 +90,7 @@ let goal_opt =
   let open Cmdliner.Arg in
   value & opt (some string) None
   & info ["goal"] ~docv:"GOAL"
-      ~doc:"Set a goal for the agent on startup (judge-supervised mode)"
+      ~doc:"Set a goal and run autonomously until the judge verifies it (Ctrl+C pauses)"
 
 let question_arg =
   let open Cmdliner in
