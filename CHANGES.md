@@ -2,8 +2,14 @@
 
 ## v0.7.3 (unreleased)
 
-> **Status**: Implementation complete. Live-tested with a real LLM pending
-> dogfood gate (W10).
+> **Status**: Implementation complete. Dogfooded with a real LLM (W10, 2
+> sessions): chaining happy path + judge-feedback auto-continue verified,
+> mid-invoke Ctrl+C (graceful cancel, process survives) + second-Ctrl+C
+> force-exit verified, doom abort fired mid-invoke with exactly one
+> incident record, llm_error_x2 block + `/goal resume` recovery verified
+> live. Two known limitations recorded in the v0.7.3 decision entries
+> (SIGINT race window at turn tail; intermittent provider 400 on
+> post-abort replay).
 
 ### Added — Autonomous goal chaining
 

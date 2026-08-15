@@ -65,7 +65,17 @@ cancelled arm), lib/par_code_chain.ml (sigint_action, cancel_outcome).
 returns to between-turns flag.
 
 **已知限制**: synchronous REPL means no mid-chain steering between
-turns (steering queue noted as future option).
+turns (steering queue noted as future option). Dogfood (W10) found a
+SIGINT race window: if the 1st Ctrl+C lands after the turn's final
+cancellation check-point (invoke returning Ok), the "[cancelling]"
+notice still renders but the turn completes and the chain continues
+(cancel_pending resets at next turn entry); bounded by doom/max_steps.
+Follow-up candidate: don't reset cancel_pending at entry, or treat a
+repeat SIGINT within N seconds as force-exit regardless of entry reset.
+Also observed: intermittent provider 400 (2013) on the first request
+after an aborted-conversation replay — handled gracefully by the error
+path (turn errors, chain continues or blocks via llm_error_x2); root
+cause (replay-ID synthesis vs provider strictness) uninvestigated.
 
 ## [2026-08-15] v0.7.3 架构: --goal auto-start (D6) + goal_auto_chain kill switch (D7)
 
