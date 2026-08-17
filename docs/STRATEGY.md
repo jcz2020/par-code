@@ -270,12 +270,12 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
   + W4 goal lifecycle (verbs, blocked status, disk flush, activation
   memory-only) + W5 no-progress & completion-claim detection + W6 resume
   regression test. Full spec: `docs/v0.7.2-ROADMAP.md`.
-- **v0.7.3 (next)** — Full autonomous goal chaining (execute_turn + run_chain, judge
-  cadence unchanged), real in-invoke cancellation consuming PAR SDK 0.10.0
-  (doom Guard-cancel + Ctrl+C pause/force-escape), error-streak guard
-  (llm_error_x2), --goal auto-start, goal_auto_chain kill switch. PAR SDK
-  feedback: 0.9.1/0.8.3/0.8.6 items retired; Think_tag_strip facade gap
-  filed. Unreleased — awaiting version bump.
+- **v0.7.3 ✅ shipped 2026-08-17** — Full autonomous goal chaining
+  (`execute_turn` + `run_chain`, judge cadence unchanged), real
+  in-invoke cancellation consuming PAR SDK 0.10.0 (doom Guard-cancel +
+  Ctrl+C pause/force-escape), error-streak guard (`llm_error_x2`),
+  `--goal` auto-start, `goal_auto_chain` kill switch. PAR SDK feedback:
+  0.9.1/0.8.3/0.8.6 items retired; `Think_tag_strip` facade gap filed.
 - v0.8.0+ — best-of-N reasoning, self-improvement, compose mode, ecosystem,
   code intelligence, safety, polish → v1.0
 

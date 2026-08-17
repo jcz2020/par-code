@@ -1,6 +1,92 @@
 # Decisions
 
-### Open PAR SDK feedback
+## [2026-08-17] v0.7.3 released — autonomous goal chaining (PAR SDK 0.10.0 cancellation)
+
+**Tag**: Release
+
+**变更前**: v0.7.2 goal mode was judge-supervised single-turn — agent
+ran one user-initiated turn, judge evaluated, feedback printed, then
+waited at the prompt. Doom-loop abort waited for the current turn to
+finish before marking the goal aborted (messaging was misleadingly
+honest about timing). Ctrl+C always killed the process and lost the
+in-flight turn's recovered conversation.
+
+**变更后**: `run_chain` driver feeds `execute_turn`'s `Chain_continue`
+outcomes back as the next user message without touching linenoise
+history; judge cadence unchanged (every 3 steps + on claims/done);
+generic-nudge continuation (Oracle N1: judge feedback rides the goal
+appendix, not the message). `--goal` CLI auto-starts the chain with
+the objective as the first turn; `/goal` chains after the next
+build-mode turn; restore-from-disk stays memory-only (`/goal resume`
+explicit). Per-invoke cancellation token consumed from PAR SDK 0.10.0
+(`Cancellation.create_token (cancellation_root rt)` + `~cancellation_token`
+on `Runtime.invoke`, cleared in `Fun.protect` finally). Doom Abort =
+`request_cancel (Guard_cancelled "doom-loop: <msg>")` for real mid-invoke
+unwind; between-turns flag fallback remains as idempotent path. SIGINT
+ladder: 1st Ctrl+C → `Request_cancel` + `[cancelling — Ctrl+C again to
+force exit]`; 2nd → `Force_exit` with `Sys.set_signal Sys.sigint
+Sys.Signal_ignore` first (R4: closes reentrant-save window); at prompt
+or judge window → `Exit_now` (v0.5.4 behavior). `Cancelled` arm saves
+the recovered conversation, increments `turn_count`, User → paused
++ `[goal paused — /goal resume to continue]`, Guard → aborted +
+`write_incident` (R2: `doom_abort` cleared so exactly one incident per
+abort). Error-streak: 2 consecutive non-cancelled, non-hit-cap invoke
+errors → `block_goal "llm_error_x2"` + visible warning (R1: error turns
+skip the goal ladder entirely — `run_goal_evaluation ~skip_ladder:!turn_errored`
+— so no `no_progress` misattribution from a nonexistent assistant
+reply). `goal_auto_chain : bool = true` config field with full 9-touchpoint
+lifecycle as kill switch. PAR SDK floor bumped to `>= 0.10.0`. PAR SDK
+feedback retirements (tool_call_id 0.9.1, include_usage 0.8.6, streaming
+error 0.8.6) + v0.7.2 trio (actionable tool errors, in-invoke cancellation,
+workspace admission) marked Consumed by 0.10.0; `Think_tag_strip` facade
+gap filed (trivial upstream ask).
+
+**原因**: PAR SDK 0.10.0 shipped the cancellation primitives this
+needed (first-class cancellation, replay-valid recovered conversations,
+instructive workspace rejection metadata). v0.7.2's lying abort text
+and Ctrl+C-during-invoke loss of conversation were real-user-friction
+items. The goal mode gained usable "walk-away autonomy" only after the
+REPL gained a way to interrupt a running turn cleanly and resume a
+chain from the recovered state.
+
+**影响范围**: `lib/par_code_repl.ml` (execute_turn extraction + run_chain
++ cancellation wiring), `lib/par_code_chain.ml` + `.mli` (new module:
+pure decision table + `run_goal_evaluation` IO companion),
+`lib/par_code_config.ml` + `lib/par_code_config_wizard.ml` (extracted to
+stay under the 800-line static limit; added `goal_auto_chain` field),
+`bin/cli_args.ml` (`--goal` doc), `test/integration/repl/goal_chain_test.sh`
+(new, LLM-free with dead-endpoint config). PAR SDK dependency:
+`>= 0.10.0`. 11 atomic commits (`ffddfd4..0c9eb7a`). 385 unit tests +
+11/11 integration files green; Phase 3 walkthrough (10 v0.7.3 scenarios)
+PASS live + source-level, 0 P0/P1.
+
+**回退方式**: `git revert 0c9eb7a..ffddfd4` for full rollback (reverts
+the release commit and the 10 implementation commits). Partial
+reversion: commit 7 (`4e6f8c0`) alone reverts the cancellation wiring
+(returns doom to between-turns flag, Ctrl+C to save+exit); commit 8
+(`3afc074`) alone reverts the chaining driver (returns to v0.7.2
+judge-supervised mode); commit 4 (`bd15dff`) alone reverts the kill
+switch (`goal_auto_chain=false` would not exist; chained turns would
+auto-continue regardless).
+
+**已知限制**: SIGINT turn-tail race — if the 1st Ctrl+C lands after
+the turn's final cancellation check-point (invoke returning Ok), the
+"[cancelling]" notice still renders but the turn completes and the
+chain continues (`cancel_pending` resets at next turn entry); bounded
+by doom and `goal_max_steps`. Follow-up: don't reset `cancel_pending` at
+entry, or treat repeat SIGINT within N seconds as force-exit regardless
+of entry reset. Intermittent provider 400 (2013) on the first request
+after an aborted-conversation replay — handled gracefully by the
+error path (turn errors, chain continues or blocks via `llm_error_x2`);
+root cause (PAR replay-ID synthesis vs provider strictness) uninvestigated.
+PAR's `Retry` middleware (retry_on Timeout/Rate_limited/External_failure)
+exists but is not wired by par-code — transient provider blips surface
+as consecutive errors and block at x2 (soft, resumable). Model-level
+goal drift observed in long sessions (model declared an active goal
+"fictional" and worked from conversation history); bounded by the
+judge verifying per the active goal.
+
+## Open PAR SDK feedback
 
 - Mode concept → [2026-07-27] First-class mode concept
 - Plan/task primitive → [2026-07-27] Plan/task primitive
