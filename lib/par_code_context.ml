@@ -94,6 +94,32 @@ let compact (conv : conversation) ~budget_tokens ~summary
       let first = List.hd msgs in
       let rest = List.tl msgs in
       let recent = take_last rest keep_recent in
+      (* Strip leading orphan Tool messages: if the cut lands between an
+         Assistant carrying tool_calls and its following Tool results, those
+         Tool messages reference an announcing assistant that was discarded.
+         Dropping stale tool results is safe — they sit in the discarded-
+         history region semantically; extending the tail backward would
+         re-grow the payload past budget. An Assistant inside the tail can
+         never have its results orphaned because results always follow their
+         assistant and only the HEAD side is cut, so leading-Tool handling
+         is the complete fix. *)
+      let announced_ids =
+        List.fold_left (fun acc m ->
+          match m.tool_calls with
+          | Some tcs ->
+            List.fold_left (fun a (tc : tool_call) -> tc.id :: a) acc tcs
+          | None -> acc
+        ) [] recent
+      in
+      let rec strip_orphans = function
+        | m :: rest when m.role = Tool &&
+            (match m.tool_call_id with
+             | Some id -> not (List.mem id announced_ids)
+             | None -> false) ->
+          strip_orphans rest
+        | msgs -> msgs
+      in
+      let recent = strip_orphans recent in
       let summary_msg = make_summary_message summary in
       { conv with messages = first :: summary_msg :: recent }
 
