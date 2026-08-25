@@ -199,6 +199,75 @@ let format_cost_output ~cost ~context_tokens ~turn_count ~metrics =
   Buffer.add_string b "\nNote: excludes async checkpoint/extraction calls.\n";
   Buffer.contents b
 
+(* --- Payload debug dump (v0.7.3+) ---------------------------------------- *)
+(* When the provider rejects a replayed conversation (HTTP 400 / Invalid_input),
+   dump the exact messages JSON to disk for byte-level root-cause analysis. *)
+
+let max_payload_dump_files = 5
+let max_payload_dump_bytes = 2 * 1024 * 1024
+
+let debug_dir () =
+  Filename.concat (Filename.concat (Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp") ".par") "debug"
+
+(** List payload-*.json in [dir], keep newest [keep] by mtime, delete the rest.
+    Pure-ish: only touches [dir]; returns the kept paths sorted newest-first.
+    Returns [[]] on any failure. *)
+let prune_payload_files ~dir ~keep =
+  (try
+     let entries = Sys.readdir dir |> Array.to_list in
+     let is_all_digits s =
+       let rec go i = i >= String.length s || (s.[i] >= '0' && s.[i] <= '9' && go (i + 1)) in
+       String.length s > 0 && go 0
+     in
+     let payload_files = List.filter (fun f ->
+       String.length f > 13 &&
+       String.sub f 0 8 = "payload-" &&
+       String.ends_with ~suffix:".json" f &&
+       is_all_digits (String.sub f 8 (String.length f - 13))
+     ) entries in
+     let with_mtime = List.filter_map (fun f ->
+       let path = Filename.concat dir f in
+       match (Unix.stat path).Unix.st_mtime with
+       | mtime -> Some (path, mtime)
+       | exception _ -> None
+     ) payload_files in
+     let sorted = List.sort (fun (_, a) (_, b) -> compare b a) with_mtime in
+     let keep_list, delete_list =
+       let rec split n acc = function
+         | [] -> (List.rev acc, [])
+         | rest when n <= 0 -> (List.rev acc, rest)
+         | x :: xs -> split (n - 1) (x :: acc) xs
+       in
+       split keep [] sorted
+     in
+     List.iter (fun (path, _) ->
+       (try Sys.remove path with Sys_error _ -> ())
+     ) delete_list;
+     List.map fst keep_list
+   with _ -> [])
+
+let dump_payload_debug (ui : Par_code_ui.backend) (conv : Types.conversation) =
+  (try
+     let dir = debug_dir () in
+     (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+     let ts = int_of_float (Unix.gettimeofday ()) in
+     let path = Filename.concat dir (Printf.sprintf "payload-%d.json" ts) in
+     let json = Yojson.Safe.to_string
+       (`List (List.map Types.message_to_yojson conv.Types.messages)) in
+     let len = String.length json in
+     let content =
+       if len > max_payload_dump_bytes then
+         let truncated = String.sub json 0 max_payload_dump_bytes in
+         truncated ^ ",{\"_truncated\":true,\"original_bytes\":" ^ string_of_int len ^ "}]"
+       else json
+     in
+     let oc = open_out path in
+     (try output_string oc content; close_out oc
+      with exn -> (try close_out oc with _ -> ()); raise exn);
+     ignore (prune_payload_files ~dir ~keep:max_payload_dump_files);
+     Par_code_ui.render_notice ui (Printf.sprintf "[debug] payload dumped to %s" path)
+   with _ -> ())
+
 let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goal () =
   let ui = Par_code_ui.create_backend () in
   (* v0.5.5 P0 #2: tag every save with the current project scope so that
@@ -480,6 +549,11 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                   cancel_pending := false
                 | Error (e, recovered_conv) ->
                    conv := Some recovered_conv;
+                  (match e with
+                   | Types.Invalid_input s
+                     when String.length s > 0 && s.[0] = '{' ->
+                     dump_payload_debug ui recovered_conv
+                   | _ -> ());
                   Par_code_ui.flush_markdown ui;
                   if string_contains_i
                        ~haystack:(Par_code_setup.error_to_string e)
