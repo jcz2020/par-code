@@ -1,5 +1,25 @@
 # Decisions
 
+## [2026-08-26] PAR SDK Feedback: recover_on_cancel 单遍扫描顺序缺陷
+
+**Tag**: PAR SDK Feedback
+
+**变更前**: `engine.ml:577-613` 的 `recover_on_cancel` 在循环顶部取消路径触发时，对对话中所有历史 assistant tool_call 进行单遍正向扫描，用 `seen_tool_ids`（仅累积当前位置之前遇到的 result id）判断悬空。由于 result 始终出现在对应 assistant 之后，已完成的 tool pair 也会被误判为悬空，导致每个历史 tool_call 都追加一条重复的 `[cancelled]` Tool synthetic fill。docstring 声明作用域为"trailing Assistant message(s)"，但代码遍历整个对话——作用域和算法双重缺陷。
+
+**变更后**: 已 filed upstream。建议最小正确修复：两遍扫描——第一遍收集所有已有 result 的 tool_call_id，第二遍从 assistant 宣布的 tool_calls 中差集出真正悬空的 id。可选加固：在 engine 层出口包装（`engine.ml:1482-1502`）增加配对断言（每个 tool_call 有且仅有一个对应 result）。实证复现：构造一条包含已完成 assistant+tool pair 的对话 → 触发循环顶部 cancel → 观察出现重复 `[cancelled]` Tool fill。
+
+**原因**: `recover_on_cancel` 的 `seen_tool_ids` 只累积扫描过程中遇到的 result id，但 result 在 assistant 之后才出现——当循环位置在 assistant 处时，尚未见到其 result，故该 assistant 的 tool_call 被误判为悬空。算法本质上无法用单遍正向扫描完成配对差集。
+
+**影响范围**: v0.7.3 取消重放场景（[2026-08-17] release 条目 + [2026-08-15] SIGINT ladder 条目 已知限制中的 provider 400 (2013) 调查）。对所有含历史 tool pair 的对话执行 cancel 路径时触发——每次 cancel 会多追加 N 条垃圾 synthetic fill（N = 历史已完成 tool_call 数量），对话体积无谓增长。
+
+**回退方式**: N/A（filing only — PAR SDK source change needed）。
+
+**已知限制**:
+- **Severity**: LOW — 对话污染（junk growth per cancel-with-history），**非** 2013 generator。实测证实重复 tool_call_id 被 provider 接受（HTTP 200），故此缺陷不会产生导致 400 (2013) 的孤儿 tool result。
+- **与 2013 事件的关系**: v0.7.3 dogfood 中两次 2013 **并非**由 `recover_on_cancel` 引起——DB 最终状态零 `[cancelled]` markers 证明该路径从未触发。2013 结案原因见同日已知限制更新（MiniMax 服务端瞬时误判）。
+- **Suggested upstream fix**: two-pass（先收集所有 result id，再差集 announced ids）+ engine egress pairing assertion。
+- **Retirement trigger**: PAR SDK ship two-pass fix。
+
 ## [2026-08-17] v0.7.3 released — autonomous goal chaining (PAR SDK 0.10.0 cancellation)
 
 **Tag**: Release
@@ -75,10 +95,7 @@ the turn's final cancellation check-point (invoke returning Ok), the
 chain continues (`cancel_pending` resets at next turn entry); bounded
 by doom and `goal_max_steps`. Follow-up: don't reset `cancel_pending` at
 entry, or treat repeat SIGINT within N seconds as force-exit regardless
-of entry reset. Intermittent provider 400 (2013) on the first request
-after an aborted-conversation replay — handled gracefully by the
-error path (turn errors, chain continues or blocks via `llm_error_x2`);
-root cause (PAR replay-ID synthesis vs provider strictness) uninvestigated.
+of entry reset. 间歇性 provider 400 (2013) 已结案（见 [2026-08-26] PAR SDK Feedback 条目）——唯一致命形状是孤儿 tool result（对生产端点最小 payload 实证复现），但客户端全部产生路径逐一排除；失败重放与随后成功的 /goal resume 携带同一消息数组，判定 MiniMax 服务端瞬时误判（自愈）。复发时用 payload dump（~/.par/debug/）与报错内 call_xxx 比对可一锤定音。
 PAR's `Retry` middleware (retry_on Timeout/Rate_limited/External_failure)
 exists but is not wired by par-code — transient provider blips surface
 as consecutive errors and block at x2 (soft, resumable). Model-level
@@ -95,6 +112,7 @@ judge verifying per the active goal.
 - `invoke_async` `?save`/`?update_current` → [2026-07-19] 3 items surfaced by v0.4.1 async work
 - `Think_tag_strip` facade → [2026-08-15] Think_tag_strip not re-exported via Par facade — 仍开放（2026-08-26 复核：pinned PAR 0.10.0 的 par.ml 无 middleware 再导出）
 - Nested-invoke depth-limiting — anticipated for v0.7.0+, still unfilled, no par-code pain yet（v0.7.3 时点复核：仍无 par-code 痛点）
+- `recover_on_cancel` ordering → [2026-08-26] PAR SDK Feedback: recover_on_cancel 单遍扫描顺序缺陷
 
 ## [2026-08-15] v0.7.3 架构: Chaining structure (D1) + judge cadence freeze (D5)
 
@@ -158,10 +176,7 @@ notice still renders but the turn completes and the chain continues
 (cancel_pending resets at next turn entry); bounded by doom/max_steps.
 Follow-up candidate: don't reset cancel_pending at entry, or treat a
 repeat SIGINT within N seconds as force-exit regardless of entry reset.
-Also observed: intermittent provider 400 (2013) on the first request
-after an aborted-conversation replay — handled gracefully by the error
-path (turn errors, chain continues or blocks via llm_error_x2); root
-cause (replay-ID synthesis vs provider strictness) uninvestigated.
+间歇性 provider 400 (2013) 已结案（见 [2026-08-26] PAR SDK Feedback 条目）——唯一致命形状是孤儿 tool result（对生产端点最小 payload 实证复现），但客户端全部产生路径逐一排除；失败重放与随后成功的 /goal resume 携带同一消息数组，判定 MiniMax 服务端瞬时误判（自愈）。复发时用 payload dump（~/.par/debug/）与报错内 call_xxx 比对可一锤定音。
 
 ## [2026-08-15] v0.7.3 架构: --goal auto-start (D6) + goal_auto_chain kill switch (D7)
 
