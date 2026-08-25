@@ -93,8 +93,8 @@ judge verifying per the active goal.
 - `set_session_id` mutex → [2026-07-19] 3 items surfaced by v0.4.1 async work
 - `last_llm_call` atomicity → [2026-07-19] 3 items surfaced by v0.4.1 async work
 - `invoke_async` `?save`/`?update_current` → [2026-07-19] 3 items surfaced by v0.4.1 async work
-- `Think_tag_strip` facade → [2026-08-15] Think_tag_strip not re-exported via Par facade
-- Nested-invoke depth-limiting — anticipated for v0.7.0+, still unfilled, no par-code pain yet
+- `Think_tag_strip` facade → [2026-08-15] Think_tag_strip not re-exported via Par facade — 仍开放（2026-08-26 复核：pinned PAR 0.10.0 的 par.ml 无 middleware 再导出）
+- Nested-invoke depth-limiting — anticipated for v0.7.0+, still unfilled, no par-code pain yet（v0.7.3 时点复核：仍无 par-code 痛点）
 
 ## [2026-08-15] v0.7.3 架构: Chaining structure (D1) + judge cadence freeze (D5)
 
