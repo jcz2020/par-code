@@ -1,10 +1,14 @@
 # CHANGES
 
-## v0.7.4-dev — Provider-error resilience
+## v0.7.4 — Provider-error resilience
 
-> **Status**: In progress. Carries the two robustness fixes that came out of
-> the provider 400 (2013) investigation. Not released yet — the version
-> bump and the tag wait for the release call.
+> **Status**: Shipped 2026-10-30. Pre-release audit passed (full suite green
+> with real exit codes, 11/11 integration files, every claim mapped to
+> automated coverage). Two P1 and two P2 findings from the audit were fixed
+> before the release — including a date-rotated test that had kept the suite
+> red since 2026-08-26 unnoticed because no CI run happened afterwards.
+> PAR SDK floor stays at `0.10.0`; CI and release now pin that exact
+> release tag.
 
 ### Fixed — Orphan tool results after context compaction
 
@@ -43,9 +47,14 @@ Two hardening details, found by the pre-release audit:
 The CI and release workflows pinned the PAR SDK to the upstream branch tip,
 so the same par-code tag could build two different binaries depending on when
 the build ran, and an upstream change could enter a release without any
-par-code review. Both workflows now pin the SDK to the `v0.10.0` release
-tag — the version this release was verified against. The SDK upgrade to
-0.12-beta is a separate, versioned change.
+par-code review. **Every** install path now pins the SDK to the `v0.10.0`
+release tag — the version this release was verified against: the CI and
+release workflows, the Linux bundle Dockerfile, the macOS build script and
+the source installer. The macOS script additionally had an idempotence check
+that never matched (opam prints a pinned package as `par.0.10.0`, so the
+`grep -qx par` test failed and the script overwrote CI's tag pin with a
+branch-tip pin). The SDK upgrade to 0.12-beta is a separate, versioned
+change.
 
 ### Fixed — Date-rotated prune test (test-only)
 

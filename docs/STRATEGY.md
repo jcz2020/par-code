@@ -276,6 +276,17 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
   Ctrl+C pause/force-escape), error-streak guard (`llm_error_x2`),
   `--goal` auto-start, `goal_auto_chain` kill switch. PAR SDK feedback:
   0.9.1/0.8.3/0.8.6 items retired; `Think_tag_strip` facade gap filed.
+- **v0.7.4 ✅ shipped 2026-10-30** — Provider-error resilience: orphan
+  tool-result removal after context compaction (strict providers reject a
+  tool result whose announcing assistant was cut away), provider-rejection
+  payload dump for byte-level root-cause analysis, reproducible PAR SDK
+  pinning in CI/release (release tag instead of branch tip). Pre-release
+  audit fixed 2 P1 + 2 P2 findings, including a date-rotated test that had
+  kept the suite red since 2026-08-26 unnoticed.
+- v0.7.5 — PAR SDK 0.12-beta adoption: `apply_patch` (zero-code visibility,
+  prompt guidance vs `edit`), complete bash output (loop detection sees the
+  real result), SDK floor bump, plus the build-reproducibility follow-up.
+  Full spec: `docs/v0.7.5-ROADMAP.md`.
 - v0.8.0+ — best-of-N reasoning, self-improvement, compose mode, ecosystem,
   code intelligence, safety, polish → v1.0
 
@@ -331,6 +342,8 @@ per global rules) lives in `docs/DECISIONS.md`. Strategic-level entries:
 | 2026-08-05 | PAR SDK feedback filed — 3 gaps surfaced by audit: (1) Runtime.save_conversation lacks ?scope (blocks P0 #2), (2) openai_provider streaming lacks stream_options.include_usage (blocks /cost accuracy), (3) think_tag_strip middleware not default (blocks CoT-leaking model support). User will direct PAR SDK team before v0.5.5 Wave 2 | Active |
 | 2026-08-07 | v0.6.1 shipped — install/upgrade parity fix: install.sh stale-binary permission guard + `par upgrade` source-fallback on no-prebuilt platforms (macOS Intel self-update now works via source recompile) + `Filename.temp_file` hygiene. Surfaces install/upgrade consistency as an architectural property. | Active |
 | 2026-08-07 | v0.6.2 shipped — linenoise migration for UTF-8/wide-char REPL input: cooked-mode tty line discipline has no wcwidth (IUTF8 insufficient), garbling CJK backspace cross-platform. Added bundled-C `linenoise` opam dep (no system packages; confirmed in release CI); migrated REPL loop + `read_line`; plain-text prompt (linenoise strlen cursor); Ctrl+C `Sys.Break` caught (REPL + read_line→exit 130); stdout flush before linenoise (slash-command output fix). "一次做对": proven library over hand-rolled raw-mode editor. | Active |
+| 2026-10-21 | v0.8.0 scope = max mode (Best-of-N): N read-only candidates in parallel, a selector that both picks and routes, single-writer execution; execution-level best-of-N deferred to v0.9.0 (write-race hazard). v0.7.5 = SDK follow-up + reproducibility, released before it | Active |
+| 2026-10-22 | Build reproducibility: PAR SDK pinned to a release tag in CI/release instead of the upstream branch tip — one par-code version must always build the same binary, and upstream changes must not enter a release without par-code review | Active |
 
 ## 10. Revision Protocol
 

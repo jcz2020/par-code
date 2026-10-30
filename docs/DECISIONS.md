@@ -1,5 +1,25 @@
 # Decisions
 
+## [2026-10-30] v0.7.4 released — provider-error resilience
+
+**Tag**: Release
+
+**变更前**: v0.7.3 已发布，main 上挂着 3 个已推送但未发版的提交（provider 400(2013) 调查结案、上下文裁切后孤儿 tool result 修复、provider payload 调试 dump）；测试套件自 2026-08-26 起实际为红（`prune_plans` 测试夹具把硬编码日期当"最近"），但此后没有 CI 运行，因此无人发现；CI 与 release 把 PAR SDK 钉在**分支 tip**，同一个 par-code tag 的两次构建可能产出不同二进制。
+
+**变更后**: v0.7.4 发布。上下文裁切不再把孤儿 tool result 发给 provider；provider 拒绝类 invalid_input 会把会话 dump 到 `~/.par/debug/`，任何复现都可字节级举证；CI 与 release 改为钉 PAR `v0.10.0` release tag（本次验证所用的 SDK 版本），产物可复现。发布前审计修复 2 个 P1 + 2 个 P2，其中 P1 之一就是那个潜伏约四周的红测。
+
+**原因**: 这批修复合在一起构成同一个主题——"provider 报错时，par-code 必须能自证发生了什么"。孤儿 tool result 是 provider 侧 400 (2013) 的唯一已知触发条件，而 payload dump 是把下一次复现变成可举证事实的手段；两者都直接服务于"错误可诊断"。产物可复现则是发布纪律问题：分支 tip 钉法让上游变化绕过 par-code 的任何评审直接进产物。
+
+**影响范围**: `lib/par_code_repl.ml`（dump 加固）、`test/test_par_code_payload_dump.ml`（写路径覆盖）、`test/test_par_code_plan_tools.ml`（夹具按时钟生成）、`.github/workflows/{ci,release}.yml`（SDK pin）、`dune-project` + `test/test_par_code.ml`（版本）、CHANGES/README/STRATEGY/DECISIONS 文档同步。
+
+**回退方式**: 版本号可回退（把 `dune-project` 改回并重建）；CI 的 SDK pin 可改回分支 tip（代价是回到不可复现状态）；dump 加固与测试为纯增量，删除即回到原行为。
+
+**已知限制**:
+- **Severity**: LOW（无新功能面）— 本版是修复版，不引入新交互面。
+- 真机 LLM 走查本轮**未做**（会消耗 provider 额度）；v0.7.4 的三条声明现在全部有自动化覆盖，按审计技能的分层规则不属于必须走查的类别。
+- payload dump 的写路径虽有测试，但**从未在真实 provider 拒绝中触发过**（按设计，它是复发时的取证手段，不是常规路径）。
+- 本机 opam switch 的 PAR 仍钉在本地仓库 `main`（已装版本为 0.10.0，与 CI 现在钉的 `v0.10.0` 一致）；若有人执行 `opam upgrade par`，本地会跳到 0.12-beta 并因新地板字段而编译失败——这正是 v0.7.5 要处理的升级。
+
 ## [2026-10-22] PAR SDK Feedback: 工具分层没有面向消费者的声明式分类入口（渐进式加载对消费端无效）
 
 **Tag**: PAR SDK Feedback
