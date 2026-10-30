@@ -246,12 +246,30 @@ let prune_payload_files ~dir ~keep =
      List.map fst keep_list
    with _ -> [])
 
+(* Two rejections inside the same second would collide on a seconds-resolution
+   filename, and the later dump would overwrite the earlier evidence -- which is
+   the one thing this diagnostic exists to prevent. The per-process counter keeps
+   the name all-digits, which is exactly what [prune_payload_files] matches on. *)
+let payload_dump_seq = ref 0
+
 let dump_payload_debug (ui : Par_code_ui.backend) (conv : Types.conversation) =
   (try
      let dir = debug_dir () in
-     (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+     (* mkdir -p: on a fresh HOME the parent may not exist yet, and a bare
+        [mkdir] would turn the whole dump into a silent no-op. *)
+     let rec mkdir_p d =
+       if not (Sys.file_exists d) then begin
+         mkdir_p (Filename.dirname d);
+         (try Unix.mkdir d 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+       end
+     in
+     (try mkdir_p dir with _ -> ());
      let ts = int_of_float (Unix.gettimeofday ()) in
-     let path = Filename.concat dir (Printf.sprintf "payload-%d.json" ts) in
+     incr payload_dump_seq;
+     let path =
+       Filename.concat dir
+         (Printf.sprintf "payload-%d%03d.json" ts (!payload_dump_seq mod 1000))
+     in
      let json = Yojson.Safe.to_string
        (`List (List.map Types.message_to_yojson conv.Types.messages)) in
      let len = String.length json in
