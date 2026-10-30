@@ -377,21 +377,31 @@ let test_show_plan_not_found () =
 
 (* -- prune_plans tests ---------------------------------------------------- *)
 
+(* [prune_plans] compares the timestamp embedded in the FILENAME against the
+   cutoff, so hardcoded "recent" fixtures silently become prunable once real time
+   passes them -- these fixtures are generated relative to now instead. *)
+let plan_file_name ~days_ago =
+  let t = Unix.gmtime (Unix.gettimeofday () -. (float_of_int days_ago *. 86400.0)) in
+  Printf.sprintf "%04d-%02d-%02dT%02d-%02d-%02dZ.md"
+    (t.Unix.tm_year + 1900) (t.Unix.tm_mon + 1) t.Unix.tm_mday
+    t.Unix.tm_hour t.Unix.tm_min t.Unix.tm_sec
+
 let test_prune_old_files () =
   with_temp_dir (fun tmpdir ->
     let old_cwd = Sys.getcwd () in
     Sys.chdir tmpdir;
     Fun.protect ~finally:(fun () -> Sys.chdir old_cwd) (fun () ->
       let plans_dir = make_plans_dir tmpdir in
+      let recent = plan_file_name ~days_ago:1 in
       write_file (Filename.concat plans_dir "2020-01-01T00-00-00Z.md") "old plan";
-      write_file (Filename.concat plans_dir "2026-07-27T14-30-00Z.md") "recent plan";
+      write_file (Filename.concat plans_dir recent) "recent plan";
       match Par_code_plan_tools.prune_plans ~older_than_days:30 with
       | Ok n ->
         Alcotest.(check int) "pruned count" 1 n;
         Alcotest.(check bool) "old file deleted" false
           (Sys.file_exists (Filename.concat plans_dir "2020-01-01T00-00-00Z.md"));
         Alcotest.(check bool) "recent file kept" true
-          (Sys.file_exists (Filename.concat plans_dir "2026-07-27T14-30-00Z.md"))
+          (Sys.file_exists (Filename.concat plans_dir recent))
       | Error (`Plan_error msg) -> failf "prune_plans error: %s" msg))
 
 let test_prune_keeps_recent () =
@@ -400,15 +410,17 @@ let test_prune_keeps_recent () =
     Sys.chdir tmpdir;
     Fun.protect ~finally:(fun () -> Sys.chdir old_cwd) (fun () ->
       let plans_dir = make_plans_dir tmpdir in
-      write_file (Filename.concat plans_dir "2026-07-27T14-30-00Z.md") "recent A";
-      write_file (Filename.concat plans_dir "2026-07-26T10-00-00Z.md") "recent B";
+      let recent_a = plan_file_name ~days_ago:1 in
+      let recent_b = plan_file_name ~days_ago:2 in
+      write_file (Filename.concat plans_dir recent_a) "recent A";
+      write_file (Filename.concat plans_dir recent_b) "recent B";
       match Par_code_plan_tools.prune_plans ~older_than_days:365 with
       | Ok n ->
         Alcotest.(check int) "none pruned" 0 n;
         Alcotest.(check bool) "file A exists" true
-          (Sys.file_exists (Filename.concat plans_dir "2026-07-27T14-30-00Z.md"));
+          (Sys.file_exists (Filename.concat plans_dir recent_a));
         Alcotest.(check bool) "file B exists" true
-          (Sys.file_exists (Filename.concat plans_dir "2026-07-26T10-00-00Z.md"))
+          (Sys.file_exists (Filename.concat plans_dir recent_b))
       | Error (`Plan_error msg) -> failf "prune_plans error: %s" msg))
 
 let test_prune_no_files () =
