@@ -125,13 +125,20 @@ install_dylib gmp    libgmp.dylib    libgmp.10.dylib
 info "setting up opam environment ..."
 eval "$(opam env)"
 
-# Pin PAR SDK (idempotent — `opam list` check avoids re-pin churn in CI).
-# Tolerate exit code 31: opam returns it when the pin succeeds but the
-# switch state metadata is "out of sync" (packages are actually installed
-# and usable). Same fix as Linux Dockerfile (commit ca57e82).
-if ! opam list --columns=name 2>/dev/null | grep -qx par; then
-    info "pinning PAR SDK ..."
-    opam pin add par https://github.com/jcz2020/par.git -y \
+# Pin PAR SDK to the v0.10.0 release tag — the SDK this release targets.
+# A branch-tip pin makes the bundle depend on whatever upstream's main
+# happened to be; an upstream change with a new required record field then
+# breaks the build with no par-code change involved.
+# Idempotent: skip only when the pin already points at the required version.
+# The previous check (`opam list --columns=name | grep -qx par`) never matched
+# anything — `opam list` prints only INSTALLED packages, and `opam pin list`
+# prints the name WITH the version ("par.0.10.0"), so the script always
+# re-pinned and overwrote CI's tag pin with a branch-tip pin.
+if opam pin list 2>/dev/null | grep -q '^par\.0\.10\.0'; then
+    info "PAR SDK already pinned at v0.10.0; skipping"
+else
+    info "pinning PAR SDK (v0.10.0 tag) ..."
+    opam pin add par https://github.com/jcz2020/par.git#v0.10.0 -y \
         || { rc=$?; [ "$rc" -eq 31 ] \
              || die "opam pin failed with exit $rc"; \
              warn "opam pin returned 31 (out of sync) — continuing"; }

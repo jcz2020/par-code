@@ -86,13 +86,16 @@ RUN opam init --disable-sandboxing -y --bare --no-setup && \
     opam switch create default --packages=ocaml-variants,ocaml.5.4.0 -y && \
     eval $(opam env --switch=default)
 
-# Pin the PAR SDK (not yet on the public opam repository).
+# Pin the PAR SDK (not yet on the public opam repository) to the v0.10.0
+# release tag. Pinning the branch tip instead would make the bundle depend on
+# whatever upstream's main happened to be — an upstream change with a new
+# required record field breaks the build without any par-code change.
 # Pin uring to 2.7.0 BEFORE par: eio.1.4+ requires uring >= 2.15.0 which
 # builds vendored liburing that fails on ARM64 AlmaLinux 8. Pinning uring
 # to 2.7.0 cascades the solver to eio.1.3 (which allows uring < 2.14.0).
 RUN eval $(opam env --switch=default) && \
     opam pin add uring 2.7.0 -y && \
-    opam pin add par https://github.com/jcz2020/par.git -y; \
+    opam pin add par https://github.com/jcz2020/par.git#v0.10.0 -y; \
     rc=$?; \
     if [ "$rc" -ne 0 ] && [ "$rc" -ne 31 ]; then exit "$rc"; fi
 
