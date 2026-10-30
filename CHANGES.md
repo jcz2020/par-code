@@ -1,5 +1,70 @@
 # CHANGES
 
+## v0.7.4-dev — Provider-error resilience
+
+> **Status**: In progress. Carries the two robustness fixes that came out of
+> the provider 400 (2013) investigation. Not released yet — the version
+> bump and the tag wait for the release call.
+
+### Fixed — Orphan tool results after context compaction
+
+Context compaction picked the kept tail blind, so the window could start
+with `Tool` messages whose announcing assistant had been cut away. Strict
+providers reject such orphans (empirically: HTTP 400 code 2013, reproduced
+with a minimal payload). The kept window now drops leading orphan tool
+results whose `tool_call_id` is never announced inside it. Dropping stale
+results is safe — they belong to the discarded region — and extending the
+window backwards would re-grow the payload past the budget. An assistant
+inside the window can never lose its results, because only the head side is
+cut.
+
+### Added — Provider payload dump on invalid-input rejection
+
+When an invocation fails with a provider-rejection-class invalid input
+(HTTP 400 body), the recovered conversation's messages are dumped to
+`~/.par/debug/payload-<timestamp><seq>.json` so a recurrence is provable at
+byte level. Best-effort throughout: it never raises and never changes control
+flow. Payloads are truncated at 2 MB and only the newest 5 dumps are kept.
+The dump makes future escalation free — the `call_xxx` id in the provider
+error can be matched against the recorded payload.
+
+Two hardening details, found by the pre-release audit:
+
+- The dump directory is created with `mkdir -p` semantics. On a fresh
+  `$HOME` a bare `mkdir` failed with `ENOENT` and the whole dump became a
+  silent no-op — the one situation where the diagnostic must not fail.
+- The file name carries a per-process sequence number, still all digits so
+  retention matching is unaffected. Previously two rejections inside the
+  same second collided on the seconds-resolution name and the later dump
+  overwrote the earlier evidence.
+
+### Changed — Reproducible SDK pinning in CI and release builds
+
+The CI and release workflows pinned the PAR SDK to the upstream branch tip,
+so the same par-code tag could build two different binaries depending on when
+the build ran, and an upstream change could enter a release without any
+par-code review. Both workflows now pin the SDK to the `v0.10.0` release
+tag — the version this release was verified against. The SDK upgrade to
+0.12-beta is a separate, versioned change.
+
+### Fixed — Date-rotated prune test (test-only)
+
+`prune_plans` compares the timestamp embedded in the file name against the
+cutoff, and the test fixtures hardcoded dates labelled "recent". Once real
+time passed those dates the assertions started failing (the suite turned red
+on 2026-08-26; no CI run happened afterwards, so it went unnoticed). The
+fixtures are now generated relative to the current clock.
+
+### Documentation — Provider 400 (2013) investigation closed
+
+Verdict: transient server-side misvalidation, not a client emission defect.
+Only an orphan tool result reproduces the exact error text, and every client
+emission path was eliminated with file:line evidence. The two known
+limitation records were updated, and the payload dump above was added as a
+permanent diagnostic.
+
+---
+
 ## v0.7.3 — Autonomous goal chaining
 
 > **Status**: Shipped 2026-08-17. Implementation + dogfood (real LLM,

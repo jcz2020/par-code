@@ -1,5 +1,88 @@
 # Decisions
 
+## [2026-10-22] PAR SDK Feedback: 工具分层没有面向消费者的声明式分类入口（渐进式加载对消费端无效）
+
+**Tag**: PAR SDK Feedback
+
+**变更前**: par-code 规划采纳 0.11+ 的渐进式工具加载（`runtime_config.max_tool_schema_tokens` + `tool_search` 元工具）时核读实现，发现三层事实：① `Tool_registry.register`（即 `Runtime.register_tool` 走的路径）把工具固定放进 `Always` 层（`lib/core/tool_registry.ml:21`），只有 `register_searchable` 才进 `Searchable`（`:29`）；② 开预算时 runtime 只把 `tool_search` 自己 `register_searchable`（`lib/core/runtime.ml:705-709`），**不会**把任何内置工具分类；③ 引擎的渐进模式只隐藏 `Searchable` 层工具（`lib/core/engine.ml:646-680`）。因此消费端把 `max_tool_schema_tokens` 设成 `Some n` 的结果是：没有任何工具被隐藏、token 也省不到——一个语义上"开了等于没开"的开关。par-code 的全部内置工具都走 `Runtime.register_tool`（`lib/par_code_setup.ml:214-232`），全部落在 `Always` 层。
+
+**变更后**: 已 filed upstream。建议最小正确修复（按优先级）：① 给 `runtime_config` 一个声明式分类（如 `searchable_tools : string list` 或按工具类别的默认分层策略），由 runtime 在注册时据此调用 `register_searchable`，避免消费端逐个 `set_layer`；② 或明确文档化"渐进式加载要求消费端把工具注册为 searchable"，并在 `register_tool` 上给出 `?layer` 参数；③ 至少让 `tool_search` 在"无任何 searchable 工具"时给出可诊断的提示，而不是静默无效果。消费端当前可达的手工路径是 `Runtime.tool_registry rt`（`runtime.mli:516`）+ `Tool_registry.set_layer`，但把 `bash`/`write` 这类核心工具藏到可能失败的检索后面是产品决策与风险，不该由 SDK 静默承担。
+
+**原因**: 渐进式加载的价值在于把工具描述符的 token 成本降下来，而成本只来自"被隐藏的那部分"。当前分层模型把"注册"和"可见性策略"绑死在 `Always` 上，导致这个特性对消费端**默认无效**——文档写得像是开箱可用，实现上却要求消费端先做一遍没有产品依据的分层决定。par-code 因此把该开关移出 v0.7.5（见 `docs/v0.7.5-ROADMAP.md` 决策 5），而不是"默认关闭地暴露一个死开关"。
+
+**影响范围**: par-code v0.7.5 范围（已移出，不阻塞）；任何想用渐进式工具加载的 PAR 消费端。PAR 侧的 `Tool_registry` 与 `runtime_config` 公开接口。
+
+**回退方式**: N/A（filing only — PAR SDK source change needed）。
+
+**已知限制**:
+- **Severity**: MEDIUM — 不是 bug，是特性未接线到消费端；开箱无效比没有该特性更误导。
+- par-code 侧的处置已定：本版不做，等上游给出声明式分类或产品决策明确后再评估（退役条件已写入 ROADMAP 决策 5）。
+- 另一条相关但独立的上游事实：`Image_block` 新增 `detail : string option [@default None]` 只影响 JSON 解码，不影响 record 构造（par-code 从不构造 image block，无影响）——这一点 PAR 自己的 CHANGES 表述为"直接构造 `Image_block` 的代码必须补 `detail = None`"，准确但不完整，容易让消费端误以为存在构造期破坏。
+
+## [2026-10-22] 构建可复现化：PAR SDK pin 从分支 tip 改为发布 tag
+
+**Tag**: Infrastructure
+
+**变更前**: CI 与 release workflow 都以 `opam pin add par https://github.com/jcz2020/par.git -y` 把 PAR SDK 钉在**默认分支 tip**（`.github/workflows/ci.yml:29`、`.github/workflows/release.yml:137`）；本机 dev switch 同样钉在本地仓库的 `main`（`git+file:///root/dev/PAR#main`）。实测后果：① 已发布二进制不可复现——v0.7.3 的构建取的是 2026-08-17 那一刻的 PAR tip；② **本地与 CI 不是同一份 SDK**——本地 PAR `main` 领先 origin/main 3 个提交（`ff8e31c`、`7b647cd`、`bfb4691`）且有 8 个未提交改动，CI 看不到这些；③ 上游任何变化会在下次发版时静默进入 par-code 构建，无需 par-code 改任何代码。
+
+**变更后**: （v0.7.5 实施时落地）CI 与 release 的 pin 改为带 tag：`opam pin add par https://github.com/jcz2020/par.git#v0.11.0-beta.20261013 -y`（保留现有 `rc -ne 31` 容错），发布说明记录 SDK 版本；本地 switch 也钉到同一 tag。地板约束从 `(par (>= 0.10.0))` 提到 `(>= 0.11.0-beta.20261013)`。
+
+**原因**: 依赖钉在分支 tip 意味着"同一个 par-code tag 的两次构建可以是两个不同的二进制"。这类不可复现性在出问题时无法定位（是 par-code 变了还是 SDK 变了？），也让"上游已更新"这类变化绕过 par-code 的 review 直接进产物。PAR 已经有可用 tag（`v0.11.0-beta.20261013`、`v0.10.0` …），且未发布到公共 opam 仓库（只能源码安装），所以 tag 是当前唯一能做到可复现的钉法。
+
+**影响范围**: `.github/workflows/ci.yml`、`.github/workflows/release.yml`、`dune-project`（依赖约束）、本机 opam switch 的 pin、发布说明模板。不改 par-code 运行时代码。
+
+**回退方式**: pin 改回不带 tag 的分支 tip 即可（一条命令），代价是回到不可复现状态。
+
+**已知限制**:
+- **Severity**: MEDIUM — 不影响功能，影响可诊断性与发版可信度。
+- pin 到 tag 后，PAR 出新 tag 需要手动跟进（有意为之：可复现性优先）。复核节奏 = 每次 par-code 发版前看一次 PAR 有无新 tag。
+- 钉 tag 意味着 par-code 的 SDK 地板暂时指向一个 **beta** 版本（PAR 尚未发布稳定版）。**退役触发**：PAR 发布 0.11.0 稳定版后，把地板切到 `>= 0.11.0` 并在 README 说明不再需要 beta 地板；若 PAR 发布到公共 opam 仓库，改用 `opam install par.<version>` 版本约束。
+
+## [2026-10-21] PAR SDK Feedback: 并发原语缺会话维度 + invoke_async 缺 save/update_current
+
+**Tag**: PAR SDK Feedback
+
+**变更前**: par-code 规划 v0.8.0（max mode / Best-of-N）时，核读 PAR SDK 并发能力，发现两块缺口：① `Runtime.invoke_parallel` 的分支是**无状态** `Agent_call`（`workflow_engine.ml:141-157`：`Engine.run_agent` 收 prompt、产出 `{text, tool_calls}` JSON），返回类型 `parallel_invoke_result.successes : (agent_dispatch_spec * Yojson.Safe.t) list`（`runtime.mli:13-17`）——**拿不到分支的 conversation**；`agent_dispatch_spec`（`runtime.mli:5-11`）也没有 per-branch conversation 入口。② `Runtime.invoke_async`（`runtime.mli:275-289`）没有 `?save` / `?update_current` 参数，而 `Runtime.invoke` 的 `~update_current` 默认 `true`（`runtime.mli:1180`）→ 并发调用会写 `rt.current_conversation`（`runtime.ml:1153`/`1168`），虽有 mutex（`runtime.ml:100-102`）但语义仍是 last-writer-wins。
+
+**变更后**: 已 filed upstream。建议最小正确修复（按优先级）：① 给 `agent_dispatch_spec` 加可选 `?conversation`，并让 `parallel_invoke_result.successes` 携带分支的 `invoke_result`（含 conversation），使"同一会话的 N 个候选 + 选出胜者并接续"成为一等能力；② 给 `Runtime.invoke_async` 补 `?save` / `?update_current`（与 `invoke` 对齐）。备选（若 ① 成本过高）：新增 `Runtime.invoke_parallel_conv` 便利 API，语义 = 并发跑同一 agent 的 N 份会话副本、返回各分支会话。
+
+**原因**: "并行多 agent" 与 "同一会话的 N 个候选" 是两种不同的并行语义。PAR 现有 `invoke_parallel` 只覆盖前者（`docs/sdk/parallel.md` 也自述为 "run N agents in parallel and merge"）。max mode 这类场景——同一请求、同一上下文、多个候选、胜者接续——在 SDK 层没有对应原语，只能由应用侧自行编排，把"并发正确性"风险留给每个应用重复解决。
+
+**影响范围**: par-code v0.8.0 max mode（本次按应用侧编排实现，不阻塞）；PAR SDK 侧的 workflow `Agent_call` 步骤（若采纳 ① 则需同步支持分支会话）。注意：PAR 0.11.0-beta 已把 `current_conversation` 改为 mutex 保护，方向正确，但未解决"分支会话不可取回"的语义缺口。
+
+**回退方式**: N/A（filing only — PAR SDK source change needed）。
+
+**已知限制**:
+- **Severity**: MEDIUM — 不是 bug，是能力缺口；影响所有"并发 + 会话接续"场景。
+- par-code 侧的临时路径已定：`Runtime.invoke` + 每候选独立会话副本 + `~update_current:false ~save:false` + par-code 自己 fan-out（Eio fiber + Semaphore + 共享取消 token）。该路径在 PAR 0.10.0（当前已装版本）即可工作，不依赖上游改动。
+- **Retirement trigger**: PAR 具备会话级并发原语后，par-code 的自编排 fan-out 退役，切换到 SDK API。
+
+**附：同一次核读发现的其余上游缺陷（同一 feedback 条目）**
+
+1. **`docs/sdk/parallel.md` 与源码多处不符**（文档页多处描述的是"设计意图"而非实际行为）：`:63-64,72` 声称结果含 `cancelled` / `duration` 字段——源码里只有 `successes` / `failures` / `merged`；`:129` 声称未传 `merge_fn` 时结果被包成 JSON 列表——实际 `merged = None`；`:101` 声称 `Fail_fast` 会取消其余分支——实际不取消，只是整批返回 `Error`；`:96,102` 声称 `Conditional` 会执行 `on_failure` 步骤——实际从未执行（等价 `Continue_on_failure`）；`:268` 声称内部构造 workflow `Parallel` 节点提交——实际直接 fork fiber 跑 `execute_step`，无 workflow run、无 `workflow_run_id`；`:9,150` 声称每 agent 独立 tool registry——只有带 `workspace = Some _` 的 spec 才有独立 registry，否则共用一个。
+2. **`failure_policy = Conditional` 在两条路径上语义不一致**：`invoke_parallel` 便利 API 直接忽略 `on_failure`（`runtime.ml:2085-2086`，`Conditional _ -> Result.Ok { successes; failures; merged }`），而 workflow `Sequential` 路径会正常执行它（`workflow_engine.ml:300-303`）。同一个 `failure_policy` 类型（`types.ml:1216-1219`）在两处行为不同，且文档只描述了会执行的那一种——按 `invoke_parallel` 文档使用 `Conditional` 的应用会静默拿到错误行为。
+3. **`agent_dispatch_spec.blocking_approval` 字段全库无人读取**：`runtime.mli:10` 自标 "reserved for v0.8.1"，实际任何分支都不消费它。
+4. **PAR 自己的 changelog 注记过期**：`CHANGES.md:309` 称 `invoke_parallel` 不捕获 per-branch `Engine.Approval_pending`，实际已捕获（`runtime.ml:2016-2053`；已装 0.10.0 同样，`_opam/lib/par/core/runtime.ml:1809`）。后果：因审批挂起而中断的分支会以 `successes` 里的 `{"status":"suspended"}` 形式出现，而不是 `failures`——合并/消费侧必须显式过滤，否则会把"挂起标记"当成答案。
+5. **部分结果的前提条件未文档化**：取消后能否拿到部分结果，取决于等待方 fiber 是否存活（`Eio.Promise.await` 是取消点）——若取消 token 的 switch 覆盖了调用方，`invoke_parallel` 直接不返回。
+
+以上 5 条不阻塞 par-code v0.8.0（我们不使用 `invoke_parallel`），但会让任何按文档使用该 API 的应用踩坑，建议上游一并修正。
+
+## [2026-10-21] v0.8.0 max mode 架构决策：候选只读 + 会话副本 fan-out
+
+**Tag**: Architecture
+
+**变更前**: par-code 每回合只有单路 `Runtime.invoke`（`lib/par_code_repl.ml:515`），一条思路一条实现。judge agent 判的是"goal 是否达成"（`lib/par_code_judge.ml`），不参与"哪个方案更好"。
+
+**变更后**: 新增 max mode（默认关闭，`max_mode` + `max_candidates` 配置，REPL `/max`，CLI `--max N`）。一次回合的流程 = N 路并发只读候选（各自持有父会话的副本）→ 选择器（独立 `selector` agent，`tools:[]`，走 `invoke_generate`）挑出胜者并判定"直接作答"还是"需要执行"→ 胜者会话被父 REPL 接管；需要执行时由**单路** build 回合落地。全套范围决策见 `docs/v0.8.0-ROADMAP.md` §3。
+
+**原因**: 三条约束交叉决定了这条路线——① 同一工作区 N 路并发写必然互相覆盖，所以候选必须只读、执行必须单路；② `Runtime.invoke_parallel` 的分支不携带会话（见同日 PAR SDK Feedback 条目），拿不到胜出候选的会话就接不下去；③ `Runtime.invoke` 的 `~update_current:false` + 显式 `?conversation:` 组合是当前唯一能保证父会话不被并发候选污染的调用姿势。执行级 best-of-N（每候选一个 git worktree 并发改、胜者 diff 回灌）是更彻底的形态，但要先解决"worktree 从 HEAD 起、看不到主工作区未提交改动"的基线问题，作为**范围妥协**推迟到 v0.9.0，退役条件与触发信号已写进 ROADMAP §3 决策 4。
+
+**影响范围**: `lib/par_code_config.ml`（两个新字段）、`lib/par_code_repl.ml`（回合分流 + `/max`）、`lib/par_code_setup.ml`（注册 candidate/selector 两个 agent）、新增 `lib/par_code_max_mode.ml` 与 `lib/par_code_selector.ml`、`bin/cli_args.ml`（`--max`）、README/CHANGES/STRATEGY/AGENTS.md 文档同步。
+
+**回退方式**: `max_mode` 默认关闭 + 独立 kill switch，关闭即回到 v0.7.3 的单路行为；新增字段全部可选，旧配置文件用默认值兜底。
+
+---
+
 ## [2026-08-26] PAR SDK Feedback: recover_on_cancel 单遍扫描顺序缺陷
 
 **Tag**: PAR SDK Feedback
