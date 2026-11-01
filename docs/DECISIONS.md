@@ -1,5 +1,24 @@
 # Decisions
 
+## [2026-11-01] v0.7.5 发布：SDK 0.12-beta 落地并经真机 dogfood 验证
+
+**Tag**: Release
+
+**变更前**: 工作树已含 v0.7.5 的全部实现（地板升级、`apply_patch` 采纳与提示、完整 bash 输出、五个安装点钉 tag），版本号仍是 `0.7.4`，且 `apply_patch` 只在单元测试层面被验证过——没有任何一次真机模型调用证明它在这条接线里真的能改文件。
+
+**变更后**: 版本号 `0.7.5`（`dune-project` + 版本断言 + 重新生成的 `par_code.opam`），tag `v0.7.5` 发布。发布前用真机 provider 做了一次 dogfood：模型对两个文件发起**一次** `apply_patch`，返回 “2 files changed, 2 insertions, 0 deletions”，两文件首行注释均正确落盘。dogfood 学到的两件事已固化为测试：单文件与多文件补丁都必须真的改到工作区文件。
+
+**原因**: v0.7.4 的教训是“发布前没在真实环境验证”会把缺陷拖到 CI 才暴露；`apply_patch` 是本版唯一的新能力面，它的价值等于“模型能用它改对文件”，只能用真机调用证明。dogfood 还暴露出一条真实格式约束（多文件补丁需要 `diff --git` 分段头，否则第二个文件头会被当作 hunk 内容吞掉），这正是测试该钉住的行为。
+
+**影响范围**: `dune-project`、`test/test_par_code.ml`（版本断言）、`par_code.opam`（生成物）、`test/test_par_code_setup.ml`（新增两条 `apply_patch` 落盘测试）、README/CHANGES/STRATEGY/DECISIONS 四份文档的状态同步。
+
+**回退方式**: 删除 tag `v0.7.5` 并把版本号退回 `0.7.4`；本版无新增运行时逻辑，回退不影响上一版行为。
+
+**已知限制**:
+- **Severity**: LOW（PATCH 发布，无破坏性变更）。
+- 多文件补丁必须带 `diff --git` 分段头；裸拼两段 `---`/`+++` 会被解析成 hunk 内容（SDK 解析器行为，par-code 侧只能钉格式并写进测试）。
+- 端到端验证覆盖一次双文件补丁；更复杂的补丁形状（重命名、删除、超大上下文）仍只有单元测试覆盖。
+
 ## [2026-11-01] SDK 地板升到 0.12-beta：采用新能力，并让构建可复现
 
 **Tag**: Architecture

@@ -10,17 +10,15 @@ type-safe bash, skills, streaming, persistence — to both ship a useful agent a
 prove out the PAR SDK in anger. (MCP client and Workflow engine are PAR SDK
 primitives par-code does not yet wire — see roadmap items v0.10.0 / v0.11.0.)
 
-**Status:** `v0.7.4` — Provider-error resilience. Context compaction no
-longer leaves orphan tool results behind (a tool result whose announcing
-assistant was cut away is rejected by strict providers), and a provider
-rejection of class invalid-input now dumps the conversation to
-`~/.par/debug/` so a recurrence is provable byte for byte. Builds are
-reproducible now: CI and the release pipeline pin the PAR SDK to a release
-tag instead of the upstream branch tip, so one par-code version always
-builds the same binary. v0.7.3's autonomous goal chaining is unchanged —
-`par --goal "..."` auto-starts the chain, the judge drives each next turn,
-and Ctrl+C cancels mid-invoke and pauses the goal with the conversation
-saved.
+**Status:** `v0.7.5` — PAR SDK 0.12-beta adoption. The SDK moves to the
+`v0.12.0-beta.20261023` release tag, and `apply_patch` arrives with it: a
+unified diff is validated hunk by hunk and applied atomically across several
+files, and the default prompt says when to reach for it instead of `edit`.
+Bash output is no longer truncated, so loop detection sees the real result,
+and every install path — CI, release, the bundle Dockerfile, the macOS
+build, the source installer — pins that tag, so one version always builds
+the same binary. v0.7.4's provider-error resilience and v0.7.3's autonomous
+goal chaining are unchanged.
 Pre-built binaries with a one-line installer (`curl | bash`) for Linux
 x86_64/arm64 + macOS arm64, plus `par upgrade`
 self-update. No OCaml or opam needed for end users.
@@ -477,7 +475,7 @@ Version numbers stay minimal (no 1.0 until core parity is earned).
 | **v0.7.2** ✅ | Goal usability hardening — visible confirmation prompts (bash + plan gate), reasoning-model thinking timer, three-class bash approval (`ask`/`auto_project`/`always`) with always-pattern persistence, planner synthesis fallback, doom-loop v2 (three signals + real abort + incident records), goal lifecycle (blocked status + disk flush + memory-only activation), no-progress & completion-claim guardrails. *"It can actually finish a goal — and you can see what it's waiting for."* |
 | **v0.7.3** ✅ | Autonomous goal chaining — `run_chain` driver (after each turn the judge verdict drives the next without user input); `par --goal` auto-starts the chain; real mid-invoke cancellation (PAR SDK 0.10.0: doom Guard-cancel + Ctrl+C pause with recovered conversation saved + second Ctrl+C force-exit); error-streak guard (`llm_error_x2` after 2 consecutive errors, soft/resumable); `goal_auto_chain` kill switch. *"Give it a goal, it works until the judge verifies it — and Ctrl+C actually stops it mid-stride."* |
 | **v0.7.4** ✅ | Provider-error resilience — context compaction drops orphan tool results instead of shipping them to the provider; a provider rejection of class invalid-input dumps the conversation to `~/.par/debug/` for byte-level root-cause analysis; CI and release pin the PAR SDK to a release tag, so one version always builds the same binary. *"When the provider says no, you can prove why."* |
-| **v0.7.5** | SDK follow-up — PAR SDK 0.12-beta: `apply_patch` (diff-based multi-file edits) with prompt guidance on when to use it versus `edit`, complete bash output so loop detection sees the real result, SDK floor bump to the new release tag. *"It edits more reliably, and its build no longer depends on upstream's mood."* |
+| **v0.7.5** ✅ | SDK follow-up — PAR SDK 0.12-beta: `apply_patch` (diff-based multi-file edits) with prompt guidance on when to use it versus `edit`, complete bash output so loop detection sees the real result, SDK floor bump to the new release tag. *"It edits more reliably, and its build no longer depends on upstream's mood."* |
 | **v0.8.0** | Best-of-N reasoning — max-mode (parallel candidates + judge selection). *"It tries several approaches and picks the best."* |
 | **v0.9.0** | Self-improvement — `/dream` + `/distill` + custom slash commands. *"It turns my repeated workflows into reusable skills."* |
 | **v0.10.0** | Compose mode — spec-driven orchestration with plan/execute/review/tdd/debug/verify/merge skills. *"Give a spec, it designs, codes, reviews, and tests end-to-end."* |

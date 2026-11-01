@@ -283,9 +283,12 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
   pinning in CI/release (release tag instead of branch tip). Pre-release
   audit fixed 2 P1 + 2 P2 findings, including a date-rotated test that had
   kept the suite red since 2026-08-26 unnoticed.
-- v0.7.5 — PAR SDK 0.12-beta adoption: `apply_patch` (zero-code visibility,
-  prompt guidance vs `edit`), complete bash output (loop detection sees the
-  real result), SDK floor bump, plus the build-reproducibility follow-up.
+- **v0.7.5 ✅ shipped 2026-11-01** — PAR SDK 0.12-beta adoption:
+  `apply_patch` (zero-code visibility, prompt guidance vs `edit`) verified on
+  a live provider (one call, two files, atomic), complete bash output (loop
+  detection sees the real result), SDK floor bump, plus the
+  build-reproducibility follow-up. The pre-release dogfood also pinned the
+  multi-file patch form (`diff --git` header per file section) in tests.
   Full spec: `docs/v0.7.5-ROADMAP.md`.
 - v0.8.0+ — best-of-N reasoning, self-improvement, compose mode, ecosystem,
   code intelligence, safety, polish → v1.0
@@ -344,6 +347,7 @@ per global rules) lives in `docs/DECISIONS.md`. Strategic-level entries:
 | 2026-08-07 | v0.6.2 shipped — linenoise migration for UTF-8/wide-char REPL input: cooked-mode tty line discipline has no wcwidth (IUTF8 insufficient), garbling CJK backspace cross-platform. Added bundled-C `linenoise` opam dep (no system packages; confirmed in release CI); migrated REPL loop + `read_line`; plain-text prompt (linenoise strlen cursor); Ctrl+C `Sys.Break` caught (REPL + read_line→exit 130); stdout flush before linenoise (slash-command output fix). "一次做对": proven library over hand-rolled raw-mode editor. | Active |
 | 2026-10-21 | v0.8.0 scope = max mode (Best-of-N): N read-only candidates in parallel, a selector that both picks and routes, single-writer execution; execution-level best-of-N deferred to v0.9.0 (write-race hazard). v0.7.5 = SDK follow-up + reproducibility, released before it | Active |
 | 2026-10-22 | Build reproducibility: PAR SDK pinned to a release tag in CI/release instead of the upstream branch tip — one par-code version must always build the same binary, and upstream changes must not enter a release without par-code review | Active |
+| 2026-11-01 | v0.7.5: SDK floor moves to the `0.12.0-beta` release tag; `apply_patch` adopted with prompt-level routing against `edit` and proven by a live two-file dogfood; doom-loop editor classification extended so patch-based loops are still caught | Active |
 
 ## 10. Revision Protocol
 

@@ -1,12 +1,13 @@
 # CHANGES
 
-## v0.7.5-dev — PAR SDK 0.12-beta 跟进
+## v0.7.5 — PAR SDK 0.12-beta 跟进
 
-> **Status**: In progress. The SDK floor moves from `0.10.0` to
+> **Status**: Released 2026-11-01. The SDK floor moves from `0.10.0` to
 > `0.12.0-beta.20261023` (a PAR release tag), and **every** install path —
 > CI, release, the Linux bundle Dockerfile, the macOS build script and the
 > source installer — pins that tag instead of following the upstream branch
-> tip.
+> tip. Verified end to end on a live provider: a single `apply_patch` call
+> edited two files atomically.
 
 ### Added — `apply_patch` (arrives with the SDK bump)
 
