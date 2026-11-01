@@ -26,6 +26,9 @@ let all_tool_names =
   [ "read"; "write_file"; "edit_file"; "grep"; "find"; "ls";
     "recall_memory"; "search_history";
     "git_status"; "git_log";
+    (* A write-capable tool the SDK added in 0.11 — the planner must filter
+       it out like any other editor. *)
+    "apply_patch";
     Par_code_plan_tools.plan_enter_tool.descriptor.Types.name;
     Par_code_plan_tools.plan_exit_tool.descriptor.Types.name ]
 
@@ -50,7 +53,8 @@ let with_test_runtime f =
           eval_limits = { max_depth = 10; max_node_visits = 1000 };
           parallel_tool_execution = false;
           bash_confirm = Runtime.default_bash_confirm;
-          event_retention_seconds = 0.0 }
+          event_retention_seconds = 0.0;
+          max_tool_schema_tokens = None }
       in
       match Runtime.create ~config sw with
       | Error _ -> Alcotest.fail "Runtime.create failed"
@@ -68,14 +72,11 @@ let with_test_runtime f =
           all_tool_names;
         f sw rt))
 
-(** Same filter as par_code_setup.ml lines 298-306. *)
+(** Uses the PRODUCTION allowlist from par_code_setup.ml, so this test guards
+    the real filter instead of a copy of it. *)
 let build_planner_descriptors () =
-  let plan_exit_name = Par_code_plan_tools.plan_exit_tool.descriptor.Types.name in
   List.filter_map (fun name ->
-    if List.mem name
-         [ "read"; "grep"; "find"; "ls";
-           "recall_memory"; "search_history"; "git_status"; "git_log" ]
-       || name = plan_exit_name
+    if List.mem name Par_code_setup.planner_tool_names
     then Some { Types.name;
                 description = Printf.sprintf "mock %s tool" name;
                 input_schema = `Assoc [];

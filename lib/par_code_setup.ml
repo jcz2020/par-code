@@ -172,7 +172,21 @@ let make_runtime_config (cfg : Par_code_config.config) =
     parallel_tool_execution = cfg.Par_code_config.parallel_tool_execution;
     bash_confirm = Runtime.default_bash_confirm;
     event_retention_seconds = cfg.Par_code_config.event_retention_days *. 24. *. 60. *. 60.;
+    (* Progressive tool loading stays off in this release: every tool we
+       register lands in the Always layer, so enabling the budget would hide
+       nothing and save no tokens (see docs/v0.7.5-ROADMAP.md decision 5). *)
+    max_tool_schema_tokens = None;
   }
+
+(* Planner tool allowlist: read-only investigation plus the plan-file tools.
+   Deliberately excludes every write-capable tool — including `apply_patch`,
+   the unified-diff editor the SDK added in 0.11 — so Plan mode can never
+   modify the workspace. Exported so the test suite can assert the real
+   allowlist instead of a copy of it. *)
+let planner_tool_names =
+  [ "read"; "grep"; "find"; "ls";
+    "recall_memory"; "search_history"; "git_status"; "git_log";
+    "plan_exit"; "plan_submit"; "write_plan_file" ]
 
 let agent_id = "par"
 
@@ -407,10 +421,7 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
      (* Planner agent: read-only tool subset, used in Plan mode (v0.5.0) *)
     let planner_descriptors =
       List.filter (fun (td : Types.tool_descriptor) ->
-        List.mem td.name
-          [ "read"; "grep"; "find"; "ls";
-            "recall_memory"; "search_history"; "git_status"; "git_log";
-            "plan_exit"; "plan_submit"; "write_plan_file" ]
+        List.mem td.name planner_tool_names
       ) !descriptors
     in
     let planner_prompt =
