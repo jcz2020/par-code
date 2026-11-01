@@ -132,11 +132,11 @@ jobs:
           restore-keys: |
             dune-build-${{ runner.os }}-
 
-      # Pin PAR SDK (not yet on public opam repository). Pinned to the v0.10.0
-      # release tag so the released binary is reproducible against a fixed
-      # SDK version, not whatever upstream's branch tip is at build time.
+      # Pin PAR SDK (not yet on public opam repository). Pinned to the
+      # v0.12.0-beta release tag so the released binary is reproducible against
+      # a fixed SDK version, not whatever upstream's branch tip is at build time.
       - name: Pin PAR SDK
-        run: opam pin add par https://github.com/jcz2020/par.git#v0.10.0 -y
+        run: opam pin add par https://github.com/jcz2020/par.git#v0.12.0-beta.20261023 -y
 
       - name: Build + bundle + package
         run: bash scripts/build-macos.sh ${{ github.event.inputs.version || github.ref_name }}
