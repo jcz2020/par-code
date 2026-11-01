@@ -1,5 +1,43 @@
 # Decisions
 
+## [2026-11-01] SDK 地板升到 0.12-beta：采用新能力，并让构建可复现
+
+**Tag**: Architecture
+
+**变更前**: par-code 的 SDK 地板是 `(par (>= 0.10.0))`，而安装路径（CI、release、Linux bundle Dockerfile、macOS 构建脚本、源码安装器）各自把 PAR 钉在**上游分支 tip**——同一个 par-code tag 的两次构建可以产出两个不同的二进制，上游的任何变化（包括新增必填 record 字段）会在不经 par-code 任何评审的情况下直接让构建失败。v0.7.4 首次发布就是这么失败的（三个平台全红于 `Some record fields are undefined: max_tool_schema_tokens`）。
+
+**变更后**: 地板升到 `(par (>= 0.12.0-beta.20261023))`（PAR 的发布 tag），五个安装点统一钉该 tag。同步完成三处必修（两处 `runtime_config` 字面量补必填字段、一处 `Types.event` 穷举匹配补新构造子 arm）。随升级**零代码**获得 `apply_patch` 内置工具，并在默认 system prompt 里给出它与 `edit` 的分流指引。同时把 doom-loop 检测器的"编辑类工具"判定扩展到 `apply_patch`——否则改用补丁的 agent 循环会漏检。
+
+**原因**: 上游已经能单方面弄坏 par-code 的构建，而"上游更新了"这种变化此前完全绕过 par-code 的评审与验证。把依赖钉到 tag 把"可复现"变成构建的默认属性；把地板升级变成一次有意识、有测试、有版本的迁移，则是让"上游新能力"能被真正吃下（`apply_patch`、完整 bash 输出），而不是每次构建被动接受。
+
+**影响范围**: `dune-project`（地板约束）、`lib/par_code_setup.ml`（`runtime_config` + planner 工具白名单常量）、`lib/par_code_ui.ml`（事件匹配）、`lib/par_code_doom_loop.ml`（编辑类工具判定）、`lib/par_code_config.ml`（system prompt 指引）、五个安装点（CI/release/Dockerfile/macOS 脚本/安装器）、README/CHANGES/AGENTS 文档。
+
+**回退方式**: 地板回退到 `0.10.0` 并把安装点的 tag 改回 `v0.10.0`；三处必修是加性的（补字段 / 补 arm），随 SDK 降级需一并去掉；prompt 指引与 doom-loop 判定可独立回退。
+
+**已知限制**:
+- **Severity**: LOW（行为面为增量）——新工具默认可见是行为变化，靠 prompt 指引分流。
+- 地板指向一个 **beta** 版本（PAR 尚无稳定版）。**退役触发**：PAR 发布 0.12.0 稳定版后切到 `>= 0.12.0` 并去掉 beta 说明。
+- `apply_patch` 的原子性覆盖"逻辑补丁"，不覆盖"单文件写到一半崩溃"；同文件重叠补丁 last-writer-wins（与 `write`/`edit` 同约定）。
+- bash 输出变完整后，doom-loop 的判据更准，**可能出现以前没有的拦截**（修复带来的行为变化，不是回归）。
+
+## [2026-11-01] 渐进式工具加载不进本版：开关语义为空
+
+**Tag**: Architecture
+
+**变更前**: 规划 v0.7.5 时打算把 PAR 0.11 的渐进式工具加载（`runtime_config.max_tool_schema_tokens` + `tool_search` 元工具）做成一个配置开关（`tool_schema_budget`），默认关闭、用户可选。
+
+**变更后**: 该开关不进 v0.7.5，`max_tool_schema_tokens` 固定为 `None`（关闭）。缺口作为 PAR SDK feedback 归档（要求面向消费者的声明式分类入口）。
+
+**原因**: 核读实现后发现该开关**语义为空**：`Tool_registry.register`（即 `Runtime.register_tool` 走的路径）把工具固定放进 `Always` 层（`tool_registry.ml:21`），只有 `register_searchable` 才进 `Searchable` 层（`:29`）；开预算时 runtime 只把 `tool_search` 自己注册成 searchable（`runtime.ml:705-709`），而引擎的渐进模式只隐藏 `Searchable` 层工具（`engine.ml:646-680`）。par-code 的全部内置工具都走 `register_tool` → 全在 `Always` 层 → 开预算的结果是**没有任何工具被隐藏、token 也省不到**。一个"用户以为开了在省 token"的空开关比没有开关更糟。
+
+**影响范围**: v0.7.5 范围（`lib/par_code_setup.ml` 的 `max_tool_schema_tokens = None`）；所有想用渐进式加载的 PAR 消费端普遍受影响（同一条 feedback 已归档到 `docs/DECISIONS.md` 的 PAR SDK Feedback 条目）。
+
+**回退方式**: 该字段与接线都在 PAR 侧；par-code 侧只需把 `None` 换成一个配置项即可重新开放。
+
+**已知限制**:
+- **Severity**: LOW（无行为变化）——本版不提供该能力。
+- **退役条件**：① PAR 提供声明式分类（哪些内置工具可被检索）；或 ② par-code 决定自定义分层并接受"检索失败就丢核心工具"的风险。届时重新评估放在 v0.8.0 还是 v0.9.0。
+
 ## [2026-10-30] v0.7.4 released — provider-error resilience
 
 **Tag**: Release

@@ -14,7 +14,7 @@ par-code 是一个基于 PAR SDK 的 OCaml 终端编码 agent。用户通过 `pa
 ### 当前状态
 
 - **版本**：v0.7.4（见 `dune-project`）
-- **PAR SDK 依赖**：0.10.0+（CI/release 钉 `github.com/jcz2020/par.git` 的 **v0.10.0 release tag**，不钉分支 tip；本机 switch 钉本地仓库 `/root/dev/PAR`，已装版本 0.10.0）
+- **PAR SDK 依赖**：0.12.0-beta+（CI/release/打包脚本/源码安装器 5 处统一钉 `github.com/jcz2020/par.git` 的 **v0.12.0-beta.20261023 tag**，不钉分支 tip；本机 switch 同样钉该 tag）
 - **opam switch**：`/root/dev/PAR`（OCaml 5.4.1）
 - **已发布**：v0.2.1（安装器）、v0.3.0（项目记忆）、v0.3.1（自动提取）、v0.3.2（arm64）、v0.3.3（PAR SDK 0.7.3 + 混合搜索）、v0.4.0（长会话连续性）、v0.4.1（异步 checkpoint）、v0.4.2（多轮上下文 critical fix）、v0.4.3（UX quick patch：/cost + config show + memory fix）、v0.4.5（UI 抽象层 + streaming markdown）、v0.5.0（Plan Mode：只读 planner + 模式切换 + plan 持久化）、v0.5.1（Plan CLI + Git Tools：par plan list/show/prune + git_status/git_log）、v0.5.2（streaming fallback fix）、v0.5.3（REPL rendering fixes：tool 去重 + /dev/tty + 诊断）、v0.5.4（Session management：par session list/show/fork + partial ID resume + Ctrl+C 干净退出）、v0.5.5（hotfix：Plan Mode tool-filter 名称修正 + startup version-notice + REPL prompt flush + `<think>` tag 中间件 + session scope 写侧修正）、v0.5.6（审计 W2-3 + UX 打磨：par config set 全 20 字段 + install.sh source compile fallback + par memory prune --dry-run + memory prefix 解析 + /session 对齐 + legacy scope 迁移 + streaming `<think>` strip，PAR SDK 0.8.3）、v0.6.0（子 agent 委派：delegate 工具 + explore（只读）/ general（全能力）subagent）、v0.6.1（install/upgrade 修正：install.sh stale-binary 权限守护 + par upgrade source-fallback 对齐 + Filename.temp_file 清理）、v0.6.2（UTF-8 REPL 输入：linenoise bundled-C + CJK backspace 不再乱码 + Ctrl+C crash 修正）、v0.7.0（目标驱动自主性：/goal 命令 + 独立 judge 模型 + doom-loop 检测 + goal_done 工具 + --goal CLI flag，PAR SDK 0.8.6）、v0.7.1（planner 预算 + REPL exit-path hotfix：planner_max_iterations 配置 + early_stopping_method Generate + 统一 exit_normally ()）、v0.7.2（goal 可用性加固：三类 bash approval + planner synthesis fallback + doom-loop v2 + goal 生命周期管理 + no-progress / completion-claim 守护）、v0.7.3（自主 goal 链式执行：run_chain 驱动 + par --goal 自动启动链 + PAR SDK 0.10.0 mid-invoke 取消 + error-streak 守护 + goal_auto_chain 开关）、v0.7.4（provider 报错韧性：裁切后孤儿 tool result 清除 + provider 拒绝 payload dump + CI/release SDK tag 钉住使产物可复现）
 
@@ -35,7 +35,7 @@ bin/main.ml ── Cmdliner CLI 入口
  ▼
 lib/par_code_setup.ml ── Runtime 引导层
  │  ├── 创建 PAR Runtime (persistence + LLM + embeddings)
- │  ├── 注册 builtin tools + bash tool + memory tools + goal_done/delegate/plan_submit/write_plan_file 工具
+ │  ├── 注册 builtin tools + bash tool + memory tools + goal_done/delegate/plan_submit/write_plan_file 工具（内置工具随 SDK 版本增加，v0.7.5 起含 `apply_patch`；planner/explore 走白名单，拿不到写工具）
  │  ├── 注册 "par" agent + "memory-extractor" agent (提取) + "planner" agent (v0.5.0+, plan mode 用的只读 agent) + "judge" agent (v0.7.0+, 独立 judge 模型) + "plan-synthesizer" agent (v0.7.2+, planner fallback) + "explore" agent (v0.6.0+, 只读 subagent) + "general" agent (v0.6.0+, 全能力 subagent)
  │  ├── 注册 checkpoint-writer agent (v0.4.0+, 通过 ~save:false ~update_current:false 在用户 Runtime 上跑)
  │  ├── 创建 checkpoint schema on mem_db (v0.4.0+)

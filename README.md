@@ -43,7 +43,7 @@ self-update. No OCaml or opam needed for end users.
 | PAR feature | How par-code uses it |
 |---|---|
 | ReAct engine (`Par.Runtime.invoke`) | Core coding-agent loop |
-| Built-in tools (`Par.Builtin_tools`) | read/write/edit, grep, find, ls |
+| Built-in tools (`Par.Builtin_tools`) | read/write/edit/apply_patch, grep, find, ls |
 | Type-safe bash (`Par.Bash_safe_command`) | Run commands without shell injection |
 | Custom tool registration | Code-specific tools (memory, plan, git) |
 | Skills (`Par.Skill_registry`) | Builtin skills registered: code-reviewer, summarizer, translator, rag-assistant |
@@ -409,8 +409,8 @@ The REPL prompt shows the current mode: `(plan) par> ` or `(build) par> `.
 
 In Plan Mode, the agent has access only to read-only tools: `read`,
 `grep`, `find`, `ls`, `recall_memory`, `search_history`,
-`git_status`, `git_log`. Write, edit, and bash are not available, so the LLM
-never sees their schemas.
+`git_status`, `git_log`. Write, edit, apply_patch, and bash are not
+available, so the LLM never sees their schemas.
 
 The planner produces a markdown plan with sections: Goal, Approach, Files to
 Touch, Risks, Open Questions, Steps.

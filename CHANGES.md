@@ -1,5 +1,61 @@
 # CHANGES
 
+## v0.7.5-dev — PAR SDK 0.12-beta 跟进
+
+> **Status**: In progress. The SDK floor moves from `0.10.0` to
+> `0.12.0-beta.20261023` (a PAR release tag), and **every** install path —
+> CI, release, the Linux bundle Dockerfile, the macOS build script and the
+> source installer — pins that tag instead of following the upstream branch
+> tip.
+
+### Added — `apply_patch` (arrives with the SDK bump)
+
+- PAR SDK 0.11 added the `apply_patch` built-in tool: it applies a unified
+  diff atomically, validates every hunk before writing anything, supports a
+  `dry_run` check and skips binary files with a warning. par-code registers
+  every built-in binding, so the tool becomes visible to the main agent and
+  to the full-capability subagent **with no code change** — the upgrade is
+  the feature.
+- The default system prompt now says which editing tool to use: `edit` for a
+  precise single-spot replacement, `apply_patch` when a change spans several
+  files or several places in one file. Without that guidance two editing
+  tools make the model pick at random.
+
+### Changed — SDK floor and reproducible builds
+
+- Floor: `(par (>= 0.10.0))` → `(par (>= 0.12.0-beta.20261023))`.
+- All five install points pin the `v0.12.0-beta.20261023` tag.
+- The released binary self-documents its dependency: `par --version` reports
+  the PAR SDK version it was built against.
+
+### Fixed — upstream bash output race (arrives with the SDK bump)
+
+- bash now waits for the output-copy fibers before reading the buffer, so a
+  short command can no longer return empty or partial output. The complete
+  output feeds the doom-loop detector's `result_preview`, so **loop detection
+  now judges on the real result and may intercept loops it previously missed**
+  — a fix, not a regression.
+
+### Changed — web tool download ceiling (arrives with the SDK bump)
+
+- A download above 10 MB now **fails** instead of being buffered and
+  truncated.
+
+### Known limitations
+
+- `apply_patch` is atomic at the level of the logical patch, not against a
+  crash in the middle of writing one file; overlapping patches on the same
+  file are last-writer-wins (same convention as `write` / `edit`).
+- **Progressive tool loading is not adopted**: PAR's `Tool_registry.register`
+  puts every tool in the `Always` layer, so enabling the budget hides
+  nothing and saves no tokens — a dead switch. It stays off until the SDK
+  offers a declarative way to classify tools.
+- The SDK floor points at a **beta** version (PAR has no stable release
+  yet). Retirement trigger: when PAR ships 0.12.0 stable, move the floor to
+  `>= 0.12.0` and drop the beta note.
+
+---
+
 ## v0.7.4 — Provider-error resilience
 
 > **Status**: Shipped 2026-10-30. Pre-release audit passed (full suite green
