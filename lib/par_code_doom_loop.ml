@@ -75,8 +75,15 @@ let jaccard (a : string list) (b : string list) : float =
 
 let verify_re = Str.regexp "\\(pytest\\|make test\\|cargo test\\|go test\\|npm test\\|tsc\\|ruff\\|flake8\\|dune build\\)"
 
+(* Every tool that changes a file counts as an edit for loop detection: the
+   single-spot `edit`, the whole-file `write`, and the unified-diff
+   `apply_patch` the SDK added in 0.11. Missing the third one would leave a
+   patch-looping agent uncaught. *)
+let is_edit_tool name =
+  name = "edit" || name = "write" || name = "apply_patch"
+
 let classify_tool ~tool_name ~args_json ~is_bash =
-  if tool_name = "edit" || tool_name = "write" then "edit"
+  if is_edit_tool tool_name then "edit"
   else if is_bash then
     let cmd =
       match args_json with
@@ -163,7 +170,7 @@ let record (t : t) (evt : tool_event) : action =
   in
 
   let edit_action =
-    if evt.tool_name = "edit" || evt.tool_name = "write" then begin
+    if is_edit_tool evt.tool_name then begin
       let output_text = match evt.output with Some s -> s | None -> "" in
       let new_shingles = shingle_lines output_text in
       let match_count = List.fold_left (fun acc (_id, ws) ->

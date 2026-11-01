@@ -138,6 +138,19 @@ let test_incident_write_parse () =
   Alcotest.(check bool) "timestamp non-empty" true (String.length ts > 0);
   (try Sys.remove incident_path with Sys_error _ -> ())
 
+let test_apply_patch_counts_as_edit () =
+  (* apply_patch is the SDK's unified-diff editor (0.11+). The near-duplicate
+     edit detector must treat it like edit/write — otherwise an agent that
+     loops on near-identical patches is never caught. *)
+  let d = create ~bash_retries:100 ~edit_matches:5 ~action_streak:100 () in
+  let text = "applied patch to lib/foo.ml" in
+  for _ = 1 to 3 do
+    ignore (record d (make_evt "apply_patch" ~output:(Some text)))
+  done;
+  let r = record d (make_evt "apply_patch" ~output:(Some text)) in
+  Alcotest.(check bool) "repeated apply_patch nudges like edit" true
+    (match r with Nudge _ -> true | _ -> false)
+
 let () =
   Alcotest.run "par_code_doom_loop"
     [ "basic",
@@ -151,7 +164,8 @@ let () =
       "edit_repeat",
       [ Alcotest.test_case "similar edit nudges" `Quick test_edit_repeat_nudge;
         Alcotest.test_case "cumulative matches forces judge" `Quick test_edit_repeat_force_judge;
-        Alcotest.test_case "A-B-A-B pattern detected" `Quick test_ab_ba_pattern_detected ];
+        Alcotest.test_case "A-B-A-B pattern detected" `Quick test_ab_ba_pattern_detected;
+        Alcotest.test_case "apply_patch counts as an edit" `Quick test_apply_patch_counts_as_edit ];
       "action_streak",
       [ Alcotest.test_case "4 same-kind nudges" `Quick test_action_streak_nudge;
         Alcotest.test_case "info resets streak" `Quick test_info_resets_action_streak ];
