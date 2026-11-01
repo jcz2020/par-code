@@ -187,6 +187,113 @@ let test_sdk_builtin_tool_inventory () =
     Alcotest.(check bool) "planner allowlist cannot see apply_patch" false
       (List.mem "apply_patch" Par_code_setup.planner_tool_names)
 
+(* Deterministic check of the tool wiring, independent of any model: a valid
+   unified diff must actually edit a file inside the workspace. This is the
+   capability v0.7.5 claims, and it distinguishes "the tool is broken" from
+   "the model produced a bad patch" when a live run fails. *)
+let read_file path =
+  let ic = open_in_bin path in
+  let n = in_channel_length ic in
+  let s = really_input_string ic n in
+  close_in ic;
+  s
+
+let starts_with ~prefix s =
+  String.length s >= String.length prefix
+  && String.sub s 0 (String.length prefix) = prefix
+
+let test_apply_patch_edits_workspace_file () =
+  let tmpfile = Filename.temp_file "par_apply_patch_" "" in
+  Sys.remove tmpfile;
+  Unix.mkdir tmpfile 0o755;
+  let file = Filename.concat tmpfile "a.ml" in
+  let oc = open_out file in output_string oc "let a = 1\n"; close_out oc;
+  Fun.protect
+    ~finally:(fun () ->
+      (try Sys.remove file with _ -> ());
+      (try Sys.rmdir tmpfile with _ -> ()))
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let net = Eio.Stdenv.net env in
+      match Par.Workspace.of_dir tmpfile with
+      | Error _ -> Alcotest.fail "workspace construction failed"
+      | Ok ws ->
+        let tools = Par.Builtin_tools.builtin_tools ~switch:sw ~net ~workspace:ws in
+        match List.find_opt
+                (fun (tb : Par.Types.tool_binding) -> tb.descriptor.name = "apply_patch")
+                tools
+        with
+        | None -> Alcotest.fail "apply_patch not in the builtin set"
+        | Some tb ->
+          let patch =
+            "--- a/a.ml\n+++ b/a.ml\n@@ -1 +1,2 @@\n+(* module a *)\n let a = 1\n" in
+          let input = `Assoc [ "patch", `String patch; "dry_run", `Bool false ] in
+          let tok : Par.Types.cancellation_token =
+            { switch = sw; cancelled = false; reason = None } in
+          (match tb.handler input tok with
+           | Par.Types.Success _ ->
+             let content = read_file file in
+             Alcotest.(check bool) "patch applied to the workspace file" true
+               (String.length content > 0
+                && (let needle = "module a" in
+                    let rec find i =
+                      i + String.length needle <= String.length content
+                      && (String.sub content i (String.length needle) = needle
+                          || find (i + 1))
+                    in
+                    find 0))
+           | Par.Types.Error e ->
+             Alcotest.failf "apply_patch rejected a valid diff: %s" e.message
+           | Par.Types.Handoff _ | Par.Types.Approval_required _ ->
+             Alcotest.fail "apply_patch must neither hand off nor require approval"))
+
+(* Multi-file patches need a `diff --git` header per file section: a bare
+   concatenation of two `--- a/x` / `+++ b/x` pairs is mis-parsed as hunk content
+   (the second header gets swallowed). This pins the form that works. *)
+let test_apply_patch_multi_file () =
+  let dir = Filename.temp_file "par_apply_patch_multi_" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  let a = Filename.concat dir "a.ml" and b = Filename.concat dir "b.ml" in
+  List.iter
+    (fun (p, s) -> let oc = open_out p in output_string oc s; close_out oc)
+    [ a, "let a = 1\n"; b, "let b = 2\n" ];
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter (fun p -> try Sys.remove p with _ -> ()) [ a; b ];
+      (try Sys.rmdir dir with _ -> ()))
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let net = Eio.Stdenv.net env in
+      match Par.Workspace.of_dir dir with
+      | Error _ -> Alcotest.fail "workspace construction failed"
+      | Ok ws ->
+        let tools = Par.Builtin_tools.builtin_tools ~switch:sw ~net ~workspace:ws in
+        match List.find_opt
+                (fun (tb : Par.Types.tool_binding) -> tb.descriptor.name = "apply_patch")
+                tools
+        with
+        | None -> Alcotest.fail "apply_patch not in the builtin set"
+        | Some tb ->
+          let patch =
+            "diff --git a/a.ml b/a.ml\n--- a/a.ml\n+++ b/a.ml\n@@ -1 +1,2 @@\n+(* module a *)\n let a = 1\n"
+            ^ "diff --git a/b.ml b/b.ml\n--- a/b.ml\n+++ b/b.ml\n@@ -1 +1,2 @@\n+(* module b *)\n let b = 2\n" in
+          let input = `Assoc [ "patch", `String patch; "dry_run", `Bool false ] in
+          let tok : Par.Types.cancellation_token =
+            { switch = sw; cancelled = false; reason = None } in
+          (match tb.handler input tok with
+          | Par.Types.Success _ ->
+            Alcotest.(check bool) "a.ml patched" true
+              (starts_with ~prefix:"(* module a *)" (read_file a));
+            Alcotest.(check bool) "b.ml patched" true
+              (starts_with ~prefix:"(* module b *)" (read_file b))
+          | Par.Types.Error e ->
+            Alcotest.failf "apply_patch rejected a valid multi-file diff: %s" e.message
+          | Par.Types.Handoff _ | Par.Types.Approval_required _ ->
+            Alcotest.fail "apply_patch must neither hand off nor require approval"))
+
 let () =
   Alcotest.run "par_setup"
     [ "planner_registration", [
@@ -197,4 +304,6 @@ let () =
       ];
       "sdk_surface", [
         Alcotest.test_case "builtin inventory matches prompt" `Quick test_sdk_builtin_tool_inventory;
+        Alcotest.test_case "apply_patch edits a workspace file" `Quick test_apply_patch_edits_workspace_file;
+        Alcotest.test_case "apply_patch applies a multi-file patch" `Quick test_apply_patch_multi_file;
       ] ]
