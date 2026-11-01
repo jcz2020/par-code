@@ -164,6 +164,29 @@ let test_planner_max_iterations_match () =
       Alcotest.(check int) "max_iterations matches config"
         expected_iterations agent.Types.max_iterations)
 
+(* The SDK version we build against must actually ship the tools the prompt
+   tells the model about. This guards the floor: a downgrade or a rename
+   upstream fails here instead of silently producing an agent that cannot
+   follow its own instructions (the v0.7.4 release failed exactly this way
+   when upstream added a required field). *)
+let test_sdk_builtin_tool_inventory () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  match Par.Workspace.of_cwd () with
+  | Error _ -> Alcotest.fail "workspace construction failed"
+  | Ok ws ->
+    let names =
+      Par.Builtin_tools.builtin_tools ~switch:sw ~net ~workspace:ws
+      |> List.map (fun (tb : Par.Types.tool_binding) -> tb.descriptor.name)
+    in
+    Alcotest.(check bool) "apply_patch ships in the builtin set" true
+      (List.mem "apply_patch" names);
+    Alcotest.(check bool) "edit and write still ship" true
+      (List.mem "edit" names && List.mem "write" names);
+    Alcotest.(check bool) "planner allowlist cannot see apply_patch" false
+      (List.mem "apply_patch" Par_code_setup.planner_tool_names)
+
 let () =
   Alcotest.run "par_setup"
     [ "planner_registration", [
@@ -171,4 +194,7 @@ let () =
         Alcotest.test_case "tools subset exact"      `Quick test_planner_tools_subset_exact;
         Alcotest.test_case "no write tools"          `Quick test_planner_no_write_tools;
         Alcotest.test_case "max_iterations match"    `Quick test_planner_max_iterations_match;
+      ];
+      "sdk_surface", [
+        Alcotest.test_case "builtin inventory matches prompt" `Quick test_sdk_builtin_tool_inventory;
       ] ]
