@@ -69,20 +69,32 @@ tmux_kill() {
 
 assert_contains() {
   local pattern="$1"
-  local input
-  input="$(cat)"
-  if ! echo "$input" | grep -qiE "$pattern"; then
+  # Drain stdin into a file, then match against the file. The previous form
+  # (`input="$(cat)"` inside a pipeline, then `echo | grep -q`) nested two
+  # pipes and intermittently lost part of the child's output — which showed
+  # up as config_set_test flakes. The product was proven correct: the same
+  # command captured through a plain command substitution always produced the
+  # full output.
+  local tmp
+  tmp="$(mktemp)"
+  cat > "$tmp"
+  if ! grep -qiE "$pattern" "$tmp"; then
+    rm -f "$tmp"
     fail "expected pattern not found: $pattern"
   fi
+  rm -f "$tmp"
 }
 
 assert_not_contains() {
   local pattern="$1"
-  local input
-  input="$(cat)"
-  if echo "$input" | grep -qiE "$pattern"; then
+  local tmp
+  tmp="$(mktemp)"
+  cat > "$tmp"
+  if grep -qiE "$pattern" "$tmp"; then
+    rm -f "$tmp"
     fail "unexpected pattern found: $pattern"
   fi
+  rm -f "$tmp"
 }
 
 assert_exit_zero() {
