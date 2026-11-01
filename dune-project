@@ -2,7 +2,7 @@
 
 (name par_code)
 
-(version "0.7.4")
+(version "0.7.5")
 
 (generate_opam_files true)
 
