@@ -524,8 +524,60 @@ let test_show_goal_auto_chain () =
   let output = capture_stdout (fun () -> show cfg) in
   Alcotest.(check bool) "shows goal_auto_chain" true (string_contains output "goal_auto_chain:")
 
-(* ── Test runner ──────────────────────────────────────────────────────── *)
+let test_max_mode_defaults () =
+  Alcotest.(check bool) "max mode defaults off" false default.max_mode;
+  Alcotest.(check int) "three candidates by default" 3 default.max_candidates
 
+let test_max_mode_roundtrip () =
+  let cfg = { default with max_mode = true; max_candidates = 5 } in
+  match of_json (to_json cfg) with
+  | Error e -> Alcotest.fail e
+  | Ok cfg' ->
+    Alcotest.(check bool) "max_mode roundtrips" true cfg'.max_mode;
+    Alcotest.(check int) "max_candidates roundtrips" 5 cfg'.max_candidates
+
+let test_max_mode_absent_defaults () =
+  let json = `Assoc [ ("provider", `String "openai"); ("model", `String "gpt-4o") ] in
+  match of_json json with
+  | Error e -> Alcotest.fail e
+  | Ok cfg ->
+    Alcotest.(check bool) "absent max_mode defaults off" false cfg.max_mode;
+    Alcotest.(check int) "absent max_candidates defaults to 3" 3
+      cfg.max_candidates
+
+let test_update_max_mode () =
+  setup_test_home (fun _ ->
+    let r = update_field ~field:"max_mode" ~value:"true" in
+    Alcotest.(check bool) "turned on" true r.max_mode;
+    let r2 = update_field ~field:"max_mode" ~value:"false" in
+    Alcotest.(check bool) "turned off" false r2.max_mode)
+
+let test_update_max_candidates () =
+  setup_test_home (fun _ ->
+    let r = update_field ~field:"max_candidates" ~value:"4" in
+    Alcotest.(check int) "set to 4" 4 r.max_candidates)
+
+let test_update_max_candidates_out_of_range () =
+  setup_test_home (fun _ ->
+    let pid = Unix.fork () in
+    if pid = 0 then begin
+      (try ignore (update_field ~field:"max_candidates" ~value:"9") with _ -> ());
+      exit 0
+    end
+    else
+      let _, status = Unix.waitpid [] pid in
+      match status with
+      | Unix.WEXITED n when n <> 0 -> ()
+      | _ -> Alcotest.fail "out-of-range candidates must exit non-zero")
+
+let test_show_max_mode () =
+  let cfg = { default with api_key = "x"; max_mode = true; max_candidates = 4 } in
+  let output = capture_stdout (fun () -> show cfg) in
+  Alcotest.(check bool) "shows max_mode" true (string_contains output "max_mode:");
+  Alcotest.(check bool) "shows max_candidates" true
+    (string_contains output "max_candidates:")
+
+(* ── Test runner ──────────────────────────────────────────────────────── *)
 let () =
   Alcotest.run "par_code_config"
     [ "mask_api_key", [
@@ -597,5 +649,14 @@ let () =
         Alcotest.test_case "absent_defaults_true"       `Quick test_goal_auto_chain_absent_defaults_true;
         Alcotest.test_case "update_field"               `Quick test_update_goal_auto_chain;
         Alcotest.test_case "show_output"                `Quick test_show_goal_auto_chain;
+      ];
+      "max_mode", [
+        Alcotest.test_case "defaults"                   `Quick test_max_mode_defaults;
+        Alcotest.test_case "roundtrip"                  `Quick test_max_mode_roundtrip;
+        Alcotest.test_case "absent_defaults"            `Quick test_max_mode_absent_defaults;
+        Alcotest.test_case "update_field"               `Quick test_update_max_mode;
+        Alcotest.test_case "update_candidates"          `Quick test_update_max_candidates;
+        Alcotest.test_case "candidates_out_of_range"    `Quick test_update_max_candidates_out_of_range;
+        Alcotest.test_case "show_output"                `Quick test_show_max_mode;
       ];
     ]

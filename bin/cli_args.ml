@@ -92,6 +92,12 @@ let goal_opt =
   & info ["goal"] ~docv:"GOAL"
       ~doc:"Set a goal and run autonomously until the judge verifies it (Ctrl+C pauses)"
 
+let max_opt =
+  let open Cmdliner.Arg in
+  value & opt (some int) None
+  & info ["max"] ~docv:"N"
+      ~doc:"Start in max mode with N candidate answers (2-5), selector keeps the best"
+
 let question_arg =
   let open Cmdliner in
   Arg.(value & pos_all string [] &

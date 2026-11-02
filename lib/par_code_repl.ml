@@ -5,288 +5,17 @@
 
 open Par
 
-let string_contains_i ~haystack ~needle =
-  let h = String.lowercase_ascii haystack in
-  let n = String.lowercase_ascii needle in
-  let lh = String.length h and ln = String.length n in
-  let rec go i =
-    if i + ln > lh then false
-    else if String.sub h i ln = n then true
-    else go (i + 1)
-  in
-  ln = 0 || go 0
+open Par_code_repl_io
 
-let stream_print_chunk (ui : Par_code_ui.backend) (chunk : Types.llm_response_chunk) =
-  Par_code_ui.render_llm_chunk ui chunk
-
-let make_stream_cb ui =
-  let streamed_text = ref false in
-  let cb chunk =
-    (match chunk with Types.Text_delta _ -> streamed_text := true | _ -> ());
-    stream_print_chunk ui chunk
-  in
-  cb, streamed_text
-
-let make_tool_event_callback (ui : Par_code_ui.backend) ?(doom = None)
-    ?(on_doom_action : Par_code_doom_loop.action -> unit = fun _ -> ()) () =
-  let start_times : (string, float) Hashtbl.t = Hashtbl.create 8 in
-  let tool_args_buf : (string, string) Hashtbl.t = Hashtbl.create 8 in
-  fun (evt : Types.event) ->
-    (match evt, doom with
-     | Types.Bash_invoked { task_id; argv; _ }, Some _ ->
-       Hashtbl.replace tool_args_buf (Types.Task_id.to_string task_id)
-         (String.concat " " argv)
-     | Types.Tool_invoked { task_id; _ }, Some _ ->
-       Hashtbl.replace tool_args_buf (Types.Task_id.to_string task_id) ""
-     | Types.Tool_completed { task_id; tool_name; result_preview; _ }, Some d ->
-       let tid = Types.Task_id.to_string task_id in
-       let args_str = Hashtbl.find_opt tool_args_buf tid |> Option.value ~default:"" in
-       Hashtbl.remove tool_args_buf tid;
-       let action = Par_code_doom_loop.record d {
-         tool_name; args_json = `String args_str;
-         output = result_preview; failed = false
-       } in
-       (match action with
-        | Par_code_doom_loop.Nudge msg -> Par_code_ui.render_warning ui msg
-        | Force_judge msg -> on_doom_action (Force_judge msg); Par_code_ui.render_warning ui msg
-        | Abort msg ->
-          on_doom_action (Abort msg);
-           Par_code_ui.render_error ui
-             (Printf.sprintf "\xe2\x9c\x97 goal aborted (doom loop) \xe2\x80\x94 cancelling this turn: %s" msg)
-        | Continue -> ())
-     | Types.Tool_failed { task_id; tool_name; _ }, Some d ->
-       let tid = Types.Task_id.to_string task_id in
-       let args_str = Hashtbl.find_opt tool_args_buf tid |> Option.value ~default:"" in
-       Hashtbl.remove tool_args_buf tid;
-       let action = Par_code_doom_loop.record d {
-         tool_name; args_json = `String args_str;
-         output = None; failed = true
-       } in
-       (match action with
-        | Par_code_doom_loop.Nudge msg -> Par_code_ui.render_warning ui msg
-        | Force_judge msg -> on_doom_action (Force_judge msg); Par_code_ui.render_warning ui msg
-        | Abort msg ->
-          on_doom_action (Abort msg);
-           Par_code_ui.render_error ui
-             (Printf.sprintf "\xe2\x9c\x97 goal aborted (doom loop) \xe2\x80\x94 cancelling this turn: %s" msg)
-        | Continue -> ())
-     | _ -> ());
-    match evt with
-    | Types.Tool_invoked { task_id; _ } ->
-      Hashtbl.replace start_times (Types.Task_id.to_string task_id) (Unix.gettimeofday ());
-      Par_code_ui.render_tool_event ui evt
-    | Types.Tool_completed { task_id; _ } ->
-      Hashtbl.remove start_times (Types.Task_id.to_string task_id);
-      Par_code_ui.render_tool_event ui evt
-    | Types.Tool_failed { task_id; tool_name; _ } ->
-      let tid = Types.Task_id.to_string task_id in
-      let elapsed = match Hashtbl.find_opt start_times tid with
-        | Some t -> (Unix.gettimeofday () -. t) *. 1000.0
-        | None -> 0.0
-      in
-      Hashtbl.remove start_times tid;
-      Par_code_ui.render_line ui
-        (Par_code_ui.textf ~style:(Par_code_ui.style ~fg:Red ~bold:true ())
-           "  \xe2\x86\x92 %s \xe2\x9c\x97 (%.1fms)" tool_name elapsed)
-    | _ -> Par_code_ui.render_tool_event ui evt
-
-let print_help (ui : Par_code_ui.backend) () =
-  Par_code_ui.render_help ui
-
-let format_health (ui : Par_code_ui.backend) (h : Types.health_status) =
-  let runtime_label = if h.Types.runtime_alive then "alive" else "DEAD" in
-  let persistence_label = if h.Types.persistence_ok then "ok" else "FAILING" in
-  Par_code_ui.render_notice ui (Printf.sprintf "  Runtime:    %s" runtime_label);
-  Par_code_ui.render_notice ui (Printf.sprintf "  Persistence: %s" persistence_label)
-
-type resume_target =
+(* Constructor re-export so existing callers keep using
+   [Par_code_repl.Resume_most_recent] etc. *)
+type resume_target = Par_code_repl_io.resume_target =
   | No_prior
   | Resume_most_recent
   | Resume_of of string
 
-let load_initial_conv (ui : Par_code_ui.backend) (rt : Runtime.runtime) (target : resume_target) : Types.conversation option =
-  match target with
-  | No_prior -> None
-  | Resume_most_recent ->
-    (match Par_code_session.load_most_recent_scoped () with
-     | Ok (Some (sid, conv)) ->
-       Par_code_ui.render_notice ui (Printf.sprintf "Resumed most recent session: %s" sid);
-       Some conv
-     | Ok None -> Par_code_ui.render_warning ui "No prior session found."; None
-     | Error e -> Par_code_ui.render_error ui (Printf.sprintf "Failed to load session: %s" e); None)
-  | Resume_of id_or_prefix ->
-    (match Par_code_session.resolve_id id_or_prefix with
-     | Error msg -> Par_code_ui.render_error ui msg; None
-     | Ok sid ->
-       (match Runtime.load_conversation rt sid with
-        | Ok (Some conv) ->
-          Par_code_ui.render_notice ui (Printf.sprintf "Resumed session: %s" sid);
-          Some conv
-        | Ok None -> Par_code_ui.render_error ui (Printf.sprintf "Session not found: %s" sid); None
-        | Error e -> Par_code_ui.render_error ui (Printf.sprintf "Failed to load session %s: %s" sid (Par_code_setup.error_to_string e)); None))
-
-let maybe_extract (ui : Par_code_ui.backend) (rt : Runtime.runtime) (conv : Types.conversation option) =
-  let enabled =
-    match Sys.getenv_opt "PAR_NO_AUTO_EXTRACT" with
-    | Some "1" | Some "true" -> false
-    | _ ->
-      (match Par_code_config.load () with
-       | Some cfg -> cfg.Par_code_config.auto_extract
-       | None -> true)
-  in
-  if enabled then begin
-    match conv with
-    | None -> ()
-    | Some c ->
-      if List.length c.Types.messages <= 1 then ()
-      else begin
-        (try
-           let project_id = Par_code_memory.resolve_project_id () in
-           (match Par_code_memory.open_db () with
-            | Error (`Db_error msg) ->
-              Par_code_ui.render_warning ui (Printf.sprintf "[extraction skipped: %s]" msg)
-            | Ok mem_db ->
-              Par_code_extractor.run_extraction rt mem_db ~project_id c;
-              Par_code_memory.close mem_db)
-         with ex ->
-           Par_code_ui.render_error ui (Printf.sprintf "[extraction failed: %s]" (Printexc.to_string ex)))
-      end
-  end
-
-let build_memory_appendix (mem_db : Par_code_memory.t option) =
-  match mem_db with
-  | Some t ->
-    let project_id = Par_code_memory.resolve_project_id () in
-    let index = Par_code_memory.render_index t ~project_id in
-    if index = "" then None else Some ("\n\n## Project Memory\n\n" ^ index)
-  | None -> None
-
-(* ── Session cost tracking ──────────────────────────────────────────────── *)
-
-type cost_state = {
-  llm_calls : int;
-  prompt_tokens : int;
-  completion_tokens : int;
-  total_tokens : int;
-}
-
-let empty_cost = {
-  llm_calls = 0;
-  prompt_tokens = 0;
-  completion_tokens = 0;
-  total_tokens = 0;
-}
-
-let add_usage (state : cost_state) (usage : Types.usage_stats) : cost_state = {
-  llm_calls = state.llm_calls + 1;
-  prompt_tokens = state.prompt_tokens + usage.Types.prompt_tokens;
-  completion_tokens = state.completion_tokens + usage.Types.completion_tokens;
-  total_tokens = state.total_tokens + usage.Types.total_tokens;
-}
-
-let format_cost_output ~cost ~context_tokens ~turn_count ~metrics =
-  let b = Buffer.create 256 in
-  Buffer.add_string b "Session usage:\n";
-  Buffer.add_string b (Printf.sprintf "  LLM calls:        %d\n" cost.llm_calls);
-  Buffer.add_string b (Printf.sprintf "  Prompt tokens:    %d\n" cost.prompt_tokens);
-  Buffer.add_string b (Printf.sprintf "  Output tokens:    %d\n" cost.completion_tokens);
-  Buffer.add_string b (Printf.sprintf "  Total tokens:     %d\n" cost.total_tokens);
-  Buffer.add_string b (Printf.sprintf "  Context size:     %d tokens (current)\n" context_tokens);
-  Buffer.add_string b (Printf.sprintf "  Turns completed:  %d\n" turn_count);
-  Buffer.add_string b "\nOperational metrics:\n";
-  List.iter (fun (k, v) ->
-    Buffer.add_string b (Printf.sprintf "  %s: %d\n" k v)) metrics;
-  Buffer.add_string b "\nNote: excludes async checkpoint/extraction calls.\n";
-  Buffer.contents b
-
-(* --- Payload debug dump (v0.7.3+) ---------------------------------------- *)
-(* When the provider rejects a replayed conversation (HTTP 400 / Invalid_input),
-   dump the exact messages JSON to disk for byte-level root-cause analysis. *)
-
-let max_payload_dump_files = 5
-let max_payload_dump_bytes = 2 * 1024 * 1024
-
-let debug_dir () =
-  Filename.concat (Filename.concat (Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp") ".par") "debug"
-
-(** List payload-*.json in [dir], keep newest [keep] by mtime, delete the rest.
-    Pure-ish: only touches [dir]; returns the kept paths sorted newest-first.
-    Returns [[]] on any failure. *)
-let prune_payload_files ~dir ~keep =
-  (try
-     let entries = Sys.readdir dir |> Array.to_list in
-     let is_all_digits s =
-       let rec go i = i >= String.length s || (s.[i] >= '0' && s.[i] <= '9' && go (i + 1)) in
-       String.length s > 0 && go 0
-     in
-     let payload_files = List.filter (fun f ->
-       String.length f > 13 &&
-       String.sub f 0 8 = "payload-" &&
-       String.ends_with ~suffix:".json" f &&
-       is_all_digits (String.sub f 8 (String.length f - 13))
-     ) entries in
-     let with_mtime = List.filter_map (fun f ->
-       let path = Filename.concat dir f in
-       match (Unix.stat path).Unix.st_mtime with
-       | mtime -> Some (path, mtime)
-       | exception _ -> None
-     ) payload_files in
-     let sorted = List.sort (fun (_, a) (_, b) -> compare b a) with_mtime in
-     let keep_list, delete_list =
-       let rec split n acc = function
-         | [] -> (List.rev acc, [])
-         | rest when n <= 0 -> (List.rev acc, rest)
-         | x :: xs -> split (n - 1) (x :: acc) xs
-       in
-       split keep [] sorted
-     in
-     List.iter (fun (path, _) ->
-       (try Sys.remove path with Sys_error _ -> ())
-     ) delete_list;
-     List.map fst keep_list
-   with _ -> [])
-
-(* Two rejections inside the same second would collide on a seconds-resolution
-   filename, and the later dump would overwrite the earlier evidence -- which is
-   the one thing this diagnostic exists to prevent. The per-process counter keeps
-   the name all-digits, which is exactly what [prune_payload_files] matches on. *)
-let payload_dump_seq = ref 0
-
-let dump_payload_debug (ui : Par_code_ui.backend) (conv : Types.conversation) =
-  (try
-     let dir = debug_dir () in
-     (* mkdir -p: on a fresh HOME the parent may not exist yet, and a bare
-        [mkdir] would turn the whole dump into a silent no-op. *)
-     let rec mkdir_p d =
-       if not (Sys.file_exists d) then begin
-         mkdir_p (Filename.dirname d);
-         (try Unix.mkdir d 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-       end
-     in
-     (try mkdir_p dir with _ -> ());
-     let ts = int_of_float (Unix.gettimeofday ()) in
-     incr payload_dump_seq;
-     let path =
-       Filename.concat dir
-         (Printf.sprintf "payload-%d%03d.json" ts (!payload_dump_seq mod 1000))
-     in
-     let json = Yojson.Safe.to_string
-       (`List (List.map Types.message_to_yojson conv.Types.messages)) in
-     let len = String.length json in
-     let content =
-       if len > max_payload_dump_bytes then
-         let truncated = String.sub json 0 max_payload_dump_bytes in
-         truncated ^ ",{\"_truncated\":true,\"original_bytes\":" ^ string_of_int len ^ "}]"
-       else json
-     in
-     let oc = open_out path in
-     (try output_string oc content; close_out oc
-      with exn -> (try close_out oc with _ -> ()); raise exn);
-     ignore (prune_payload_files ~dir ~keep:max_payload_dump_files);
-     Par_code_ui.render_notice ui (Printf.sprintf "[debug] payload dumped to %s" path)
-   with _ -> ())
-
-let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goal () =
+let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goal
+    ?max () =
   let ui = Par_code_ui.create_backend () in
   (* v0.5.5 P0 #2: tag every save with the current project scope so that
      `par session list` / `par -r` / `par --continue <prefix>` filter
@@ -320,6 +49,22 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
   let goal_auto_chain = match loaded_cfg with Some c -> c.Par_code_config.goal_auto_chain | None -> true in
   let goal_verify_cmd = match loaded_cfg with Some c -> c.Par_code_config.goal_verify_command | None -> None in
   let env_no_ckpt = match Sys.getenv_opt "PAR_NO_CHECKPOINT" with Some "1" | Some "true" -> true | _ -> false in
+  let max_mode_on =
+    ref (match loaded_cfg with Some c -> c.Par_code_config.max_mode | None -> false)
+  in
+  let max_n =
+    ref (match loaded_cfg with Some c -> c.Par_code_config.max_candidates | None -> 3)
+  in
+  let max_chain_notice = ref false in
+  let cost_precounted = ref false in
+  (match max with
+   | Some n ->
+     let n = Par_code_max_mode.clamp_candidates n in
+     max_mode_on := true;
+     max_n := n;
+     Par_code_ui.render_notice ui
+       (Printf.sprintf "[max mode] on \xe2\x80\x94 %d candidates per turn" n)
+   | None -> ());
   (match resume with
    | No_prior ->
      (match loaded_cfg with
@@ -445,7 +190,26 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
       Oracle R1 skips the ladder on errored turns). history_add/
       history_save stay in loop()'s input branch — chained messages are
       not user input. *)
-    let execute_turn (message : string) : Par_code_chain.turn_outcome =
+    let execute_turn ~(chained : bool) (message : string) : Par_code_chain.turn_outcome =
+      (if
+         !max_mode_on && not !max_chain_notice
+         && (chained
+             || match !Par_code_goal.current with
+                | Some g -> g.Par_code_goal.status = Par_code_goal.Active
+                | None -> false)
+       then begin
+         max_chain_notice := true;
+         Par_code_ui.render_notice ui
+           "[max mode] skipped during the goal chain \xe2\x80\x94 cost would scale with N"
+       end);
+      let max_turn_active () =
+        !max_mode_on
+        && (not chained)
+        && !Par_code_mode.current = Par_code_mode.Build
+        && (match !Par_code_goal.current with
+            | Some g when g.Par_code_goal.status = Par_code_goal.Active -> false
+            | _ -> true)
+      in
              cancel_pending := false;
              in_invoke := true;
              let turn_cancelled = ref false and turn_errored = ref false and turn_exn = ref false in
@@ -518,11 +282,13 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                let mode_before_invoke = !Par_code_mode.current in
                invoke_start_time := Unix.gettimeofday ();
                hit_cap := false;
+               cost_precounted := false;
                let tool_count_before = match !conv with
                  | Some c -> List.length c.Types.messages
                  | None -> 0
                in
                 let stream_cb, streamed_text = make_stream_cb ui in
+               let max_turn = max_turn_active () in
                let invoke_result =
                  let turn_token =
                    Par.Cancellation.create_token (Par.Runtime.cancellation_root rt) in
@@ -530,16 +296,119 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                  Fun.protect
                    ~finally:(fun () -> turn_token_ref := None; in_invoke := false)
                    (fun () ->
-                      Runtime.invoke rt
-                        ~agent_id:(Par_code_mode.agent_id_for !Par_code_mode.current)
-                        ~message
-                        ?conversation:!conv
-                        ~on_tool_event
-                        ~on_chunk:(Some stream_cb)
-                        ~enable_handoff:true
-                        ?system_prompt_appendix:combined_appendix
-                        ~cancellation_token:turn_token
-                        ())
+                      let single msg =
+                        Runtime.invoke rt
+                          ~agent_id:(Par_code_mode.agent_id_for !Par_code_mode.current)
+                          ~message:msg
+                          ?conversation:!conv
+                          ~on_tool_event
+                          ~on_chunk:(Some stream_cb)
+                          ~enable_handoff:true
+                          ?system_prompt_appendix:combined_appendix
+                          ~cancellation_token:turn_token
+                          ()
+                      in
+                      if not max_turn then single message
+                      else begin
+                        let n = !max_n in
+                        Par_code_ui.render_notice ui
+                          (Printf.sprintf "[max mode] %d candidates running..." n);
+                        let outcome =
+                          Par_code_max_mode.run_candidates ~rt
+                            ~agent_id:Par_code_max_mode.candidate_agent_id
+                            ~message ?conversation:!conv
+                            ?system_prompt_appendix:combined_appendix ~n
+                            ~cancellation_token:turn_token
+                            ~on_candidate_done:(fun i ok ->
+                              Par_code_ui.render_notice ui
+                                (Printf.sprintf "  candidate %d/%d \xc2\xb7 %s"
+                                   (i + 1) n (if ok then "done" else "failed")))
+                            ()
+                        in
+                        match outcome.Par_code_max_mode.candidates with
+                        | [] ->
+                          Par_code_ui.render_warning ui
+                            "[max mode] all candidates failed \xe2\x80\x94 running a single pass";
+                          single message
+                        | cands ->
+                          let texts =
+                            List.map
+                              (fun (c : Par_code_max_mode.candidate) ->
+                                 c.Par_code_max_mode.text)
+                              cands
+                          in
+                          let choice =
+                            match
+                              Par_code_selector.choose ~rt ~user_message:message
+                                texts
+                            with
+                            | Ok ch -> ch
+                            | Error msg ->
+                              Par_code_ui.render_warning ui
+                                (Printf.sprintf
+                                   "[max mode] selector failed (%s) \xe2\x80\x94 using candidate 1"
+                                   msg);
+                              Par_code_selector.default_choice
+                          in
+                          let idx =
+                            if
+                              choice.Par_code_selector.index
+                              < List.length cands
+                              && choice.Par_code_selector.index >= 0
+                            then choice.Par_code_selector.index
+                            else 0
+                          in
+                          let winner = List.nth cands idx in
+                          List.iter on_tool_event winner.Par_code_max_mode.events;
+                          let failed =
+                            List.length outcome.Par_code_max_mode.failures
+                          in
+                          List.iter
+                            (fun (i, msg) ->
+                               Par_code_ui.render_warning ui
+                                 (Printf.sprintf
+                                    "[max mode] candidate %d failed \xe2\x80\x94 %s"
+                                    (i + 1) msg))
+                            outcome.Par_code_max_mode.failures;
+                          Par_code_ui.render_notice ui
+                            (Printf.sprintf
+                               "[max mode] selected candidate %d/%d%s \xe2\x80\x94 %s"
+                               (winner.Par_code_max_mode.index + 1)
+                               (List.length cands)
+                               (if failed = 0 then ""
+                                else Printf.sprintf " (%d failed)" failed)
+                               (if choice.Par_code_selector.reasoning = "" then
+                                  "no reasoning given"
+                                else choice.Par_code_selector.reasoning));
+                          cost :=
+                            List.fold_left add_usage !cost
+                              (Par_code_max_mode.candidate_usages outcome);
+                          cost := add_generate_usage !cost choice.Par_code_selector.total_tokens;
+                          (match choice.Par_code_selector.kind with
+                           | Par_code_selector.Answer ->
+                             cost_precounted := true;
+                             Ok
+                               { Types.response =
+                                   { Types.text =
+                                       Some winner.Par_code_max_mode.text
+                                   ; reasoning_content = None
+                                   ; tool_calls = None
+                                   ; finish_reason = Types.Stop
+                                   ; usage = Par_code_max_mode.empty_usage
+                                   ; model = ""
+                                   }
+                               ; conversation =
+                                   winner.Par_code_max_mode.conversation
+                               ; approval_pending = None
+                               }
+                           | Par_code_selector.Execute ->
+                             conv := Some winner.Par_code_max_mode.conversation;
+                             let plan = choice.Par_code_selector.plan in
+                             Par_code_ui.render_notice ui
+                               "[max mode] executing the selected approach";
+                             single
+                               (if String.trim plan = "" then message else plan))
+                      end)
                in
                last_plan_path := None;
                 (match invoke_result with
@@ -599,7 +468,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                          (Printf.sprintf "[model returned no text%s]" reason))
                   end;
                   Par_code_ui.render_line ui Par_code_ui.empty;
-                 cost := add_usage !cost resp.Types.usage;
+                 if not !cost_precounted then cost := add_usage !cost resp.Types.usage;
                  consecutive_invoke_errors := 0;
                 let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in ();
                 incr turn_count;
@@ -699,7 +568,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
       back in as the next user message; no user input, no history entries.
       Tail-recursive, bounded by execute_turn's stop conditions. *)
    let rec run_chain (message : string) : unit =
-     (match execute_turn message with
+     (match execute_turn ~chained:true message with
       | Par_code_chain.Chain_stop -> ()
       | Par_code_chain.Chain_continue next -> run_chain next)
    in
@@ -802,6 +671,38 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
               Par_code_ui.render_success ui "Switched to BUILD mode."
             end;
             loop ()
+          | "/max" ->
+            let rest =
+              if String.length trimmed > 4 then
+                String.trim (String.sub trimmed 4 (String.length trimmed - 4))
+              else ""
+            in
+            (match String.lowercase_ascii rest with
+             | "" ->
+               Par_code_ui.render_notice ui
+                 (Printf.sprintf
+                    "[max mode: %s, %d candidates] usage: /max on | off | <2-5>"
+                    (if !max_mode_on then "on" else "off") !max_n)
+             | "on" ->
+               max_mode_on := true;
+               Par_code_ui.render_success ui
+                 (Printf.sprintf
+                    "Max mode on: %d candidates per turn (cost scales with N)."
+                    !max_n)
+             | "off" ->
+               max_mode_on := false;
+               Par_code_ui.render_notice ui "[max mode off]"
+             | other ->
+               (match int_of_string_opt other with
+                | Some n when n >= 2 && n <= 5 ->
+                  max_mode_on := true;
+                  max_n := n;
+                  Par_code_ui.render_success ui
+                    (Printf.sprintf "Max mode on: %d candidates per turn." n)
+                | _ ->
+                  Par_code_ui.render_warning ui
+                    "[max mode] candidates must be between 2 and 5"));
+            loop ()
           | "/goal" ->
             let rest = if String.length trimmed > 5 then String.trim (String.sub trimmed 5 (String.length trimmed - 5)) else "" in
             if rest = "clear" then begin
@@ -840,7 +741,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
               |> ignore
             with _ -> ());
             (* Oracle R3(a): user turn may chain; prompt resumes after. *)
-            (match execute_turn trimmed with
+            (match execute_turn ~chained:false trimmed with
              | Par_code_chain.Chain_stop -> ()
              | Par_code_chain.Chain_continue next -> run_chain next);
             loop ()

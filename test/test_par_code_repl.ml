@@ -1,6 +1,6 @@
 (* test_par_code_repl.ml — Tests for session cost tracking and /cost output. *)
 
-open Par_code_repl
+open Par_code_repl_io
 
 let string_contains s sub =
   let len_s = String.length s in

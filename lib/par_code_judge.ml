@@ -35,24 +35,7 @@ type verdict = {
 
 let default_verdict = { goal_met = false; reasoning = "Unable to parse judge response" }
 
-let extract_json_object s =
-  let len = String.length s in
-  let start = ref (-1) in
-  let depth = ref 0 in
-  let begin_pos = ref (-1) in
-  for i = 0 to len - 1 do
-    if s.[i] = '{' then begin
-      if !depth = 0 then begin_pos := i;
-      incr depth
-    end else if s.[i] = '}' then begin
-      decr depth;
-      if !depth = 0 then start := !begin_pos
-    end
-  done;
-  if !start >= 0 then
-    let end_pos = String.index_from s !start '}' in
-    Some (String.sub s !start (end_pos - !start + 1))
-  else None
+let extract_json_object = Par_code_json_extract.extract_object
 
 let parse_verdict text =
   match extract_json_object text with

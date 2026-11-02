@@ -210,6 +210,8 @@ let run_wizard ?(ui=Par_code_ui.create_backend ()) () =
     doom_action_streak = Par_code_config.default.doom_action_streak;
     bash_approval;
     goal_auto_chain;
+    max_mode = Par_code_config.default.max_mode;
+    max_candidates = Par_code_config.default.max_candidates;
   } in
   Par_code_config.save cfg;
   render_notice ui (Printf.sprintf "\nSaved config to %s" (Par_code_config.config_path ()))

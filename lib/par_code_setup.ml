@@ -481,6 +481,39 @@ This is the LAST thing you do. The user will be asked to confirm.
              "recall_memory"; "search_history"; "git_status"; "git_log" ]
        ) !descriptors
      in
+     (* Max-mode candidate (v0.8.0): read-only by construction, so no candidate
+        can race another on the same workspace. *)
+     (match Runtime.make_agent
+        ~id:Par_code_max_mode.candidate_agent_id
+        ~system_prompt:(Types.stable_prompt Par_code_max_mode.candidate_system_prompt)
+        ~model:model_cfg
+        ~tools:explore_descriptors
+        ~middleware:[think_tag_strip_middleware]
+        ~max_iterations:10
+        ~early_stopping_method:Types.Generate
+        () with
+     | Error e ->
+       ui_render_warning (Printf.sprintf "Warning: max-mode candidate agent not registered: %s" (error_to_string e))
+     | Ok agent ->
+       (match Runtime.register_agent rt agent with
+        | Error e -> ui_render_warning (Printf.sprintf "Warning: max-mode candidate agent registration failed: %s" (error_to_string e))
+        | Ok () -> ()));
+     (* Selector (v0.8.0): tools=[] because invoke_generate rejects agents
+        carrying tools. *)
+     (match Runtime.make_agent
+        ~id:Par_code_selector.selector_agent_id
+        ~system_prompt:(Types.stable_prompt Par_code_selector.selector_system_prompt)
+        ~model:model_cfg
+        ~tools:[]
+        ~middleware:[think_tag_strip_middleware]
+        ~max_iterations:1
+        () with
+     | Error e ->
+       ui_render_warning (Printf.sprintf "Warning: selector agent not registered: %s" (error_to_string e))
+     | Ok agent ->
+       (match Runtime.register_agent rt agent with
+        | Error e -> ui_render_warning (Printf.sprintf "Warning: selector agent registration failed: %s" (error_to_string e))
+        | Ok () -> ()));
      (match Runtime.make_agent
         ~id:Par_code_delegate.explore_agent_id
         ~system_prompt:(Types.stable_prompt Par_code_delegate.explore_system_prompt)

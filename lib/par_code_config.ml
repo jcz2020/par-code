@@ -45,6 +45,8 @@ type config = {
   doom_edit_matches : int;
   doom_action_streak : int;
   bash_approval : string;
+  max_mode : bool;
+  max_candidates : int;
 }
 
 let default_system_prompt = {|
@@ -146,6 +148,8 @@ let default = {
   doom_edit_matches = 2;
   doom_action_streak = 4;
   bash_approval = "ask";
+  max_mode = false;
+  max_candidates = 3;
 }
 
 let config_dir () =
@@ -198,6 +202,8 @@ let to_json (cfg : config) : Yojson.Safe.t =
     ("doom_edit_matches", `Int cfg.doom_edit_matches);
     ("doom_action_streak", `Int cfg.doom_action_streak);
     ("bash_approval", `String cfg.bash_approval);
+    ("max_mode", `Bool cfg.max_mode);
+    ("max_candidates", `Int cfg.max_candidates);
   ]
 
 let of_json (json : Yojson.Safe.t) : (config, string) result =
@@ -272,6 +278,8 @@ let of_json (json : Yojson.Safe.t) : (config, string) result =
         (match json |> member "bash_approval" |> to_string_option with
          | Some s when s = "ask" || s = "auto_project" || s = "always" -> s
          | _ -> default.bash_approval);
+      max_mode = get_b "max_mode" default.max_mode;
+      max_candidates = get_i "max_candidates" default.max_candidates;
     }
   with exn -> Error (Printexc.to_string exn)
 
@@ -376,6 +384,8 @@ let merge
     doom_edit_matches = cfg.doom_edit_matches;
     doom_action_streak = cfg.doom_action_streak;
     bash_approval = Option.value bash_approval ~default:cfg.bash_approval;
+    max_mode = cfg.max_mode;
+    max_candidates = cfg.max_candidates;
   }
 
 let require_config () =
@@ -589,6 +599,16 @@ let update_field ~field ~value =
        | other ->
          Printf.eprintf "Invalid bash_approval '%s'. Use 'ask', 'auto_project', or 'always'.\n" other;
          exit 1)
+    | "max_mode" -> { cfg with max_mode = parse_bool value }
+    | "max_candidates" ->
+      (match int_of_string_opt (String.trim value) with
+       | Some n when n >= 2 && n <= 5 -> { cfg with max_candidates = n }
+       | Some _ ->
+         Printf.eprintf "Invalid value for max_candidates: must be between 2 and 5, got '%s'\n" value;
+         exit 1
+       | None ->
+         Printf.eprintf "Invalid value for max_candidates: expected int, got '%s'\n" value;
+         exit 1)
     (* ── Excluded ── *)
     | "system_prompt" ->
       Printf.eprintf "system_prompt is multiline; set it via 'par config' wizard instead.\n";
@@ -656,5 +676,7 @@ let show ?(ui=Par_code_ui.create_backend ()) (cfg : config) =
     line "doom_edit_matches:" (string_of_int cfg.doom_edit_matches);
     line "doom_action_streak:" (string_of_int cfg.doom_action_streak);
     line "bash_approval:" cfg.bash_approval;
+    line "max_mode:" (string_of_bool cfg.max_mode);
+    line "max_candidates:" (string_of_int cfg.max_candidates);
   ] in
   render_line ui image
