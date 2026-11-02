@@ -327,9 +327,17 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                         in
                         match outcome.Par_code_max_mode.candidates with
                         | [] ->
-                          Par_code_ui.render_warning ui
-                            "[max mode] all candidates failed \xe2\x80\x94 running a single pass";
-                          single message
+                          if Par.Cancellation.is_cancelled turn_token then
+                            Error
+                              ( Types.Cancelled Types.User_cancelled
+                              , (match !conv with
+                                 | Some c -> c
+                                 | None -> { Types.messages = []; metadata = [] }) )
+                          else begin
+                            Par_code_ui.render_warning ui
+                              "[max mode] all candidates failed \xe2\x80\x94 running a single pass";
+                            single message
+                          end
                         | cands ->
                           let texts =
                             List.map
@@ -398,11 +406,17 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                                    ; model = ""
                                    }
                                ; conversation =
-                                   winner.Par_code_max_mode.conversation
+                                   Par_code_max_mode.restore_user_message
+                                     ~original:message
+                                     winner.Par_code_max_mode.conversation
                                ; approval_pending = None
                                }
                            | Par_code_selector.Execute ->
-                             conv := Some winner.Par_code_max_mode.conversation;
+                             conv :=
+                               Some
+                                 (Par_code_max_mode.restore_user_message
+                                    ~original:message
+                                    winner.Par_code_max_mode.conversation);
                              let plan = choice.Par_code_selector.plan in
                              Par_code_ui.render_notice ui
                                "[max mode] executing the selected approach";

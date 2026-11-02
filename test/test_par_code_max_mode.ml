@@ -12,10 +12,6 @@ let string_contains s sub =
   in
   len_sub = 0 || search 0
 
-let test_seed_count () =
-  Alcotest.(check int) "three strategy seeds" 3
-    (List.length Par_code_max_mode.strategy_seeds)
-
 let test_seed_rotation () =
   Alcotest.(check string) "index 0 is first seed"
     (List.nth Par_code_max_mode.strategy_seeds 0)
@@ -92,37 +88,62 @@ let test_candidate_usages_skip_failures () =
   Alcotest.(check int) "merged prompt tokens" 10
     (Par_code_max_mode.merge_usage usages).Types.prompt_tokens
 
-let test_copy_conversation_isolated () =
-  let msg : Types.message =
-    { role = Types.User
-    ; content_blocks = [ Types.Text_block { text = "hi"; cache_control = None } ]
-    ; tool_calls = None
-    ; tool_call_id = None
-    ; name = None
-    ; reasoning_content = None
+let msg role text : Types.message =
+  { role
+  ; content_blocks = [ Types.Text_block { text; cache_control = None } ]
+  ; tool_calls = None
+  ; tool_call_id = None
+  ; name = None
+  ; reasoning_content = None
+  }
+
+let text_of (m : Types.message) =
+  match m.content_blocks with
+  | [ Types.Text_block { text; _ } ] -> text
+  | _ -> "<multi>"
+
+let test_restore_rewrites_last_user_message () =
+  let conv : Types.conversation =
+    { messages =
+        [ msg Types.User "original question"
+        ; msg Types.Assistant "earlier answer"
+        ; msg Types.User "Your assigned angle: risk\n\n---\n\nUser request:\noriginal question"
+        ; msg Types.Assistant "candidate answer"
+        ]
+    ; metadata = []
     }
   in
-  let original : Types.conversation =
-    { messages = [ msg ]; metadata = [ ("k", `String "v") ] }
+  let restored = Par_code_max_mode.restore_user_message ~original:"original question" conv in
+  Alcotest.(check int) "message count unchanged" 4
+    (List.length restored.Types.messages);
+  let texts = List.map text_of restored.Types.messages in
+  Alcotest.(check (list string)) "only the seeded prompt is rewritten"
+    [ "original question"; "earlier answer"; "original question"; "candidate answer" ]
+    texts
+
+let test_restore_preserves_other_messages () =
+  let conv : Types.conversation =
+    { messages = [ msg Types.User "seeded wrapper" ]
+    ; metadata = [ ("k", `String "v") ]
+    }
   in
-  let copy = Par_code_max_mode.copy_conversation original in
-  Alcotest.(check int) "same message count" (List.length original.messages)
-    (List.length copy.messages);
-  let original_untouched =
-    match original.messages with
-    | [ m ] -> ( match m.content_blocks with
-        | [ Types.Text_block { text; _ } ] -> text = "hi"
-        | _ -> false)
-    | _ -> false
+  let restored = Par_code_max_mode.restore_user_message ~original:"real text" conv in
+  Alcotest.(check string) "metadata untouched" "v"
+    (match restored.Types.metadata with [ (_, `String s) ] -> s | _ -> "");
+  Alcotest.(check string) "user text replaced" "real text"
+    (text_of (List.hd restored.Types.messages))
+
+let test_restore_without_user_message () =
+  let conv : Types.conversation =
+    { messages = [ msg Types.Assistant "only an answer" ]; metadata = [] }
   in
-  Alcotest.(check bool) "original conversation unchanged" true original_untouched;
-  Alcotest.(check bool) "copy is a distinct record"
-    false (copy == original)
+  let restored = Par_code_max_mode.restore_user_message ~original:"x" conv in
+  Alcotest.(check string) "untouched when no user message exists"
+    "only an answer" (text_of (List.hd restored.Types.messages))
 
 let () =
   Alcotest.run "par_code_max_mode"
     [ "strategy_seeds", [
-        Alcotest.test_case "count"      `Quick test_seed_count;
         Alcotest.test_case "rotation"   `Quick test_seed_rotation;
         Alcotest.test_case "wraps"      `Quick test_seed_wraps;
         Alcotest.test_case "distinct"   `Quick test_seeds_differ;
@@ -140,7 +161,12 @@ let () =
         Alcotest.test_case "outcome_skips_failures" `Quick
           test_candidate_usages_skip_failures;
       ];
-      "conversation_copy", [
-        Alcotest.test_case "isolated" `Quick test_copy_conversation_isolated;
+      "conversation_restore", [
+        Alcotest.test_case "rewrites_last_user" `Quick
+          test_restore_rewrites_last_user_message;
+        Alcotest.test_case "preserves_others"    `Quick
+          test_restore_preserves_other_messages;
+        Alcotest.test_case "no_user_message"     `Quick
+          test_restore_without_user_message;
       ];
     ]

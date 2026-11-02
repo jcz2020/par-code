@@ -81,8 +81,32 @@ let candidate_usages (o : outcome) : Types.usage_stats list =
 
 let clamp_candidates (n : int) : int = if n < 2 then 2 else if n > 5 then 5 else n
 
-let copy_conversation (c : Types.conversation) : Types.conversation =
-  { c with Types.messages = c.Types.messages }
+let restore_user_message ~(original : string) (c : Types.conversation) :
+    Types.conversation =
+  let msgs = c.Types.messages in
+  let last_user =
+    List.fold_left
+      (fun acc (i, m) ->
+         match m.Types.role with Types.User -> Some i | _ -> acc)
+      None
+      (List.mapi (fun i m -> (i, m)) msgs)
+  in
+  match last_user with
+  | None -> c
+  | Some idx ->
+    { c with
+      Types.messages =
+        List.mapi
+          (fun i (m : Types.message) ->
+             if i = idx then
+               { m with
+                 Types.content_blocks =
+                   [ Types.Text_block
+                       { text = original; cache_control = None } ]
+               }
+             else m)
+          msgs
+    }
 
 let error_to_string (e : Types.error_category) =
   match e with
@@ -105,40 +129,34 @@ let run_candidates ~(rt : Runtime.runtime) ~(agent_id : string)
   let n = clamp_candidates n in
   let slots = Array.make n None in
   let failures = ref [] in
-  let sem = Eio.Semaphore.make n in
   let report index ok =
     match on_candidate_done with Some f -> f index ok | None -> ()
   in
   let run_one i =
-    Eio.Semaphore.acquire sem;
-    Fun.protect
-      ~finally:(fun () -> Eio.Semaphore.release sem)
-      (fun () ->
-         let prompt = candidate_prompt ~seed:(seed_for i) ~message in
-         let conv_copy = Option.map copy_conversation conversation in
-         let events = ref [] in
-         match
-           Runtime.invoke rt ~agent_id ~message:prompt ?conversation:conv_copy
-             ?system_prompt_appendix ~update_current:false ~save:false
-             ~on_tool_event:(fun e -> events := e :: !events)
-             ~cancellation_token ()
-         with
-         | Ok r ->
-           let text =
-             match r.Types.response.Types.text with Some t -> t | None -> ""
-           in
-           slots.(i) <-
-             Some
-               { index = i
-               ; text
-               ; conversation = r.Types.conversation
-               ; usage = r.Types.response.Types.usage
-               ; events = List.rev !events
-               };
-           report i true
-         | Error (e, _) ->
-           failures := (i, error_to_string e) :: !failures;
-           report i false)
+    let prompt = candidate_prompt ~seed:(seed_for i) ~message in
+    let events = ref [] in
+    match
+      Runtime.invoke rt ~agent_id ~message:prompt ?conversation
+        ?system_prompt_appendix ~update_current:false ~save:false
+        ~on_tool_event:(fun e -> events := e :: !events)
+        ~cancellation_token ()
+    with
+    | Ok r ->
+      let text =
+        match r.Types.response.Types.text with Some t -> t | None -> ""
+      in
+      slots.(i) <-
+        Some
+          { index = i
+          ; text
+          ; conversation = r.Types.conversation
+          ; usage = r.Types.response.Types.usage
+          ; events = List.rev !events
+          };
+      report i true
+    | Error (e, _) ->
+      failures := (i, error_to_string e) :: !failures;
+      report i false
   in
   Eio.Fiber.all (List.init n (fun i () -> run_one i));
   { candidates = List.filter_map (fun x -> x) (Array.to_list slots)

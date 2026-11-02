@@ -24,7 +24,13 @@ val add_usage : Par.Types.usage_stats -> Par.Types.usage_stats -> Par.Types.usag
 val merge_usage : Par.Types.usage_stats list -> Par.Types.usage_stats
 val candidate_usages : outcome -> Par.Types.usage_stats list
 val clamp_candidates : int -> int
-val copy_conversation : Par.Types.conversation -> Par.Types.conversation
+
+val restore_user_message :
+  original:string -> Par.Types.conversation -> Par.Types.conversation
+(** [restore_user_message ~original c] rewrites the last user message of [c] to
+    [original]. A candidate runs on a wrapper prompt (strategy angle + request),
+    and adopting its transcript otherwise persists that wrapper as the user's
+    own words in the session, checkpoints and memory extraction. *)
 
 val run_candidates :
   rt:Par.Runtime.runtime ->

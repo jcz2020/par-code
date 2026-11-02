@@ -49,7 +49,13 @@ let max_candidate_chars = 2000
 
 let truncate ?(limit = max_candidate_chars) (s : string) : string =
   if String.length s <= limit then s
-  else String.sub s 0 limit ^ "\n...[truncated]"
+  else begin
+    let cut = ref limit in
+    while !cut > 0 && Char.code s.[!cut] land 0xC0 = 0x80 do
+      decr cut
+    done;
+    String.sub s 0 !cut ^ "\n...[truncated]"
+  end
 
 let build_message ~(user_message : string) (candidates : string list) : string =
   let b = Buffer.create 1024 in
@@ -67,7 +73,6 @@ let choice_of_int n = function
   | Some c when c >= 1 && c <= n -> Some (c - 1)
   | Some 0 -> Some 0
   | _ -> None
-
 let parse_choice ~(n : int) (text : string) : choice option =
   match Par_code_json_extract.extract_object text with
   | None -> None
