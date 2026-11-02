@@ -15,13 +15,14 @@ bash test/integration/run.sh
 | File | Surface | Bug caught |
 |------|---------|------------|
 | `cli/version_config_test.sh` | `par --version`, `par config show` | — |
-| `cli/config_set_test.sh` | `par config set` all 22 fields | P1 #5: "Unknown config field" |
+| `cli/config_set_test.sh` | `par config set` all 24 fields | P1 #5: "Unknown config field" |
 | `cli/memory_test.sh` | `par memory` CRUD + search + prune | v0.5.6 prune --dry-run regression |
 | `cli/plan_test.sh` | `par plan` list/show/prune | — |
 | `cli/session_test.sh` | `par session` list/show/fork | P0 #2: empty session list |
 | `repl/basics_test.sh` | `/help` `/session` `/cost` `/quit` Ctrl+D/Ctrl+C exits | v0.7.1 double-extraction |
 | `repl/resume_test.sh` | `--resume` banner+prompt ≤3s, `/session` history | v0.7.2 blank-pane QA observation |
 | `repl/modes_test.sh` | `/plan` `/build` prompt switch | P0 #1: plan mode surface |
+| `repl/max_mode_test.sh` | `/max` status + bounds, all-candidates-fail fallback, goal chain skips max mode | v0.8.0 max mode |
 | `repl/startup_test.sh` | PAR_NO_UPDATE_CHECK silence | P0 #3: version notice always fires |
 
 ## Architecture

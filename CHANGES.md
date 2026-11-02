@@ -2,9 +2,12 @@
 
 ## v0.8.0 — Best-of-N (max mode)
 
-> **Status**: Unreleased (implemented 2026-11-02). The version number is not
-> bumped until the release is requested; everything below is on `main` and
-> green in unit + integration tests.
+> **Status**: Released 2026-11-02.
+> 
+> **Release note**: the winner's transcript is rewritten back to the user's own
+> wording before it is adopted. Candidates run on a wrapper prompt (strategy
+> angle + request), and without that rewrite the wrapper would land in the
+> saved session, checkpoints and memory extraction as if the user had typed it.
 
 ### Added — max mode
 

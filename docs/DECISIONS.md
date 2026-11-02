@@ -1,5 +1,24 @@
 # Decisions
 
+## [2026-11-02] v0.8.0 发布：max mode 落地，并经独立代码评审修正会话污染
+
+**Tag**: Release
+
+**变更前**: 每回合只有单路 `Runtime.invoke`。v0.8.0 的 max mode 实现已合入 `main`（只读候选 fan-out + selectors 分流），但版本号仍是 `0.7.5`，且候选跑在包装 prompt（策略角度 + 用户请求）上——胜出候选的会话被接管时，这段包装会作为“用户原话”写进会话存档、checkpoint 与记忆提取。
+
+**变更后**: 版本号 `0.8.0`（`dune-project` + 版本断言 + 重新生成的 `par_code.opam`），tag `v0.8.0` 发布。发布前跑了一轮独立代码评审（外部 reviewer 逐行读 diff + 自跑 build/test），提出 1 条 HIGH：会话污染。修复方式是在接管前把胜出会话里最后一条 user 消息重写回用户原话（`Par_code_max_mode.restore_user_message`），并补了三条单测；真机验证：存储的会话里 `assigned angle` 为 0 命中、用户原话保留。同轮评审的 4 条低危项也一并处理：去掉无意义的 `Eio.Semaphore`（fiber 数就等于上限）、`truncate` 改成 UTF-8 边界安全、候选全都因取消而失败时直接返回取消而不是再发一次注定失败的 invoke、删掉两条镜像实现细节的垃圾测试。
+
+**原因**: v0.5.4 的教训是“测试全绿不等于功能可用”，所以发布门禁包含独立评审 + 真机走查。本次评审价值在于抓到了单测无法发现的问题：单测断言的是“会话被接管”，而没断言“接管后的会话里用户说了什么”。走查还确认了两件与产品无关但会误伤验证的事：审计脚本没应答 bash 审批提示时会看起来像“卡住”，以及在回合尾部立刻 kill 会丢掉最后一次 `save_conversation`。
+
+**影响范围**: `dune-project`、`test/test_par_code.ml`（版本断言）、`par_code.opam`（生成物）、`lib/par_code_max_mode.ml|.mli`（restore + 移除 semaphore/copy）、`lib/par_code_selector.ml`（UTF-8 截断）、`lib/par_code_repl.ml`（接管前重写 + 取消检查）、`test/test_par_code_max_mode.ml`、README/CHANGES/STRATEGY/AGENTS/ROADMAP 五份文档。
+
+**回退方式**: 删除 tag `v0.8.0` 并把版本号退回 `0.7.5`；`max_mode` 默认关闭，退回后行为与 v0.7.5 一致（新增字段缺省即旧行为）。
+
+**已知限制**:
+- **Severity**: LOW（MINOR 发布，max mode 默认关闭）。
+- 候选偶尔会被上游 provider 拒绝（已知的瞬时 400 / tool-id 误判类），此时该路候选计入“failed”并在状态行与逐条警告里明示，其余候选继续；这条路径在本次走查里真实出现过。
+- 执行级 best-of-N（每候选一个 worktree）仍推迟到 v0.9.0（写冲突风险，退役条件在 ROADMAP §3）。
+
 ## [2026-11-01] v0.7.5 发布：SDK 0.12-beta 落地并经真机 dogfood 验证
 
 **Tag**: Release
