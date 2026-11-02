@@ -20,6 +20,7 @@ declare -a FIELDS=(
   "embedding_dimension 512 512"
   "checkpoint_interval 5 5"
   "context_budget_tokens 50000 50000"
+  "context_window_tokens 64000 64000"
   "max_tokens 2048 2048"
   "parallel_tool_execution true parallel_tool_execution.*true"
   "auto_extract false auto_extract.*false"
@@ -29,7 +30,7 @@ declare -a FIELDS=(
   "goal_auto_chain false goal_auto_chain.*false"
 )
 
-test_all_22_fields_set_and_show() {
+test_all_23_fields_set_and_show() {
   setup_home; trap teardown_home EXIT
   for entry in "${FIELDS[@]}"; do
     local field value pattern
@@ -245,7 +246,7 @@ test_context_budget_tokens_500_rejected() {
   echo "$output" | assert_contains 'must be >= 1000'
 }
 
-test_case "all 22 fields set+show round-trip"  test_all_22_fields_set_and_show
+test_case "all 23 fields set+show round-trip"  test_all_23_fields_set_and_show
 
 test_case "set provider"                       test_set_provider
 test_case "set api_key"                        test_set_api_key

@@ -170,7 +170,8 @@ let record (t : t) (evt : tool_event) : action =
   in
 
   let edit_action =
-    if is_edit_tool evt.tool_name then begin
+    if evt.failed then Continue
+    else if is_edit_tool evt.tool_name then begin
       let output_text = match evt.output with Some s -> s | None -> "" in
       let new_shingles = shingle_lines output_text in
       let match_count = List.fold_left (fun acc (_id, ws) ->

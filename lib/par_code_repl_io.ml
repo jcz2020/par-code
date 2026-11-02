@@ -21,16 +21,20 @@ let string_contains_i ~haystack ~needle =
 let stream_print_chunk (ui : Par_code_ui.backend) (chunk : Types.llm_response_chunk) =
   Par_code_ui.render_llm_chunk ui chunk
 
-let make_stream_cb ui =
+exception Stream_cancel_requested
+
+let make_stream_cb ?(cancelled = fun () -> false) ui =
   let streamed_text = ref false in
   let cb chunk =
+    if cancelled () then raise Stream_cancel_requested;
     (match chunk with Types.Text_delta _ -> streamed_text := true | _ -> ());
     stream_print_chunk ui chunk
   in
   cb, streamed_text
 
 let make_tool_event_callback (ui : Par_code_ui.backend) ?(doom = None)
-    ?(on_doom_action : Par_code_doom_loop.action -> unit = fun _ -> ()) () =
+    ?(on_doom_action : Par_code_doom_loop.action -> unit = fun _ -> ())
+    ?(goal_active : unit -> bool = fun () -> false) () =
   let start_times : (string, float) Hashtbl.t = Hashtbl.create 8 in
   let tool_args_buf : (string, string) Hashtbl.t = Hashtbl.create 8 in
   fun (evt : Types.event) ->
@@ -53,8 +57,9 @@ let make_tool_event_callback (ui : Par_code_ui.backend) ?(doom = None)
         | Force_judge msg -> on_doom_action (Force_judge msg); Par_code_ui.render_warning ui msg
         | Abort msg ->
           on_doom_action (Abort msg);
+           let label = if goal_active () then "goal aborted" else "turn aborted" in
            Par_code_ui.render_error ui
-             (Printf.sprintf "\xe2\x9c\x97 goal aborted (doom loop) \xe2\x80\x94 cancelling this turn: %s" msg)
+             (Printf.sprintf "\xe2\x9c\x97 %s (doom loop) \xe2\x80\x94 cancelling this turn: %s" label msg)
         | Continue -> ())
      | Types.Tool_failed { task_id; tool_name; _ }, Some d ->
        let tid = Types.Task_id.to_string task_id in
@@ -69,8 +74,9 @@ let make_tool_event_callback (ui : Par_code_ui.backend) ?(doom = None)
         | Force_judge msg -> on_doom_action (Force_judge msg); Par_code_ui.render_warning ui msg
         | Abort msg ->
           on_doom_action (Abort msg);
+           let label = if goal_active () then "goal aborted" else "turn aborted" in
            Par_code_ui.render_error ui
-             (Printf.sprintf "\xe2\x9c\x97 goal aborted (doom loop) \xe2\x80\x94 cancelling this turn: %s" msg)
+             (Printf.sprintf "\xe2\x9c\x97 %s (doom loop) \xe2\x80\x94 cancelling this turn: %s" label msg)
         | Continue -> ())
      | _ -> ());
     match evt with
@@ -113,7 +119,7 @@ let load_initial_conv (ui : Par_code_ui.backend) (rt : Runtime.runtime) (target 
     (match Par_code_session.load_most_recent_scoped () with
      | Ok (Some (sid, conv)) ->
        Par_code_ui.render_notice ui (Printf.sprintf "Resumed most recent session: %s" sid);
-       Some conv
+       Some (Par_code_payload.sanitize conv)
      | Ok None -> Par_code_ui.render_warning ui "No prior session found."; None
      | Error e -> Par_code_ui.render_error ui (Printf.sprintf "Failed to load session: %s" e); None)
   | Resume_of id_or_prefix ->
@@ -123,7 +129,7 @@ let load_initial_conv (ui : Par_code_ui.backend) (rt : Runtime.runtime) (target 
        (match Runtime.load_conversation rt sid with
         | Ok (Some conv) ->
           Par_code_ui.render_notice ui (Printf.sprintf "Resumed session: %s" sid);
-          Some conv
+          Some (Par_code_payload.sanitize conv)
         | Ok None -> Par_code_ui.render_error ui (Printf.sprintf "Session not found: %s" sid); None
         | Error e -> Par_code_ui.render_error ui (Printf.sprintf "Failed to load session %s: %s" sid (Par_code_setup.error_to_string e)); None))
 

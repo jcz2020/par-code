@@ -31,6 +31,7 @@ type config = {
   checkpoint_enabled : bool;
   checkpoint_interval : int;
   context_budget_tokens : int;
+  context_window_tokens : int;
   default_mode : Par_code_mode.mode;
   judge_enabled : bool;
   judge_model : string option;
@@ -71,6 +72,7 @@ IMPORTANT: Assist with authorized security testing and defensive security. Refus
 ## Tool usage
 - Prefer dedicated tools (read, write, edit, grep, find, ls) over bash for file operations. Dedicated tools are faster, safer, and provide better tracking.
 - Two editing tools: use `edit` for a precise single-spot replacement (one file, one known snippet); use `apply_patch` when a change spans several files or several places in one file — it applies a unified diff, so every hunk is validated before anything is written.
+- A multi-file `apply_patch` must start every file section with `diff --git a/<path> b/<path>`; without that header the parser can swallow the next section's header and report a context mismatch.
 - Never hand-roll a diff to feed `apply_patch` if `edit` can do the same thing; `apply_patch` earns its keep on multi-file edits.
 - Reserve bash for actual system commands and terminal operations. Never use bash echo to communicate with the user.
 - Bash commands require user confirmation. Batch independent tool calls when possible.
@@ -134,6 +136,7 @@ let default = {
   checkpoint_enabled = true;
   checkpoint_interval = 10;
   context_budget_tokens = 100000;
+  context_window_tokens = 128000;
   default_mode = Par_code_mode.Build;
   judge_enabled = true;
   judge_model = None;
@@ -188,6 +191,7 @@ let to_json (cfg : config) : Yojson.Safe.t =
     ("checkpoint_enabled", `Bool cfg.checkpoint_enabled);
     ("checkpoint_interval", `Int cfg.checkpoint_interval);
     ("context_budget_tokens", `Int cfg.context_budget_tokens);
+    ("context_window_tokens", `Int cfg.context_window_tokens);
     ("default_mode", `String (Par_code_mode.label cfg.default_mode));
     ("judge_enabled", `Bool cfg.judge_enabled);
     ("judge_model", opt_str cfg.judge_model);
@@ -246,6 +250,7 @@ let of_json (json : Yojson.Safe.t) : (config, string) result =
       checkpoint_enabled = get_b "checkpoint_enabled" default.checkpoint_enabled;
       checkpoint_interval = get_i "checkpoint_interval" default.checkpoint_interval;
       context_budget_tokens = get_i "context_budget_tokens" default.context_budget_tokens;
+      context_window_tokens = get_i "context_window_tokens" default.context_window_tokens;
       default_mode = get_mode "default_mode" default.default_mode;
       judge_enabled = get_b "judge_enabled" default.judge_enabled;
       judge_model = get_os "judge_model";
@@ -332,8 +337,8 @@ let to_model_config (cfg : config) : Types.model_config =
     stop_sequences = None;
   }
 
-let to_persistence_config (_cfg : config) : [ `Sqlite of string ] =
-  `Sqlite (db_path ())
+let to_persistence_config (cfg : config) : [ `Sqlite of string ] =
+  `Sqlite (match cfg.db_uri with Some uri -> uri | None -> db_path ())
 
 let merge
     (cfg : config)
@@ -347,6 +352,7 @@ let merge
     ?(embedding_dimension = None)
     ?(checkpoint_enabled = None) ?(checkpoint_interval = None)
     ?(context_budget_tokens = None)
+    ?(context_window_tokens = None)
     ?(default_mode = None) ?(bash_approval = None) () =
   {
     provider = Option.value provider ~default:cfg.provider;
@@ -370,6 +376,7 @@ let merge
     checkpoint_enabled = Option.value checkpoint_enabled ~default:cfg.checkpoint_enabled;
     checkpoint_interval = Option.value checkpoint_interval ~default:cfg.checkpoint_interval;
     context_budget_tokens = Option.value context_budget_tokens ~default:cfg.context_budget_tokens;
+    context_window_tokens = Option.value context_window_tokens ~default:cfg.context_window_tokens;
     default_mode = (match default_mode with Some m -> m | None -> cfg.default_mode);
     judge_enabled = cfg.judge_enabled;
     judge_model = cfg.judge_model;
@@ -504,6 +511,15 @@ let update_field ~field ~value =
        | None ->
          Printf.eprintf "Invalid value for context_budget_tokens: expected int, got '%s'\n" value;
          exit 1)
+    | "context_window_tokens" ->
+      (match int_of_string_opt (String.trim value) with
+       | Some n when n >= 1000 -> { cfg with context_window_tokens = n }
+       | Some _ ->
+         Printf.eprintf "Invalid value for context_window_tokens: must be >= 1000, got '%s'\n" value;
+         exit 1
+       | None ->
+         Printf.eprintf "Invalid value for context_window_tokens: expected int, got '%s'\n" value;
+         exit 1)
     (* ── Optional int ── *)
     | "max_tokens" ->
       if is_clear value then { cfg with max_tokens = None }
@@ -621,7 +637,7 @@ let update_field ~field ~value =
         [ "api_base"; "api_key"; "auto_extract";
           "bash_approval";
           "checkpoint_enabled"; "checkpoint_interval";
-          "context_budget_tokens"; "db_uri"; "default_mode";
+          "context_budget_tokens"; "context_window_tokens"; "db_uri"; "default_mode";
           "doom_action_streak"; "doom_bash_retries"; "doom_edit_matches";
           "embedding_base_url"; "embedding_dimension"; "embedding_model";
           "event_retention_days";
@@ -662,6 +678,7 @@ let show ?(ui=Par_code_ui.create_backend ()) (cfg : config) =
     line "checkpoint_enabled:" (string_of_bool cfg.checkpoint_enabled);
     line "checkpoint_interval:" (string_of_int cfg.checkpoint_interval);
     line "context_budget_tokens:" (string_of_int cfg.context_budget_tokens);
+    line "context_window_tokens:" (string_of_int cfg.context_window_tokens);
     line "default_mode:" (Par_code_mode.label cfg.default_mode);
     line "system_prompt:" (if cfg.system_prompt = default.system_prompt then "<default>" else "<custom>");
     line "judge_enabled:" (string_of_bool cfg.judge_enabled);

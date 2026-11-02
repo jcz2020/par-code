@@ -165,11 +165,14 @@ let plan_submit_input_schema : Yojson.Safe.t =
     ]
 
 let last_submitted_plan : string option ref = ref None
+let last_written_plan : (string * string) option ref = ref None
 
 let consume_submitted_plan () =
   match !last_submitted_plan with
   | Some path -> last_submitted_plan := None; Some path
   | None -> None
+
+let submitted_plan_pending () = !last_submitted_plan <> None
 
 (** Pure gate-response function — separated for testability. *)
 let gate_response ~confirmed path =
@@ -216,12 +219,23 @@ let make_plan_submit_tool ~(ui : Par_code_ui.backend Lazy.t) : Types.tool_bindin
     else begin
       let cleaned = Json_extract.strip_think_tags plan in
       let plans_dir = ensure_plans_dir () in
-      let filename = format_timestamp () ^ ".md" in
-      let path = Filename.concat plans_dir filename in
       (try
-        let oc = open_out path in
-        Fun.protect ~finally:(fun () -> close_out oc)
-          (fun () -> output_string oc cleaned);
+        let path =
+          match !last_written_plan with
+        | Some (draft_path, _) ->
+          let oc = open_out draft_path in
+          Fun.protect ~finally:(fun () -> close_out oc)
+            (fun () -> output_string oc cleaned);
+          draft_path
+        | None ->
+          let filename = format_timestamp () ^ ".md" in
+          let path = Filename.concat plans_dir filename in
+          let oc = open_out path in
+          Fun.protect ~finally:(fun () -> close_out oc)
+            (fun () -> output_string oc cleaned);
+          path
+        in
+        last_written_plan := None;
         let backend = Lazy.force ui in
         Par_code_ui.render_notice backend
           (Printf.sprintf "Plan saved to %s" path);
@@ -308,6 +322,7 @@ let write_plan_file_tool : Types.tool_binding =
         let oc = open_out path in
         Fun.protect ~finally:(fun () -> close_out oc)
           (fun () -> output_string oc cleaned);
+        last_written_plan := Some (path, cleaned);
         Success
           (`Assoc [ ("written_to", `String path) ])
       with Sys_error _ ->

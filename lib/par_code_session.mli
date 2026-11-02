@@ -36,6 +36,10 @@ val resolve_id : string -> (string, string) result
     If [prefix] is >= 36 chars, treated as full UUID.
     If shorter, searches for unique prefix match; errors if ambiguous. *)
 
+val truncate_utf8 : string -> int -> string
+(** [truncate_utf8 s max_bytes] returns a prefix of [s] of at most
+    [max_bytes] bytes that ends on a UTF-8 character boundary. *)
+
 val resolve_title : string -> string
 (** Extract the first user message from a session as its display title.
     Returns "(unavailable)" if the session cannot be loaded. *)

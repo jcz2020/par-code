@@ -196,6 +196,7 @@ let run_wizard ?(ui=Par_code_ui.create_backend ()) () =
     auto_extract;
     embedding_base_url; embedding_model; embedding_dimension;
     checkpoint_enabled; checkpoint_interval; context_budget_tokens;
+    context_window_tokens = Par_code_config.default.context_window_tokens;
     default_mode;
     judge_enabled = Par_code_config.default.judge_enabled;
     judge_model = Par_code_config.default.judge_model;

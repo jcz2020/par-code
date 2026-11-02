@@ -60,6 +60,9 @@ let looks_like_path s =
   (String.length s > 0 && s.[0] = '.') ||
   (String.length s > 0 && s.[0] = '/')
 
+let is_special_file s =
+  List.mem s [ "/dev/null"; "/dev/stdin"; "/dev/stdout"; "/dev/stderr" ]
+
 let extract_redirect_targets s =
   let targets = ref [] in
   let len = String.length s in
@@ -112,7 +115,7 @@ let classify (ws : Par.Workspace.workspace) ~(argv : string list) : class_ =
       let sensitive_paths = ref [] in
       let unknown = ref false in
       List.iter (fun c ->
-        if not !unknown then
+        if not !unknown && not (is_special_file c) then
           match Workspace.admit ws c with
           | Ok _ -> ()
           | Error (Types.Invalid_input msg) when msg = "absolute path not under any workspace root" ->

@@ -68,6 +68,17 @@ let test_classify_in_project_no_paths () =
     Alcotest.(check bool) "no paths is In_project" true
       (r = Par_code_approvals.In_project)
 
+let test_classify_dev_null_is_in_project () =
+  match Par.Workspace.of_cwd () with
+  | Error _ -> Alcotest.fail "of_cwd failed"
+  | Ok ws ->
+    let r =
+      Par_code_approvals.classify ws
+        ~argv:["bash"; "-lc"; "find . -name '*.ml' 2>/dev/null | head -20"]
+    in
+    Alcotest.(check bool) "/dev/null does not make a command external" true
+      (r = Par_code_approvals.In_project)
+
 let test_classify_external_path () =
   match Par.Workspace.of_cwd () with
   | Error _ -> Alcotest.fail "of_cwd failed"
@@ -145,6 +156,7 @@ let () =
     "classify", [
       test_case "in_project relative" `Quick test_classify_in_project_relative;
       test_case "in_project no paths" `Quick test_classify_in_project_no_paths;
+      test_case "dev_null in_project" `Quick test_classify_dev_null_is_in_project;
       test_case "external path"       `Quick test_classify_external_path;
       test_case "sensitive"           `Quick test_classify_sensitive;
       test_case "etc external"        `Quick test_classify_etc_external;

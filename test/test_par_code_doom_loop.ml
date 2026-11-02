@@ -151,6 +151,14 @@ let test_apply_patch_counts_as_edit () =
   Alcotest.(check bool) "repeated apply_patch nudges like edit" true
     (match r with Nudge _ -> true | _ -> false)
 
+let test_failed_edits_never_abort () =
+  let d = create ~bash_retries:100 ~edit_matches:2 ~action_streak:100 () in
+  for _ = 1 to 10 do
+    ignore (record d (make_evt "apply_patch" ~output:None ~failed:true))
+  done;
+  let r = record d (make_evt "apply_patch" ~output:None ~failed:true) in
+  Alcotest.(check bool) "failed edits do not abort" true (r = Continue)
+
 let () =
   Alcotest.run "par_code_doom_loop"
     [ "basic",
@@ -165,7 +173,8 @@ let () =
       [ Alcotest.test_case "similar edit nudges" `Quick test_edit_repeat_nudge;
         Alcotest.test_case "cumulative matches forces judge" `Quick test_edit_repeat_force_judge;
         Alcotest.test_case "A-B-A-B pattern detected" `Quick test_ab_ba_pattern_detected;
-        Alcotest.test_case "apply_patch counts as an edit" `Quick test_apply_patch_counts_as_edit ];
+        Alcotest.test_case "apply_patch counts as an edit" `Quick test_apply_patch_counts_as_edit;
+        Alcotest.test_case "failed edits ignored" `Quick test_failed_edits_never_abort ];
       "action_streak",
       [ Alcotest.test_case "4 same-kind nudges" `Quick test_action_streak_nudge;
         Alcotest.test_case "info resets streak" `Quick test_info_resets_action_streak ];

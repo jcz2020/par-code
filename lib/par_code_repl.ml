@@ -124,6 +124,10 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
   let in_invoke = ref false in
   let cancel_pending = ref false in
   let on_tool_event = make_tool_event_callback ui ~doom:(Some doom_detector)
+      ~goal_active:(fun () ->
+        match !Par_code_goal.current with
+        | Some g when g.Par_code_goal.status = Par_code_goal.Active -> true
+        | _ -> false)
       ~on_doom_action:(fun act ->
         match act with
         | Par_code_doom_loop.Abort msg ->
@@ -202,6 +206,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
          Par_code_ui.render_notice ui
            "[max mode] skipped during the goal chain \xe2\x80\x94 cost would scale with N"
        end);
+      conv := Option.map Par_code_payload.sanitize !conv;
       let max_turn_active () =
         !max_mode_on
         && (not chained)
@@ -213,6 +218,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
              cancel_pending := false;
              in_invoke := true;
              let turn_cancelled = ref false and turn_errored = ref false and turn_exn = ref false in
+             let stream_cancelled = ref false in
             (try
               (match !conv with
               | Some c ->
@@ -287,7 +293,11 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                  | Some c -> List.length c.Types.messages
                  | None -> 0
                in
-                let stream_cb, streamed_text = make_stream_cb ui in
+                let stream_cb, streamed_text =
+                  make_stream_cb
+                    ~cancelled:(fun () ->
+                      if !cancel_pending then (stream_cancelled := true; true) else false)
+                    ui in
                let max_turn = max_turn_active () in
                let invoke_result =
                  let turn_token =
@@ -406,17 +416,19 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                                    ; model = ""
                                    }
                                ; conversation =
-                                   Par_code_max_mode.restore_user_message
-                                     ~original:message
-                                     winner.Par_code_max_mode.conversation
+                                   Par_code_payload.sanitize
+                                     (Par_code_max_mode.restore_user_message
+                                        ~original:message
+                                        winner.Par_code_max_mode.conversation)
                                ; approval_pending = None
                                }
                            | Par_code_selector.Execute ->
                              conv :=
                                Some
-                                 (Par_code_max_mode.restore_user_message
-                                    ~original:message
-                                    winner.Par_code_max_mode.conversation);
+                                 (Par_code_payload.sanitize
+                                    (Par_code_max_mode.restore_user_message
+                                       ~original:message
+                                       winner.Par_code_max_mode.conversation));
                              let plan = choice.Par_code_selector.plan in
                              Par_code_ui.render_notice ui
                                "[max mode] executing the selected approach";
@@ -428,7 +440,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                 (match invoke_result with
                 | Error (Types.Cancelled reason, recovered_conv) ->
                    turn_cancelled := true;
-                   conv := Some recovered_conv;
+                   conv := Some (Par_code_payload.sanitize recovered_conv);
                   Par_code_ui.flush_markdown ui;
                   let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in ();
                   incr turn_count;
@@ -441,15 +453,20 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                           "[goal paused \xe2\x80\x94 /goal resume to continue]"
                       | _ -> Par_code_ui.render_notice ui "[cancelled by user]")
                    | Par_code_chain.Abort_goal r ->
-                     Par_code_goal.mark_status Par_code_goal.Aborted;
-                     ignore (Par_code_doom_loop.write_incident
-                               ~signal:"doom_loop" ~reason:r ~normalized:"" ~original:"");
-                     Par_code_ui.render_error ui
-                       ("\xe2\x9c\x97 goal aborted (doom loop) \xe2\x80\x94 " ^ r));
+                     (match !Par_code_goal.current with
+                      | Some g when g.Par_code_goal.status = Par_code_goal.Active ->
+                        Par_code_goal.mark_status Par_code_goal.Aborted;
+                        ignore (Par_code_doom_loop.write_incident
+                                  ~signal:"doom_loop" ~reason:r ~normalized:"" ~original:"");
+                        Par_code_ui.render_error ui
+                          ("\xe2\x9c\x97 goal aborted (doom loop) \xe2\x80\x94 " ^ r)
+                      | _ ->
+                        Par_code_ui.render_error ui
+                          ("\xe2\x9c\x97 turn aborted (doom loop) \xe2\x80\x94 " ^ r)));
                   doom_abort := false; doom_force_judge := false;
                   cancel_pending := false
                 | Error (e, recovered_conv) ->
-                   conv := Some recovered_conv;
+                   conv := Some (Par_code_payload.sanitize recovered_conv);
                   (match e with
                    | Types.Invalid_input s
                      when String.length s > 0 && s.[0] = '{' ->
@@ -463,11 +480,20 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                   if Par_code_chain.counts_invoke_error e then
                     incr consecutive_invoke_errors;
                   turn_errored := true;
-                  Par_code_ui.render_error ui (Par_code_setup.error_to_string e);
+                  if !stream_cancelled then begin
+                    turn_cancelled := true;
+                    Par_code_ui.render_notice ui "[cancelled by user]"
+                  end else
+                    Par_code_ui.render_error ui (Par_code_setup.error_to_string e);
                  let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in ()
               | Ok { Types.response = resp; conversation = returned_conv; _ } ->
-                 conv := Some returned_conv;
-                 Par_code_ui.flush_markdown ui;
+                 conv := Some (Par_code_payload.sanitize returned_conv);
+                 if !stream_cancelled then begin
+                   turn_cancelled := true;
+                   Par_code_ui.flush_markdown ui;
+                   Par_code_ui.render_notice ui "[cancelled by user]"
+                 end else begin
+                   Par_code_ui.flush_markdown ui;
                   if not !streamed_text then begin
                     (match resp.Types.text with
                      | Some text when text <> "" ->
@@ -482,6 +508,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                          (Printf.sprintf "[model returned no text%s]" reason))
                   end;
                   Par_code_ui.render_line ui Par_code_ui.empty;
+                 end;
                  if not !cost_precounted then cost := add_usage !cost resp.Types.usage;
                  consecutive_invoke_errors := 0;
                 let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in ();
@@ -500,7 +527,8 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                     | _ -> ())
                  end);
               (if mode_before_invoke = Par_code_mode.Plan
-                && !Par_code_mode.current = Par_code_mode.Build then begin
+                && !Par_code_mode.current = Par_code_mode.Build
+                && not (Par_code_plan_tools.submitted_plan_pending ()) then begin
                  (match !conv with
                   | Some c ->
                     (match Par_code_plan_tools.persist_plan_file c with
@@ -516,7 +544,20 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                   ~tool_count_before ~skip_ladder:!turn_errored ()
              with ex ->
               turn_exn := true;
-              Par_code_ui.render_error ui (Printf.sprintf "\n[error] %s" (Printexc.to_string ex)));
+              (match ex with
+               | Par_code_repl_io.Stream_cancel_requested ->
+                 turn_cancelled := true;
+                 cancel_pending := false;
+                 doom_abort := false;
+                 doom_force_judge := false;
+                 Par_code_ui.flush_markdown ui;
+                 (match !conv with
+                  | Some c -> ignore (Runtime.save_conversation rt ~conversation:c ~scope ())
+                  | None -> ());
+                 Par_code_ui.render_notice ui "\n[cancelled by user]"
+               | _ ->
+                 Par_code_ui.render_error ui
+                   (Printf.sprintf "\n[error] %s" (Printexc.to_string ex))));
                 (match Par_code_plan_tools.consume_submitted_plan () with
                   | Some path ->
                     last_plan_path := Some path;

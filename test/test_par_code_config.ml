@@ -45,6 +45,7 @@ let test_json_roundtrip () =
     checkpoint_enabled = false;
     checkpoint_interval = 5;
     context_budget_tokens = 50000;
+    context_window_tokens = 64000;
     planner_max_iterations = 30;
     goal_auto_chain = false;
   } in
@@ -64,6 +65,7 @@ let test_json_roundtrip () =
     Alcotest.(check bool) "checkpoint_enabled roundtrip" false loaded.checkpoint_enabled;
     Alcotest.(check int) "checkpoint_interval roundtrip" 5 loaded.checkpoint_interval;
     Alcotest.(check int) "context_budget_tokens roundtrip" 50000 loaded.context_budget_tokens;
+    Alcotest.(check int) "context_window_tokens roundtrip" 64000 loaded.context_window_tokens;
     Alcotest.(check int) "planner_max_iterations roundtrip" 30 loaded.planner_max_iterations;
     Alcotest.(check bool) "goal_auto_chain roundtrip" false loaded.goal_auto_chain
 
@@ -123,6 +125,7 @@ let test_show_output () =
   Alcotest.(check bool) "shows auto_extract" true (string_contains output "auto_extract:");
   Alcotest.(check bool) "shows checkpoint_enabled" true (string_contains output "checkpoint_enabled:");
   Alcotest.(check bool) "shows context_budget_tokens" true (string_contains output "context_budget_tokens:");
+  Alcotest.(check bool) "shows context_window_tokens" true (string_contains output "context_window_tokens:");
   Alcotest.(check bool) "system_prompt shows <default>" true (string_contains output "<default>")
 
 let test_show_custom_system_prompt () =
@@ -247,6 +250,22 @@ let test_update_int_context_budget () =
   setup_test_home (fun _ ->
     let r = update_field ~field:"context_budget_tokens" ~value:"50000" in
     Alcotest.(check int) "context_budget_tokens set" 50000 r.context_budget_tokens)
+
+let test_update_int_context_window () =
+  setup_test_home (fun _ ->
+    let r = update_field ~field:"context_window_tokens" ~value:"64000" in
+    Alcotest.(check int) "context_window_tokens set" 64000 r.context_window_tokens)
+
+let test_persistence_config_prefers_db_uri () =
+  let cfg = { default with db_uri = Some "/tmp/par-audit.db" } in
+  match to_persistence_config cfg with
+  | `Sqlite path -> Alcotest.(check string) "db_uri wins" "/tmp/par-audit.db" path
+
+let test_persistence_config_defaults_to_home () =
+  let cfg = { default with db_uri = None } in
+  match to_persistence_config cfg with
+  | `Sqlite path ->
+    Alcotest.(check string) "default database name" "par.db" (Filename.basename path)
 
 let test_update_optional_int_set () =
   setup_test_home (fun _ ->
@@ -403,6 +422,18 @@ let test_update_context_budget_too_low () =
       | Unix.WEXITED n when n <> 0 -> ()
       | _ -> Alcotest.fail "context_budget_tokens=500 should exit non-zero")
 
+let test_update_context_window_too_low () =
+  setup_test_home (fun _ ->
+    let pid = Unix.fork () in
+    if pid = 0 then begin
+      (try ignore (update_field ~field:"context_window_tokens" ~value:"500") with _ -> ());
+      exit 0
+    end else
+      let _, status = Unix.waitpid [] pid in
+      match status with
+      | Unix.WEXITED n when n <> 0 -> ()
+      | _ -> Alcotest.fail "context_window_tokens=500 should exit non-zero")
+
 let test_update_max_tokens_zero () =
   setup_test_home (fun _ ->
     let pid = Unix.fork () in
@@ -464,7 +495,7 @@ let test_unknown_field_lists_all () =
       let all_fields = [
         "api_base"; "api_key"; "auto_extract";
         "checkpoint_enabled"; "checkpoint_interval";
-        "context_budget_tokens"; "db_uri"; "default_mode";
+        "context_budget_tokens"; "context_window_tokens"; "db_uri"; "default_mode";
         "embedding_base_url"; "embedding_dimension"; "embedding_model";
         "event_retention_days";
         "max_iterations"; "max_tokens"; "model";
@@ -604,6 +635,10 @@ let () =
         Alcotest.test_case "custom_system_prompt" `Quick test_show_custom_system_prompt;
         Alcotest.test_case "default_mode"        `Quick test_show_default_mode;
       ];
+      "persistence_config", [
+        Alcotest.test_case "db_uri_wins"       `Quick test_persistence_config_prefers_db_uri;
+        Alcotest.test_case "default_home_path" `Quick test_persistence_config_defaults_to_home;
+      ];
       "update_field", [
         Alcotest.test_case "string_provider"            `Quick test_update_string_provider;
         Alcotest.test_case "string_api_key"             `Quick test_update_string_api_key;
@@ -617,6 +652,7 @@ let () =
         Alcotest.test_case "int_planner_max_iterations" `Quick test_update_int_planner_max_iterations;
         Alcotest.test_case "int_checkpoint_interval"    `Quick test_update_int_checkpoint_interval;
         Alcotest.test_case "int_context_budget"         `Quick test_update_int_context_budget;
+        Alcotest.test_case "int_context_window"         `Quick test_update_int_context_window;
         Alcotest.test_case "optional_int_set"           `Quick test_update_optional_int_set;
         Alcotest.test_case "optional_int_clear"         `Quick test_update_optional_int_clear;
         Alcotest.test_case "bool_true"                  `Quick test_update_bool_true;
@@ -636,6 +672,7 @@ let () =
         Alcotest.test_case "max_iterations_zero"        `Quick test_update_max_iterations_zero;
         Alcotest.test_case "checkpoint_interval_zero"   `Quick test_update_checkpoint_interval_zero;
         Alcotest.test_case "context_budget_too_low"     `Quick test_update_context_budget_too_low;
+        Alcotest.test_case "context_window_too_low"     `Quick test_update_context_window_too_low;
         Alcotest.test_case "max_tokens_zero"            `Quick test_update_max_tokens_zero;
         Alcotest.test_case "invalid_bool"               `Quick test_update_invalid_bool;
         Alcotest.test_case "invalid_default_mode"       `Quick test_update_invalid_default_mode;

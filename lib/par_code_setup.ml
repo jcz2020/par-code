@@ -54,7 +54,7 @@ let error_to_string (e : Types.error_category) =
 let ensure_rng () = Mirage_crypto_rng_unix.use_default ()
 
 let make_persistence_service (cfg : Par_code_config.config) =
-  let path = Par_code_config.db_path () in
+  let (`Sqlite path) = Par_code_config.to_persistence_config cfg in
   let retention = cfg.Par_code_config.event_retention_days *. 24. *. 60. *. 60. in
   match Sqlite_persistence.create ~retention_ttl:retention path with
   | Error e ->
@@ -212,8 +212,9 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
   | Ok rt ->
     (* Open the memory database for project memory (v0.3.0). *)
     let memory_embedding_fn : Par_memory.Memory_service.embedding_fn option =
-      match provider_tag with
-      | `Anthropic -> None
+      match provider_tag, cfg.Par_code_config.embedding_model with
+      | `Anthropic, _ | _, None -> None
+      | _, Some model when String.trim model = "" -> None
       | _ ->
         Some (fun texts ->
           match embeddings.Types.embed_fn texts with
@@ -334,9 +335,12 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
        | Ok _ -> descriptors := goal_done.Types.descriptor :: !descriptors
        | Error e -> ui_render_warning (Printf.sprintf "Warning: goal_done tool not registered: %s" (error_to_string e)));
       let model_cfg = Par_code_config.to_model_config cfg in
+    let context_window = Some cfg.Par_code_config.context_window_tokens in
     let base_prompt = cfg.Par_code_config.system_prompt in
     (match Runtime.make_agent
        ~id:agent_id
+       ~context_window_override:context_window
+       ~context_strategy:None
        ~system_prompt:(Types.stable_prompt base_prompt)
        ~model:model_cfg
        ~tools:!descriptors
@@ -355,6 +359,8 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
     (* Register the memory-extractor agent (v0.3.1). Tools=[] — pure generation. *)
     (match Runtime.make_agent
        ~id:Par_code_extractor.extractor_agent_id
+       ~context_window_override:context_window
+       ~context_strategy:None
        ~system_prompt:(Types.stable_prompt Par_code_extractor.extractor_system_prompt)
        ~model:model_cfg
        ~tools:[]
@@ -372,6 +378,8 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
        needs a dedicated no-tool agent with a plan-shape system prompt. *)
     (match Runtime.make_agent
        ~id:Par_code_plan_tools.synthesizer_agent_id
+       ~context_window_override:context_window
+       ~context_strategy:None
        ~system_prompt:(Types.stable_prompt
          "You are a plan synthesizer. You receive a coding agent's investigation \
           transcript and must output the COMPLETE implementation plan as markdown. \
@@ -392,6 +400,8 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
         | Ok () -> ()));
     (match Runtime.make_agent
        ~id:Par_code_checkpoint.checkpoint_writer_agent_id
+       ~context_window_override:context_window
+       ~context_strategy:None
        ~system_prompt:(Types.stable_prompt Par_code_checkpoint.checkpoint_writer_system_prompt)
        ~model:model_cfg
        ~tools:[]
@@ -406,6 +416,8 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
        | Ok () -> ()));
      (match Runtime.make_agent
         ~id:Par_code_judge.judge_agent_id
+        ~context_window_override:context_window
+        ~context_strategy:None
         ~system_prompt:(Types.stable_prompt Par_code_judge.judge_system_prompt)
         ~model:model_cfg
         ~tools:[]
@@ -459,6 +471,8 @@ This is the LAST thing you do. The user will be asked to confirm.
     in
     (match Runtime.make_agent
        ~id:Par_code_mode.planner_agent_id
+       ~context_window_override:context_window
+       ~context_strategy:None
        ~system_prompt:(Types.stable_prompt planner_prompt)
        ~model:model_cfg
        ~tools:planner_descriptors
@@ -485,6 +499,8 @@ This is the LAST thing you do. The user will be asked to confirm.
         can race another on the same workspace. *)
      (match Runtime.make_agent
         ~id:Par_code_max_mode.candidate_agent_id
+        ~context_window_override:context_window
+        ~context_strategy:None
         ~system_prompt:(Types.stable_prompt Par_code_max_mode.candidate_system_prompt)
         ~model:model_cfg
         ~tools:explore_descriptors
@@ -502,6 +518,8 @@ This is the LAST thing you do. The user will be asked to confirm.
         carrying tools. *)
      (match Runtime.make_agent
         ~id:Par_code_selector.selector_agent_id
+        ~context_window_override:context_window
+        ~context_strategy:None
         ~system_prompt:(Types.stable_prompt Par_code_selector.selector_system_prompt)
         ~model:model_cfg
         ~tools:[]
@@ -516,6 +534,8 @@ This is the LAST thing you do. The user will be asked to confirm.
         | Ok () -> ()));
      (match Runtime.make_agent
         ~id:Par_code_delegate.explore_agent_id
+        ~context_window_override:context_window
+        ~context_strategy:None
         ~system_prompt:(Types.stable_prompt Par_code_delegate.explore_system_prompt)
         ~model:model_cfg
         ~tools:explore_descriptors
@@ -535,6 +555,8 @@ This is the LAST thing you do. The user will be asked to confirm.
      in
      (match Runtime.make_agent
         ~id:Par_code_delegate.general_agent_id
+        ~context_window_override:context_window
+        ~context_strategy:None
         ~system_prompt:(Types.stable_prompt Par_code_delegate.general_system_prompt)
         ~model:model_cfg
         ~tools:general_descriptors
@@ -550,6 +572,9 @@ This is the LAST thing you do. The user will be asked to confirm.
      Runtime.set_tool_description_overrides rt [
       "bash", "Execute a system command (e.g. git, npm, docker, make, systemctl). \
                NOT for file operations — use read/ls/grep/find tools for those.";
+      "apply_patch", "Apply a unified diff atomically. For two or more files, \
+                      every file section MUST start with a `diff --git a/<path> b/<path>` \
+                      header; without it the next section's header is read as hunk content.";
     ];
     Runtime.register_tool_call_hook rt
       (Bash_confirm.make_hook ?confirm_fn:(Some (fun cmd ->

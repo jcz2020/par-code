@@ -108,25 +108,41 @@ let load_most_recent_scoped () : ((string * Types.conversation) option, string) 
       Error (Printf.sprintf "load_most_recent_conversation failed: %s"
         (Par_code_setup.error_to_string e)))
 
+let conversation_ids_matching_prefix ~prefix : (string list, string) result =
+  with_persistence (fun db ->
+    let scope = Par_code_memory.resolve_project_id () in
+    let raw_db = Sqlite_persistence.raw_sqlite3_db db in
+    migrate_legacy_scopes raw_db;
+    let stmt =
+      Sqlite3.prepare raw_db
+        "SELECT session_id FROM conversations WHERE scope = ? AND session_id LIKE ? \
+         ORDER BY updated_at DESC LIMIT 2"
+    in
+    ignore (Sqlite3.bind_text stmt 1 scope);
+    ignore (Sqlite3.bind_text stmt 2 (prefix ^ "%"));
+    let results = ref [] in
+    let rec fetch () =
+      match Sqlite3.step stmt with
+      | Sqlite3.Rc.ROW -> results := Sqlite3.column_text stmt 0 :: !results; fetch ()
+      | Sqlite3.Rc.DONE -> ()
+      | _ -> ()
+    in
+    fetch ();
+    ignore (Sqlite3.finalize stmt);
+    Ok (List.rev !results))
+
 let resolve_id (prefix : string) : (string, string) result =
   if String.length prefix >= 36 then
     Ok prefix
   else
-    match list_sessions ~limit:200 with
+    match conversation_ids_matching_prefix ~prefix with
     | Error e -> Error e
-    | Ok summaries ->
-      let matches =
-        List.filter (fun s ->
-          String.starts_with ~prefix s.id
-        ) summaries
-      in
-      match matches with
-      | [] -> Error (Printf.sprintf "No session matches prefix '%s'" prefix)
-      | [s] -> Ok s.id
-      | _ ->
-        let count = List.length matches in
-        Error (Printf.sprintf "Prefix '%s' matches %d sessions — be more specific"
-                 prefix count)
+    | Ok [] -> Error (Printf.sprintf "No session matches prefix '%s'" prefix)
+    | Ok [ s ] -> Ok s
+    | Ok matches ->
+      Error
+        (Printf.sprintf "Prefix '%s' matches %d sessions — be more specific" prefix
+           (List.length matches))
 
 let rec first_user_text messages =
   match messages with
@@ -142,13 +158,29 @@ let rec first_user_text messages =
       if trimmed = "" then "(empty)" else trimmed
     else first_user_text rest
 
+let truncate_utf8 (s : string) (max_bytes : int) : string =
+  let len = String.length s in
+  if len <= max_bytes then s
+  else begin
+    let k = ref max_bytes in
+    while !k > 0 && Char.code s.[!k] land 0xC0 = 0x80 do
+      decr k
+    done;
+    let prefix_len =
+      if !k = 0 then 0
+      else if Char.code s.[!k] >= 0xC0 then !k
+      else max_bytes
+    in
+    String.sub s 0 prefix_len
+  end
+
 let resolve_title (session_id : string) : string =
   match load session_id with
   | Ok (Some conv) ->
     let result = first_user_text conv.Types.messages in
     let max_len = 50 in
-    if String.length result > max_len then
-      String.sub result 0 max_len ^ "..."
+    let cut = truncate_utf8 result max_len in
+    if String.length cut < String.length result then cut ^ "..."
     else result
   | _ -> "(unavailable)"
 

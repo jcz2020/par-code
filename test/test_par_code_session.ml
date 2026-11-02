@@ -31,6 +31,19 @@ let test_resolve_id_no_match () =
     (Error "No session matches prefix 'zzzzzznosession'")
     (resolve_id "zzzzzznosession")
 
+let test_truncate_utf8_cjk () =
+  let s = "用一句话说明 is_palindrome 的时间复杂度，以及更多内容" in
+  let cut = truncate_utf8 s 20 in
+  Alcotest.(check bool) "result is valid UTF-8" true (String.is_valid_utf_8 cut);
+  Alcotest.(check bool) "no longer than the byte budget" true
+    (String.length cut <= 20)
+
+let test_truncate_utf8_exact_boundary () =
+  let s = "用 recall_memory 搜索 'par'，告诉我返回了几条。" in
+  let cut = truncate_utf8 s 50 in
+  Alcotest.(check bool) "result is valid UTF-8" true (String.is_valid_utf_8 cut);
+  Alcotest.(check int) "cuts before the split character" 48 (String.length cut)
+
 let test_migrate_legacy_scopes () =
   let path = Filename.temp_file "test_session_migration" ".db" in
   Sys.remove path;
@@ -124,6 +137,10 @@ let () =
         Alcotest.test_case "full_uuid"       `Quick test_resolve_id_full_uuid;
         Alcotest.test_case "short_full_uuid" `Quick test_resolve_id_short_full_uuid;
         Alcotest.test_case "no_match"        `Quick test_resolve_id_no_match;
+      ];
+      "truncate_utf8", [
+        Alcotest.test_case "cjk_boundary"    `Quick test_truncate_utf8_cjk;
+        Alcotest.test_case "exact_boundary"  `Quick test_truncate_utf8_exact_boundary;
       ];
       "migrate_legacy_scopes", [
         Alcotest.test_case "backfill_from_checkpoints" `Quick test_migrate_legacy_scopes;

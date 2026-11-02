@@ -633,6 +633,20 @@ let render_delegation_tool_event backend ~agent_type (evt : Par.Types.event) =
                         ~style:(style ~dim:true ()))
     | _ -> ())
 
+let truncate_utf8 s max_bytes =
+  let len = String.length s in
+  if len <= max_bytes then s
+  else begin
+    let k = ref max_bytes in
+    while !k > 0 && Char.code s.[!k] land 0xC0 = 0x80 do decr k done;
+    let prefix_len =
+      if !k = 0 then 0
+      else if Char.code s.[!k] >= 0xC0 then !k
+      else max_bytes
+    in
+    String.sub s 0 prefix_len
+  end
+
 let render_delegation_result backend ~agent_type ~text:txt =
   let label = match agent_type with
     | "explore" -> "[explore]"
@@ -640,7 +654,7 @@ let render_delegation_result backend ~agent_type ~text:txt =
     | other -> Printf.sprintf "[%s]" other
   in
   let preview = if String.length txt > 500 then
-    String.sub txt 0 500 ^ "\n... (truncated)"
+    truncate_utf8 txt 500 ^ "\n... (truncated)"
   else txt in
   render backend (vcat [
     textf "  %s ✓ complete\n" label ~style:(style ~fg:Green ~dim:true ());

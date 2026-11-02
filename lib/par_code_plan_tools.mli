@@ -10,6 +10,8 @@ val write_plan_file_tool : Types.tool_binding
 val sanitize_plan_filename : string -> string
 val last_submitted_plan : string option ref
 val consume_submitted_plan : unit -> string option
+
+val submitted_plan_pending : unit -> bool
 val has_six_sections : string -> bool
 val plan_file_written_since : float -> bool
 val persist_text : string -> string option

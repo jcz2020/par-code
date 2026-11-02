@@ -234,9 +234,8 @@ let format_timestamp ts =
     (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
 
 let truncate_summary s =
-  if String.length s > 40
-  then String.sub s 0 37 ^ "..."
-  else s
+  let cut = Par_code_session.truncate_utf8 s 37 in
+  if String.length cut < String.length s then cut ^ "..." else s
 
 let render_memory_table (memories : Par_code_memory.memory list) =
   let rows =
@@ -563,8 +562,8 @@ let extract_session_title (conv : Types.conversation) : string =
         let raw = Buffer.contents buf in
         let trimmed = String.trim raw in
         let max_len = 50 in
-        if String.length trimmed > max_len then
-          String.sub trimmed 0 max_len ^ "..."
+        let cut = Par_code_session.truncate_utf8 trimmed max_len in
+        if String.length cut < String.length trimmed then cut ^ "..."
         else if trimmed = "" then "(empty)"
         else trimmed
       else first_user_text rest
