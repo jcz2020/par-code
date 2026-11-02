@@ -1,5 +1,61 @@
 # CHANGES
 
+## v0.8.1 — Hardening from a live walkthrough
+
+> **Status**: Released 2026-11-03.
+>
+> **Release note**: a full live-provider walkthrough of v0.8.0 found four
+> session-breaking defects. Two could leave a session permanently unusable
+> after a single provider error. This patch fixes those, plus the P1 issues
+> surfaced by the same walkthrough.
+
+### Fixed — session-breaking
+
+- **Context compression no longer destroys tool history.** The SDK assumed an
+  8000-token window for models missing from its static table and fell back to
+  truncating the oldest messages; a cut could orphan a tool result and every
+  later request failed with `tool id not found (400/2013)`. Agents now receive
+  the configured `context_window_tokens` (default 128000) and let the SDK
+  summarize with the main model instead of truncating silently.
+- **Provider payloads are sanitized before every request and save.** Orphan
+  tool results (no announcing assistant tool_call) are dropped, and tool_call
+  arguments that are not a JSON object (typically `null`) become `{}`. One
+  malformed message can no longer poison every later turn.
+- **Memory recall does not wait on an unconfigured embedding service.**
+  Embeddings are only used when `embedding_model` is set; otherwise recall is
+  keyword-only and returns in milliseconds instead of timing out after ~130s.
+- **Doom-loop ignores failed edits.** A failed `edit`/`write`/`apply_patch`
+  used to normalize to the same empty output, so six failures counted as six
+  near-duplicate edits and aborted the turn. Only successful edits count now;
+  a non-goal abort says "turn aborted" instead of "goal aborted".
+- **Ctrl+C aborts a streaming answer.** The terminal's cancellation token did
+  not stop an in-flight stream; a REPL-side check now aborts on the next
+  chunk. It waits for that chunk, so a slow provider can still take seconds.
+- **`--db-uri` is honored** by the persistence service instead of always using
+  `~/.par/par.db`.
+
+### Fixed — plans, sessions, prompts
+
+- **One plan file per submission.** `plan_submit` overwrites the draft written
+  by `write_plan_file` instead of creating a second timestamped copy; the
+  automatic post-turn persistence no longer writes a wrap-up file.
+- **`par session fork` output resolves.** The printed 8-character id is found
+  by prefix lookup, and fork titles no longer emit invalid UTF-8.
+- **`apply_patch` multi-file guidance.** The tool description and default
+  prompt now state that every file section needs a `diff --git a/<path> b/<path>`
+  header; the old failure message pointed at identical-looking text.
+- **`/dev/null`, `/dev/stdin`, `/dev/stdout`, `/dev/stderr` are not
+  "outside project"**, so commands like `find ... 2>/dev/null` no longer ask
+  for approval in `auto_project` mode.
+- **UTF-8-safe truncation** for session titles, memory summaries and
+  delegation previews.
+
+### Config
+
+- **`context_window_tokens`** (int, default `128000`, minimum `1000`) — the
+  model's real context window, used for compression decisions. Set it per
+  provider; the previous implicit default was 8000 for unknown models.
+
 ## v0.8.0 — Best-of-N (max mode)
 
 > **Status**: Released 2026-11-02.

@@ -1,5 +1,21 @@
 # Decisions
 
+## [2026-11-03] v0.8.1：真机走查后的会话韧性修复
+
+**Tag**: Release
+
+**变更前**: v0.8.0 用安装版 + 真实 provider 做完整走查，发现四个会打断会话的 P0：① 未知模型被 PAR 按 8000 token 窗口处理，截断历史时留下孤立 tool result，provider 返回 400(2013)，且 par-code 把截断后的 recovered conversation 落库，会话永久损坏；② 默认配置下 `recall_memory` 无条件走 embedding（`embedding_model=None` 也建了 embedding_fn），每次卡 ~130s；③ 模型一次 `arguments: null` 的 tool call 会让之后每轮都 400；④ doom-loop 把失败的 `edit`/`write`/`apply_patch` 归一化成相同空输出，6 次失败就中止整轮。
+
+**变更后**: 新增 `par_code_payload.sanitize`，在 invoke 前、错误恢复、会话恢复与落库前删除孤立 Tool、把非对象 tool_call 参数规范成 `{}`；新增 `context_window_tokens` 配置（默认 128000），所有 agent 传 `~context_window_override` 并设 `~context_strategy:None`，让 SDK 用主模型摘要；仅当 `embedding_model` 非空时才向 memory 层传 embedding_fn；doom-loop 的 edit-repeat 只统计成功编辑，非 goal 中止文案改为 turn。P1 一并修复：plan_submit 覆写草稿（一次只留一个 plan 文件）、fork 前缀改查 conversations 表、UTF-8 安全截断、apply_patch 多文件段头提示、`/dev/null` 白名单、`--db-uri` 真正生效、Ctrl+C 在流式回调里本地中止。
+
+**原因**: 这些不是边角问题——前两个能让用户的会话在正常长度下直接不可用，第三个只需模型偶发一次畸形参数，第四个会让普通补丁任务被误杀。走查证据（payload dump、events、DB 中的孤立 tool result）表明根因在 par-code 的装配层与错误恢复策略，不在模型。
+
+**影响范围**: `lib/par_code_payload.ml|.mli`（新）、`lib/par_code_config.ml`、`lib/par_code_config_wizard.ml`、`lib/par_code_setup.ml`、`lib/par_code_repl.ml`、`lib/par_code_repl_io.ml`、`lib/par_code_plan_tools.ml|.mli`、`lib/par_code_session.ml|.mli`、`lib/par_code_doom_loop.ml`、`lib/par_code_approvals.ml`、`lib/par_code_ui.ml`、`bin/main.ml`、测试与文档。
+
+**回退方式**: 删除 tag `v0.8.1`，版本号退回 `0.8.0`。`context_window_tokens` 缺省时仍按 128000 处理；旧配置文件无需迁移。
+
+**已知限制**: Ctrl+C 流式中止依赖“下一个 chunk 到达”，慢 provider 仍可能等待数秒；PAR 的 cancellation token 本应在流式回调中生效，上游修复后可移除本地 abort。`context_window_tokens` 的默认值 128000 是保守选择，具体模型窗口需用户按 provider 设置。
+
 ## [2026-11-02] v0.8.0 发布：max mode 落地，并经独立代码评审修正会话污染
 
 **Tag**: Release

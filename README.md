@@ -10,7 +10,13 @@ type-safe bash, skills, streaming, persistence — to both ship a useful agent a
 prove out the PAR SDK in anger. (MCP client and Workflow engine are PAR SDK
 primitives par-code does not yet wire — see roadmap items v0.10.0 / v0.11.0.)
 
-**Status:** `v0.8.0` — Best-of-N max mode. A build-mode turn can now run N
+**Status:** `v0.8.1` — hardening release. A live-provider walkthrough of v0.8.0
+found four session-breaking defects — context truncation that poisoned tool
+history, a ~130s memory-recall stall on an unconfigured embedding service,
+`null` tool-call arguments that broke every later turn, and a doom-loop that
+aborted on failed edits. All are fixed, together with duplicate plan files,
+fork ids, UTF-8 titles and `--db-uri`. The v0.8.0 feature set is unchanged:
+a build-mode turn can now run N
 read-only candidates along different strategy angles and keep the best one:
 `/max` (or `par --max N`), with a dedicated selector deciding whether the
 winner answers directly or still needs carrying out — execution stays
@@ -524,6 +530,7 @@ Version numbers stay minimal (no 1.0 until core parity is earned).
 | **v0.7.4** ✅ | Provider-error resilience — context compaction drops orphan tool results instead of shipping them to the provider; a provider rejection of class invalid-input dumps the conversation to `~/.par/debug/` for byte-level root-cause analysis; CI and release pin the PAR SDK to a release tag, so one version always builds the same binary. *"When the provider says no, you can prove why."* |
 | **v0.7.5** ✅ | SDK follow-up — PAR SDK 0.12-beta: `apply_patch` (diff-based multi-file edits) with prompt guidance on when to use it versus `edit`, complete bash output so loop detection sees the real result, SDK floor bump to the new release tag. *"It edits more reliably, and its build no longer depends on upstream's mood."* |
 | **v0.8.0** ✅ | Best-of-N reasoning — max mode: N read-only candidates answered along different strategy angles, a dedicated selector picks one and routes it to answer or single-writer execution; `/max` + `--max N` + two config fields, `/cost` counts all N. *"It tries several approaches and picks the best."* |
+| **v0.8.1** ✅ | Hardening — context truncation, malformed tool-call payloads and unconfigured embeddings can no longer break a session; one plan file per submission; fork ids resolve; UTF-8-safe CLI output; `--db-uri` honored. *"Long sessions stay healthy."* |
 | **v0.9.0** | Self-improvement — `/dream` + `/distill` + custom slash commands. *"It turns my repeated workflows into reusable skills."* |
 | **v0.10.0** | Compose mode — spec-driven orchestration with plan/execute/review/tdd/debug/verify/merge skills. *"Give a spec, it designs, codes, reviews, and tests end-to-end."* |
 | **v0.11.0** | Ecosystem connections — MCP OAuth + hot-reload + multi-source skills (remote URLs, `.claude`/`.agents`/…). *"Connect any MCP server; pull skills from URLs."* |
