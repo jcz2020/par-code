@@ -290,8 +290,14 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
   build-reproducibility follow-up. The pre-release dogfood also pinned the
   multi-file patch form (`diff --git` header per file section) in tests.
   Full spec: `docs/v0.7.5-ROADMAP.md`.
-- v0.8.0+ — best-of-N reasoning, self-improvement, compose mode, ecosystem,
-  code intelligence, safety, polish → v1.0
+- **v0.8.0 🚧 implemented 2026-11-02, pending release** — Best-of-N
+  (max mode): a build-mode turn runs N read-only candidates along three
+  strategy angles, a dedicated selector agent picks one and routes it to
+  "answer directly" or "execute" (single-writer), `/max` + `--max N` +
+  `max_mode` / `max_candidates` config, cost counted per N. Skipped during
+  goal chains and in plan mode. Full spec: `docs/v0.8.0-ROADMAP.md`.
+- v0.9.0+ — self-improvement, compose mode, ecosystem, code intelligence,
+  safety, polish → v1.0
 
 The roadmap order follows: **usable first (v0.2 foundation) → signature
 capabilities on steepest difficulty curve (v0.3–v0.4 memory/long-context,
@@ -348,6 +354,7 @@ per global rules) lives in `docs/DECISIONS.md`. Strategic-level entries:
 | 2026-10-21 | v0.8.0 scope = max mode (Best-of-N): N read-only candidates in parallel, a selector that both picks and routes, single-writer execution; execution-level best-of-N deferred to v0.9.0 (write-race hazard). v0.7.5 = SDK follow-up + reproducibility, released before it | Active |
 | 2026-10-22 | Build reproducibility: PAR SDK pinned to a release tag in CI/release instead of the upstream branch tip — one par-code version must always build the same binary, and upstream changes must not enter a release without par-code review | Active |
 | 2026-11-01 | v0.7.5: SDK floor moves to the `0.12.0-beta` release tag; `apply_patch` adopted with prompt-level routing against `edit` and proven by a live two-file dogfood; doom-loop editor classification extended so patch-based loops are still caught | Active |
+| 2026-11-02 | v0.8.0 implemented (pending release) — max mode: read-only candidates registered as their own agent (read-only by construction, not by prompt), dedicated selector agent, answer path reuses the existing turn bookkeeping via a synthesized invoke result, execution stays single-writer, max mode skipped in goal chains and plan mode. REPL support layer split into `par_code_repl_io` to stay under the file-size limit | Active |
 
 ## 10. Revision Protocol
 

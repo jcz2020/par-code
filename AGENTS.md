@@ -13,10 +13,10 @@ par-code 是一个基于 PAR SDK 的 OCaml 终端编码 agent。用户通过 `pa
 
 ### 当前状态
 
-- **版本**：v0.7.4（见 `dune-project`）
+- **版本**：v0.7.5（见 `dune-project`）；v0.8.0 已实现、待发版
 - **PAR SDK 依赖**：0.12.0-beta+（CI/release/打包脚本/源码安装器 5 处统一钉 `github.com/jcz2020/par.git` 的 **v0.12.0-beta.20261023 tag**，不钉分支 tip；本机 switch 同样钉该 tag）
 - **opam switch**：`/root/dev/PAR`（OCaml 5.4.1）
-- **已发布**：v0.2.1（安装器）、v0.3.0（项目记忆）、v0.3.1（自动提取）、v0.3.2（arm64）、v0.3.3（PAR SDK 0.7.3 + 混合搜索）、v0.4.0（长会话连续性）、v0.4.1（异步 checkpoint）、v0.4.2（多轮上下文 critical fix）、v0.4.3（UX quick patch：/cost + config show + memory fix）、v0.4.5（UI 抽象层 + streaming markdown）、v0.5.0（Plan Mode：只读 planner + 模式切换 + plan 持久化）、v0.5.1（Plan CLI + Git Tools：par plan list/show/prune + git_status/git_log）、v0.5.2（streaming fallback fix）、v0.5.3（REPL rendering fixes：tool 去重 + /dev/tty + 诊断）、v0.5.4（Session management：par session list/show/fork + partial ID resume + Ctrl+C 干净退出）、v0.5.5（hotfix：Plan Mode tool-filter 名称修正 + startup version-notice + REPL prompt flush + `<think>` tag 中间件 + session scope 写侧修正）、v0.5.6（审计 W2-3 + UX 打磨：par config set 全 20 字段 + install.sh source compile fallback + par memory prune --dry-run + memory prefix 解析 + /session 对齐 + legacy scope 迁移 + streaming `<think>` strip，PAR SDK 0.8.3）、v0.6.0（子 agent 委派：delegate 工具 + explore（只读）/ general（全能力）subagent）、v0.6.1（install/upgrade 修正：install.sh stale-binary 权限守护 + par upgrade source-fallback 对齐 + Filename.temp_file 清理）、v0.6.2（UTF-8 REPL 输入：linenoise bundled-C + CJK backspace 不再乱码 + Ctrl+C crash 修正）、v0.7.0（目标驱动自主性：/goal 命令 + 独立 judge 模型 + doom-loop 检测 + goal_done 工具 + --goal CLI flag，PAR SDK 0.8.6）、v0.7.1（planner 预算 + REPL exit-path hotfix：planner_max_iterations 配置 + early_stopping_method Generate + 统一 exit_normally ()）、v0.7.2（goal 可用性加固：三类 bash approval + planner synthesis fallback + doom-loop v2 + goal 生命周期管理 + no-progress / completion-claim 守护）、v0.7.3（自主 goal 链式执行：run_chain 驱动 + par --goal 自动启动链 + PAR SDK 0.10.0 mid-invoke 取消 + error-streak 守护 + goal_auto_chain 开关）、v0.7.4（provider 报错韧性：裁切后孤儿 tool result 清除 + provider 拒绝 payload dump + CI/release SDK tag 钉住使产物可复现）
+- **已发布**：v0.2.1（安装器）、v0.3.0（项目记忆）、v0.3.1（自动提取）、v0.3.2（arm64）、v0.3.3（PAR SDK 0.7.3 + 混合搜索）、v0.4.0（长会话连续性）、v0.4.1（异步 checkpoint）、v0.4.2（多轮上下文 critical fix）、v0.4.3（UX quick patch：/cost + config show + memory fix）、v0.4.5（UI 抽象层 + streaming markdown）、v0.5.0（Plan Mode：只读 planner + 模式切换 + plan 持久化）、v0.5.1（Plan CLI + Git Tools：par plan list/show/prune + git_status/git_log）、v0.5.2（streaming fallback fix）、v0.5.3（REPL rendering fixes：tool 去重 + /dev/tty + 诊断）、v0.5.4（Session management：par session list/show/fork + partial ID resume + Ctrl+C 干净退出）、v0.5.5（hotfix：Plan Mode tool-filter 名称修正 + startup version-notice + REPL prompt flush + `<think>` tag 中间件 + session scope 写侧修正）、v0.5.6（审计 W2-3 + UX 打磨：par config set 全 20 字段 + install.sh source compile fallback + par memory prune --dry-run + memory prefix 解析 + /session 对齐 + legacy scope 迁移 + streaming `<think>` strip，PAR SDK 0.8.3）、v0.6.0（子 agent 委派：delegate 工具 + explore（只读）/ general（全能力）subagent）、v0.6.1（install/upgrade 修正：install.sh stale-binary 权限守护 + par upgrade source-fallback 对齐 + Filename.temp_file 清理）、v0.6.2（UTF-8 REPL 输入：linenoise bundled-C + CJK backspace 不再乱码 + Ctrl+C crash 修正）、v0.7.0（目标驱动自主性：/goal 命令 + 独立 judge 模型 + doom-loop 检测 + goal_done 工具 + --goal CLI flag，PAR SDK 0.8.6）、v0.7.1（planner 预算 + REPL exit-path hotfix：planner_max_iterations 配置 + early_stopping_method Generate + 统一 exit_normally ()）、v0.7.2（goal 可用性加固：三类 bash approval + planner synthesis fallback + doom-loop v2 + goal 生命周期管理 + no-progress / completion-claim 守护）、v0.7.3（自主 goal 链式执行：run_chain 驱动 + par --goal 自动启动链 + PAR SDK 0.10.0 mid-invoke 取消 + error-streak 守护 + goal_auto_chain 开关）、v0.7.4（provider 报错韧性：裁切后孤儿 tool result 清除 + provider 拒绝 payload dump + CI/release SDK tag 钉住使产物可复现）、v0.7.5（PAR SDK 0.12-beta 跟进：apply_patch + 完整 bash 输出 + 五处安装点钉 tag）
 
 ### 架构概览
 
@@ -80,8 +80,12 @@ PAR SDK (Runtime.invoke → ReAct loop → tool dispatch → LLM)
 | `lib/par_code_goal.mli` | Goal 公共 API (v0.7.0+) | 查 goal 接口签名 |
 | `lib/par_code_goal_tools.ml` | goal_done agent 工具 (v0.7.0+) | 改 goal_done 工具逻辑 |
 | `lib/par_code_goal_tools.mli` | Goal tools 公共 API (v0.7.0+) | 查 goal tools 接口签名 |
+| `lib/par_code_json_extract.ml` | judge 与 selector 共用的宽松 JSON 对象提取 | 改模型输出的 JSON 容错语义 |
+| `lib/par_code_json_extract.mli` | Json_extract 公共 API | 查接口签名 |
 | `lib/par_code_judge.ml` | 独立 judge agent：verdict 解析 + evaluate_goal (v0.7.0+) | 改 judge 评估逻辑、prompt |
 | `lib/par_code_judge.mli` | Judge 公共 API (v0.7.0+) | 查 judge 接口签名 |
+| `lib/par_code_max_mode.ml` | Best-of-N 候选执行器：策略种子 + Eio fiber 并发 + 会话副本 (v0.8.0+) | 改候选并发/隔离逻辑 |
+| `lib/par_code_max_mode.mli` | Max mode 公共 API (v0.8.0+) | 查候选执行器接口签名 |
 | `lib/par_code_memory.ml` | 记忆层：Sqlite_memory 代理 + FTS5/vec0 搜索 + 迁移 + 索引渲染 | 改记忆 schema、加搜索功能 |
 | `lib/par_code_memory.mli` | Memory 公共 API | 查 memory 接口签名 |
 | `lib/par_code_memory_tools.ml` | 3 个 agent 工具 (recall/remember/search_history) | 加新工具给 LLM 用 |
@@ -91,7 +95,10 @@ PAR SDK (Runtime.invoke → ReAct loop → tool dispatch → LLM)
 | `lib/par_code_plan_tools.mli` | Plan tools 公共 API (v0.5.1+) | 查 plan 工具接口签名 |
 | `lib/par_code_progress.ml` | no_progress 检测 + completion-claim 启发式（EN+CN 关键词 + 否定处理）(v0.7.0+) | 改 progress 检测规则 |
 | `lib/par_code_progress.mli` | Progress 公共 API (v0.7.0+) | 查 progress 接口签名 |
-| `lib/par_code_repl.ml` | REPL 循环 + 单次问答 + /goal 命令 + run_chain 链驱动（Ui.render_* 渲染） | 改交互行为、加 slash 命令 |
+| `lib/par_code_repl.ml` | REPL 循环 + 单次问答 + /goal + /max 命令 + run_chain 链驱动（Ui.render_* 渲染） | 改交互行为、加 slash 命令 |
+| `lib/par_code_repl_io.ml` | REPL 支撑层：流式回调、tool 事件回调、会话恢复、成本统计、payload dump (v0.8.0+) | 改渲染回调、会话恢复、成本展示 |
+| `lib/par_code_selector.ml` | 候选选择器：独立 selector agent + JSON 解析 + answer/execute 分流 (v0.8.0+) | 改选择逻辑、prompt、容错回退 |
+| `lib/par_code_selector.mli` | Selector 公共 API (v0.8.0+) | 查选择器接口签名 |
 | `lib/par_code_session.ml` | Session management：list/load/fork/resolve_id (v0.5.4+) | 改 session 逻辑、加新 session 相关功能 |
 | `lib/par_code_session.mli` | Session management 公共 API (v0.5.4+) | 查 session 接口签名 |
 | `lib/par_code_setup.ml` | Runtime 引导：创建 runtime、注册 tools/agents（含 judge/delegate/goal_done/plan_submit/write_plan_file）、think_tag_strip 中间件、bash 审批 hook、tool 描述覆盖 | 集成新功能到 runtime |

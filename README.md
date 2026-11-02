@@ -371,6 +371,47 @@ commands and normal input resume at the prompt after the chain stops.
 | `goal_max_steps` | `50` | Maximum turns before forced abort. |
 | `goal_verify_command` | (none) | Shell command to verify completion claims. |
 
+## Max mode (Best-of-N)
+
+Off by default. When on, a build-mode turn first asks the model the same
+question along three different **strategy angles** (minimal change /
+architecture first / risk first), then a dedicated selector agent picks one
+candidate and decides whether it already answers the request or still needs
+execution. Execution is always single-writer: candidates are read-only.
+
+```
+/max                status (off / on, N candidates)
+/max on             enable with the current N
+/max off            disable
+/max 4              enable with 4 candidates (2-5)
+--max 4             start the session in max mode with 4 candidates
+```
+
+A max-mode turn looks like:
+
+```
+[max mode] 3 candidates running...
+  candidate 1/3 · done
+  candidate 2/3 · done
+  candidate 3/3 · done
+[max mode] selected candidate 2/3 — it reused the existing backoff helper
+```
+
+Candidates do not stream (N interleaved streams are unreadable); each one
+reports a single line. The winner's final text renders normally, and when the
+selector says "execute", its instruction becomes the next message of a normal
+build turn, which streams as usual. Token cost is multiplied by N and counted
+in `/cost`.
+
+| Field | Default | Purpose |
+|---|---|---|
+| `max_mode` | `false` | Enable max mode by default for build-mode turns. |
+| `max_candidates` | `3` | Number of candidates per turn (2-5). |
+
+Fallbacks: a failing candidate is dropped and the rest continue; if all fail,
+the turn runs as a plain single pass; if the selector itself fails, candidate 1
+answers directly. Max mode is skipped during goal chains and in plan mode.
+
 ## Bash approval
 
 `bash_approval` controls how bash commands are confirmed (default `ask`):
@@ -476,7 +517,7 @@ Version numbers stay minimal (no 1.0 until core parity is earned).
 | **v0.7.3** ✅ | Autonomous goal chaining — `run_chain` driver (after each turn the judge verdict drives the next without user input); `par --goal` auto-starts the chain; real mid-invoke cancellation (PAR SDK 0.10.0: doom Guard-cancel + Ctrl+C pause with recovered conversation saved + second Ctrl+C force-exit); error-streak guard (`llm_error_x2` after 2 consecutive errors, soft/resumable); `goal_auto_chain` kill switch. *"Give it a goal, it works until the judge verifies it — and Ctrl+C actually stops it mid-stride."* |
 | **v0.7.4** ✅ | Provider-error resilience — context compaction drops orphan tool results instead of shipping them to the provider; a provider rejection of class invalid-input dumps the conversation to `~/.par/debug/` for byte-level root-cause analysis; CI and release pin the PAR SDK to a release tag, so one version always builds the same binary. *"When the provider says no, you can prove why."* |
 | **v0.7.5** ✅ | SDK follow-up — PAR SDK 0.12-beta: `apply_patch` (diff-based multi-file edits) with prompt guidance on when to use it versus `edit`, complete bash output so loop detection sees the real result, SDK floor bump to the new release tag. *"It edits more reliably, and its build no longer depends on upstream's mood."* |
-| **v0.8.0** | Best-of-N reasoning — max-mode (parallel candidates + judge selection). *"It tries several approaches and picks the best."* |
+| **v0.8.0** 🚧 | Best-of-N reasoning — max mode: N read-only candidates answered along different strategy angles, a dedicated selector picks one and routes it to answer or single-writer execution; `/max` + `--max N` + two config fields, `/cost` counts all N. *"It tries several approaches and picks the best."* (implemented 2026-11-02; pending release) |
 | **v0.9.0** | Self-improvement — `/dream` + `/distill` + custom slash commands. *"It turns my repeated workflows into reusable skills."* |
 | **v0.10.0** | Compose mode — spec-driven orchestration with plan/execute/review/tdd/debug/verify/merge skills. *"Give a spec, it designs, codes, reviews, and tests end-to-end."* |
 | **v0.11.0** | Ecosystem connections — MCP OAuth + hot-reload + multi-source skills (remote URLs, `.claude`/`.agents`/…). *"Connect any MCP server; pull skills from URLs."* |

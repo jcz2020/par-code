@@ -1,5 +1,46 @@
 # CHANGES
 
+## v0.8.0 — Best-of-N (max mode)
+
+> **Status**: Unreleased (implemented 2026-11-02). The version number is not
+> bumped until the release is requested; everything below is on `main` and
+> green in unit + integration tests.
+
+### Added — max mode
+
+- **`/max` and `par --max N`** — `par --max 3` starts a session with max mode
+  on; `/max` prints the state, `/max on|off` toggles, `/max 2..5` sets the
+  candidate count (out-of-range is rejected without changing state).
+- **Three strategy angles** — candidates are not the same prompt run N times.
+  Each gets a different angle (minimal change, architecture first, risk first)
+  so the N× spend buys genuinely different approaches instead of near-duplicates.
+- **A selector agent, not the judge** — `selector` (tools-free, `invoke_generate`)
+  picks the best candidate and routes it: `answer` returns the winner's text,
+  `execute` hands the winner's instruction to a normal single-writer build turn.
+- **Consequences are visible and cheap to undo** — one line per candidate, a
+  selection line with the selector's reasoning, and `/cost` counts all N.
+  A failing candidate is dropped; all-failed falls back to a plain single pass;
+  a broken selector falls back to candidate 1. Ctrl+C cancels every candidate at
+  once (they share the turn's cancellation token).
+- **Skipped where N× cost is not defensible** — goal chains and plan mode run
+  single-pass.
+
+### Changed — internal
+
+- `lib/par_code_repl.ml` (891 lines) split: streaming callbacks, session resume,
+  cost accounting and the payload dumper moved to `lib/par_code_repl_io.ml`
+  (619 + 290 lines). Test modules that opened `Par_code_repl` for those helpers
+  now open the new module.
+- The judge and the selector parse model output through one shared
+  `Par_code_json_extract.extract_object`, so their tolerance for prose-wrapped
+  JSON cannot drift apart.
+
+### Config
+
+- `max_mode` (bool, default `false`) and `max_candidates` (int, default `3`,
+  range 2-5), both settable via `par config set` and shown by `par config show`.
+  Missing fields in an older config file fall back to the defaults.
+
 ## v0.7.5 — PAR SDK 0.12-beta 跟进
 
 > **Status**: Released 2026-11-01. The SDK floor moves from `0.10.0` to

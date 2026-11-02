@@ -134,6 +134,8 @@
 - par-code 侧的临时路径已定：`Runtime.invoke` + 每候选独立会话副本 + `~update_current:false ~save:false` + par-code 自己 fan-out（Eio fiber + Semaphore + 共享取消 token）。该路径在 PAR 0.10.0（当前已装版本）即可工作，不依赖上游改动。
 - **Retirement trigger**: PAR 具备会话级并发原语后，par-code 的自编排 fan-out 退役，切换到 SDK API。
 
+**2026-11-02 复核（SDK `v0.12.0-beta.20261023`，即 par-code 当前地板）**: 两条缺口在最新 tag 上都没修——`runtime.mli:315-329` 的 `invoke_async` 依旧没有 `?save` / `?update_current`；`runtime.mli:484` 的 `invoke_parallel` 签名未变，`agent_dispatch_spec`（`:5-11`）仍无 conversation 入口，`parallel_invoke_result.successes`（`:13-17`）仍是 `(agent_dispatch_spec * Yojson.Safe.t) list`。同日 `Runtime.invoke`（`:293`）仍带 `?update_current`（`:306`）与 `?save`（`:307`），应用侧编排路径继续可用。下方 5 条缺陷本次未逐条重跑复现，只标注“未见修复”。
+
 **附：同一次核读发现的其余上游缺陷（同一 feedback 条目）**
 
 1. **`docs/sdk/parallel.md` 与源码多处不符**（文档页多处描述的是"设计意图"而非实际行为）：`:63-64,72` 声称结果含 `cancelled` / `duration` 字段——源码里只有 `successes` / `failures` / `merged`；`:129` 声称未传 `merge_fn` 时结果被包成 JSON 列表——实际 `merged = None`；`:101` 声称 `Fail_fast` 会取消其余分支——实际不取消，只是整批返回 `Error`；`:96,102` 声称 `Conditional` 会执行 `on_failure` 步骤——实际从未执行（等价 `Continue_on_failure`）；`:268` 声称内部构造 workflow `Parallel` 节点提交——实际直接 fork fiber 跑 `execute_step`，无 workflow run、无 `workflow_run_id`；`:9,150` 声称每 agent 独立 tool registry——只有带 `workspace = Some _` 的 spec 才有独立 registry，否则共用一个。
@@ -157,6 +159,8 @@
 **影响范围**: `lib/par_code_config.ml`（两个新字段）、`lib/par_code_repl.ml`（回合分流 + `/max`）、`lib/par_code_setup.ml`（注册 candidate/selector 两个 agent）、新增 `lib/par_code_max_mode.ml` 与 `lib/par_code_selector.ml`、`bin/cli_args.ml`（`--max`）、README/CHANGES/STRATEGY/AGENTS.md 文档同步。
 
 **回退方式**: `max_mode` 默认关闭 + 独立 kill switch，关闭即回到 v0.7.3 的单路行为；新增字段全部可选，旧配置文件用默认值兜底。
+
+**实现注记 (2026-11-02)**: 按上述路线落地，实现上有四处偏离草案时的假设，均已写入规格对照记录：① 候选 agent 独立注册为 `max_candidate`（工具白名单 = 只读子集），只读由构造保证而不是靠 prompt；② 选择器判定 `answer` 时不再复制一遍收尾逻辑，而是合成一个 `Types.invoke_result`（胜者文本 + 各路累加 usage + 胜者会话）交给既有 `Ok` 分支，渲染/计费/落库/checkpoint 全部沿用；③ 候选与本轮 invoke 共用一个 `turn_token`，Ctrl+C 一次性停掉 N 路；④ goal chain 续跑（`~chained:true`）与 Plan 模式跳过 max mode——自主循环里 N 倍成本不可控，规划模式已有专门的 planner 通路。同时把 `par_code_repl.ml` 的支撑层（流式回调、会话恢复、成本统计、payload dump）拆到 `par_code_repl_io.ml`，让回合接线落在 800 行红线以内。
 
 ---
 
