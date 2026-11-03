@@ -675,6 +675,12 @@ This is the LAST thing you do. The user will be asked to confirm.
     List.iter (fun (desc : Types.skill_descriptor) ->
       ignore (Runtime.register_skill rt desc : (Types.skill_binding, _) result)
     ) Builtin_skills.builtin_skills;
+    let registered, rejected = Par_code_skills.discover_and_register ~rt () in
+    if registered <> [] then
+      Printf.eprintf "[skills] loaded %d custom command(s)\n"
+        (List.length registered);
+    List.iter (fun (id, reason) ->
+      Printf.eprintf "[skills] %s: %s\n" id reason) rejected;
     f rt mem_db;
     (match mem_db with Some t -> Par_code_memory.close t | None -> ());
     ignore (Runtime.close rt)

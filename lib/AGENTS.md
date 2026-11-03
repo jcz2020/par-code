@@ -1,6 +1,6 @@
 # lib/ — the `par_code` library
 
-**Score 15** — 52 files (29 `.ml`, 22 `.mli`, `dune`), 9.5k LOC. Earned its file: the entire product core; every other directory consumes it.
+**Score 15** — 54 files (30 `.ml`, 23 `.mli`, `dune`), 9.7k LOC. Earned its file: the entire product core; every other directory consumes it.
 
 Flat directory — no subdirs; the module set IS the architecture. All modules are top-level `Par_code_*` (`(wrapped false)` in `dune`).
 
@@ -9,6 +9,7 @@ Flat directory — no subdirs; the module set IS the architecture. All modules a
 | Task | Modules (LOC) |
 |---|---|
 | Runtime bootstrap: tools, agents, middleware, bash approval | `par_code_setup.ml` (680) |
+| User/project skills: discovery, registration, body read | `par_code_skills.ml` (v0.9.0 W0/W1) |
 | REPL loop, slash commands, goal-chain driver | `par_code_repl.ml` (868) + `par_code_repl_io.ml` (333) |
 | Rendering: image algebra, ANSI backend, `render_*` | `par_code_ui.ml` (776) + `par_code_ui_markdown.ml` (320) |
 | Config (38 fields) + wizard | `par_code_config.ml` (699) + `par_code_config_wizard.ml` (218) |
@@ -22,6 +23,7 @@ Flat directory — no subdirs; the module set IS the architecture. All modules a
 ## CONVENTIONS
 
 - 800-line file limit — extract when exceeded. `repl` (868) is the known violation; `repl_io` and `config_wizard` exist because of this rule.
+- v0.9.0 W0/W1: user skills live at `./.par/skills/<id>/skill.md` (project first) and `~/.par/skills/`; only `trigger: manual` is registered; the REPL adds `/skills` and `/<id>`; the SDK does not consume `body_path`, so `Par_code_skills.read_body` injects the body via `~system_prompt_appendix`.
 - v0.8.2 工具行边界：`Par_code_ui_markdown.has_pending` + `push "\n"` 在渲染工具/状态行前刷出半行（保留 code-block context）；`Tool_call_start` 独占一行；表格/help/cost/session 用无内嵌换行的 image，`render_line` 补一个行尾换行。
 - v0.8.2 `/cost`：事件回调对 `Tool_invoked` 调 `Runtime.record_tool_invocation`（每次调用一次，bash 不重复计）；max-mode 候选各自记录，胜者事件重放走不带 `~rt` 的回调；`tools_visible` 由主 agent 去重工具数计算；SDK 0.12-beta 的 `events_*` / budget 计数器不展示。
 - 手动 `/checkpoint` 传 `~extract:false`；周期 `maybe_checkpoint` 仍提取记忆（v0.8.2+）。
@@ -41,6 +43,7 @@ Flat directory — no subdirs; the module set IS the architecture. All modules a
 
 - NEVER git write ops from agent code. `git_tools` exposes only `git status --porcelain=v1 -b` and `git log --format=%H|%s|%ai` — that is the planner's whole allowlist.
 - Parallel agents (explore subagent, max-mode candidates) share ONE read-only tool list by construction — no candidate races another on the workspace.
+- NEVER assume `skill_descriptor.body_path` is injected by the SDK — 0.12-beta has no runtime consumer; read it in `Par_code_skills` and pass it as a system-prompt appendix.
 - Approval classification fails CLOSED: `..` or `:` in a path, or any unmapped error → `Unknown` → human prompt; delete-class commands (`rm/mv/dd/shred/truncate`) are always `External_path`.
 - Do NOT await the checkpoint fiber — fire-and-forget (`par_code_checkpoint.ml:428`).
 - NEVER render a tool/status line while markdown has a pending half-line — route through `render_event_line` / `flush_pending_line` first.
