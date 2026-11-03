@@ -1,5 +1,21 @@
 # Decisions
 
+## [2026-11-03] v0.9.0 范围裁决：self-improvement，执行级 best-of-N 推迟
+
+**Tag**: Scope
+
+**变更前**: README/STRATEGY 承诺 v0.9.0 = self-improvement（`/dream` + `/distill` + 自定义 slash 命令），但 `docs/v0.8.0-ROADMAP.md` 决策 4 把执行级 best-of-N（每候选一个 worktree、胜者 diff 回灌）也推迟到 v0.9.0；两处范围来源冲突，且 v0.9.0 没有规格文件。
+
+**变更后**: v0.9.0 = self-improvement；执行级 best-of-N 推迟到 v0.10+，触发条件仍是“用户频繁要求换个实现再来一版”。规格落到 `docs/v0.9.0-ROADMAP.md`（R1 决策 1..7）；实施顺序 W0/W1（skill 发现 + 自定义 `/命令` + `/skills`）先行，W2 `/distill`、W3 `/dream` 随后。版本号仍为 0.8.2，发布时才 bump 0.9.0。
+
+**原因**: README/STRATEGY 是对外承诺；执行级 best-of-N 的退役条件尚未出现，且它需要先解决 worktree 脏工作区基线，属于更高风险的范围扩张。self-improvement 直接复用 SDK 已有的 `Skill_loader` / `register_skill` 与记忆层，增量明确、可回退。
+
+**影响范围**: `docs/v0.9.0-ROADMAP.md`（新）、README roadmap 行、CHANGES（发布时）、STRATEGY、DECISIONS、AGENTS（新模块/命令）；实现从 `main`（`7130653`）切分支，发布前不 bump 版本。
+
+**回退方式**: 删除 v0.9.0 ROADMAP 与相关实现，范围回到“未定”；执行级 best-of-N 的推迟记录保留，作为后续触发条件。
+
+**已知限制**: PAR 0.12-beta 的 `skill_descriptor.body_path` 没有运行时消费者，par-code 自己读正文；Auto/Keyword 用户 skill 默认不启用（`skills_auto_activate` 随 W4 补）；`/skills reload` 对已注册 id 的 frontmatter 变更需要重启（SDK 没有公开的 unregister/replace）；`/dream`/`/distill` 的辅助 LLM 调用成本暂不计入 turn 级 `/cost`。
+
 ## [2026-11-03] v0.8.2：清理真机审计的 P2（交互噪声与死指标）
 
 **Tag**: Release

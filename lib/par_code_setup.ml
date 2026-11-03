@@ -373,6 +373,23 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
          (match Runtime.register_agent rt extractor with
           | Error e -> ui_render_warning (Printf.sprintf "Warning: extractor agent registration failed: %s" (error_to_string e))
           | Ok () -> ()));
+    (* Register the skill-distiller agent (v0.9.0 W2). Tools=[] — pure generation. *)
+    (match Runtime.make_agent
+       ~id:Par_code_distill.distiller_agent_id
+       ~context_window_override:context_window
+       ~context_strategy:None
+       ~system_prompt:(Types.stable_prompt Par_code_distill.distiller_system_prompt)
+       ~model:model_cfg
+       ~tools:[]
+       ~middleware:[think_tag_strip_middleware]
+       ~max_iterations:1
+       () with
+     | Error e ->
+       ui_render_warning (Printf.sprintf "Warning: distiller agent not registered: %s" (error_to_string e))
+     | Ok d ->
+       (match Runtime.register_agent rt d with
+        | Error e -> ui_render_warning (Printf.sprintf "Warning: distiller agent registration failed: %s" (error_to_string e))
+        | Ok () -> ()));
     (* Register the plan-synthesizer agent (v0.7.2 W2). Tools=[] —
        invoke_generate rejects tool-carrying agents, so the synthesis fallback
        needs a dedicated no-tool agent with a plan-shape system prompt. *)
@@ -675,6 +692,12 @@ This is the LAST thing you do. The user will be asked to confirm.
     List.iter (fun (desc : Types.skill_descriptor) ->
       ignore (Runtime.register_skill rt desc : (Types.skill_binding, _) result)
     ) Builtin_skills.builtin_skills;
+    let registered, rejected = Par_code_skills.discover_and_register ~rt () in
+    if registered <> [] then
+      Printf.eprintf "[skills] loaded %d custom command(s)\n"
+        (List.length registered);
+    List.iter (fun (id, reason) ->
+      Printf.eprintf "[skills] %s: %s\n" id reason) rejected;
     f rt mem_db;
     (match mem_db with Some t -> Par_code_memory.close t | None -> ());
     ignore (Runtime.close rt)

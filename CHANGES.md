@@ -1,5 +1,31 @@
 # CHANGES
 
+## v0.9.0 — Self-improvement (unreleased)
+
+> **Status**: In progress on `feat/v0.9.0-skills`.
+>
+> **Scope**: user/project skills (W0/W1) and `/distill` (W2).
+
+### Added — skills
+
+- **Custom skills are discovered from `./.par/skills/<id>/skill.md` and
+  `~/.par/skills/`.** Only `trigger: manual` entries are registered as slash
+  commands; project entries shadow user entries with the same id. The SDK does
+  not consume `body_path`, so par-code reads the body and injects it as a
+  system-prompt appendix when `/<id>` is invoked.
+- **`/skills` lists discovered skills and `/skills reload` rescans both
+  directories.** Startup discovery reports rejected files as warnings; built-in
+  commands win on id conflicts.
+- **`/distill` turns a repeated workflow into a skill.** The tools-free
+  `skill-distiller` agent proposes one JSON skill from the request, recent
+  session, and memory index. par-code validates the id, reserved ids, existing
+  ids, description, and body size, shows the proposal, and writes on
+  confirmation through a temp file parsed by `Skill_loader` before the rename.
+  `--force` backs up an existing file to `.par/backups/skills/`; `--user`
+  targets the user directory. The command is Build-mode only.
+- **`test_par_code_distill.ml`** covers proposal parsing, id/description/body
+  validation, atomic write, and the `--force` backup (27th Alcotest suite).
+
 ## v0.8.2 — P2 cleanup from the live walkthrough
 
 > **Status**: Released 2026-11-03.

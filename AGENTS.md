@@ -2,7 +2,7 @@
 
 > 项目级规则 + 项目地图。优先级高于全局 agent 指令文件。本文件是全库索引；模块细节在各子目录 AGENTS.md，此处不重复。
 
-**Generated:** 2026-11-03 · **Commit:** 03c9db0 · **Branch:** main
+**Generated:** 2026-11-03 · **Commit:** 7130653 · **Branch:** main
 
 ## OVERVIEW
 
@@ -13,8 +13,8 @@ par-code 是基于 PAR SDK 的 OCaml 终端编码 agent：`par` 启动 REPL，ag
 ```
 par-code/
 ├── bin/              # Cmdliner CLI：main.ml 分发 + cli_args.ml（29 flag）→ bin/AGENTS.md
-├── lib/              # 29 个核心模块，flat 布局，Par_code_* 前缀 → lib/AGENTS.md
-├── test/             # Alcotest 单测（25 exe）→ test/AGENTS.md
+├── lib/              # 31 个核心模块，flat 布局，Par_code_* 前缀 → lib/AGENTS.md
+├── test/             # Alcotest 单测（27 exe）→ test/AGENTS.md
 │   └── integration/  # bash/tmux e2e harness → test/integration/AGENTS.md
 ├── scripts/          # install.sh / build-macos.sh / checksums.sh / docker/linux-bundle.Dockerfile
 ├── docs/             # DECISIONS.md（决策账本）+ STRATEGY.md（战略快照）
@@ -28,7 +28,8 @@ par-code/
 
 | 任务 | 位置 | 备注 |
 |---|---|---|
-| lib 29 个模块的职责 / 接口 / lib 级约定 | `lib/AGENTS.md` | 模块地图在彼处 |
+| lib 31 个模块的职责 / 接口 / lib 级约定 | `lib/AGENTS.md` | 模块地图在彼处 |
+| 自定义 skill / 命令 | `lib/par_code_skills.ml` + `lib/par_code_distill.ml` + `/skills` + `/distill` | v0.9.0 W0/W1/W2；manual-only |
 | CLI 子命令 / flag / 分发 | `bin/AGENTS.md` | `main.ml` 触 10 个模块，全库最宽耦合 |
 | 单测约定 / 版本断言 | `test/AGENTS.md` | 版本断言硬编码在 `test/test_par_code.ml:2` |
 | e2e harness | `test/integration/AGENTS.md` | `run.sh`、setup_home 契约、dead endpoint |
@@ -52,7 +53,7 @@ par-code/
 | `Par_code_checkpoint` | module | `lib/par_code_checkpoint.ml` | 53 | 长会话连续性；手动 /checkpoint 不触发提取（v0.8.2+） |
 | `Par_code_payload.sanitize` | val | `lib/par_code_payload.ml` | 8 | invoke / 落库前的会话清洗 |
 
-\* 外部引用为 bin+test 中 `Module.` 限定引用的实测计数，签名变更按此排爆炸半径。公共面：22 个 `.mli` 共 195 `val` + 29 `type`；7 个模块无 `.mli`（config / config_wizard / extractor / memory_tools / repl / repl_io / setup），bin 直接依赖其未封装表面，改它们等于改 bin。
+\* 外部引用为 bin+test 中 `Module.` 限定引用的实测计数，签名变更按此排爆炸半径。公共面：24 个 `.mli` 共 212 `val` + 32 `type`；7 个模块无 `.mli`（config / config_wizard / extractor / memory_tools / repl / repl_io / setup），bin 直接依赖其未封装表面，改它们等于改 bin。
 
 ## CONVENTIONS
 
@@ -61,6 +62,7 @@ par-code/
 - 对话超过 `context_budget_tokens` 时，老消息替换为最近 checkpoint 摘要（v0.4.0+）
 - 每次 invoke / 落库前 `Par_code_payload.sanitize` 清洗会话：删孤立 tool result、非对象 tool_call 参数归一 `{}`；所有 agent 带 `context_window_override`（默认 128000）+ `context_strategy:None`（v0.8.1+）
 - v0.8.2 交互约定：工具/状态行前先 flush pending markdown；`/cost` 只展示真实计数器；手动 `/checkpoint` 不触发提取；doom-loop action-streak 排除 bash/编辑（细节在 `lib/AGENTS.md`）
+- v0.9.0 W0/W1/W2（进行中）：用户 skill 放在 `./.par/skills/<id>/skill.md` 或 `~/.par/skills/`；只有 Manual trigger 会被注册为 `/<id>`；SDK 不读 `body_path`，par-code 自己读正文；`/distill` 生成提案、确认后原子写盘，`--force` 先备份（细节在 `lib/AGENTS.md`）
 - bash approval 三类：`ask` / `auto_project` / `always`；goal 活跃时 `ask` 自动升级 `auto_project`；持久化在 `.par/approvals.json`
 - PAR SDK 依赖 ≥ 0.12.0-beta.20261023（v0.7.5+）；tag 固定 6 处：`dune-project` 地板 + 5 个安装点；linenoise ≥ 1.3 为 bundled-C 依赖（UTF-8 REPL 输入）
 - 缩进：OCaml 2 空格、dune 1 空格（`.editorconfig`）
