@@ -72,21 +72,21 @@ let test_validate () =
   Alcotest.(check bool) "valid" true
     (match Par_code_distill.validate_proposal ~existing:[] ~force:false p with
      | Ok () -> true | Error _ -> false);
-  Alcotest.(check bool) "existing without force" false
+  Alcotest.(check bool) "existing without force" true
     (match Par_code_distill.validate_proposal ~existing:["demo"] ~force:false p with
      | Ok () -> false | Error _ -> true);
   Alcotest.(check bool) "existing with force" true
     (match Par_code_distill.validate_proposal ~existing:["demo"] ~force:true p with
      | Ok () -> true | Error _ -> false);
-  Alcotest.(check bool) "reserved id" false
+  Alcotest.(check bool) "reserved id" true
     (match Par_code_distill.validate_proposal ~existing:[]
              ~force:false (proposal ~id:"skills" ()) with
      | Ok () -> false | Error _ -> true);
-  Alcotest.(check bool) "empty description" false
+  Alcotest.(check bool) "empty description" true
     (match Par_code_distill.validate_proposal ~existing:[]
              ~force:false (proposal ~description:"" ()) with
      | Ok () -> false | Error _ -> true);
-  Alcotest.(check bool) "oversized body" false
+  Alcotest.(check bool) "oversized body" true
     (match Par_code_distill.validate_proposal ~existing:[]
              ~force:false (proposal ~body:(String.make (64 * 1024 + 1) 'x') ()) with
      | Ok () -> false | Error _ -> true)
