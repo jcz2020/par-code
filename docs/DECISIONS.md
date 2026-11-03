@@ -10,7 +10,9 @@
 
 **原因**: 这些 P2 单条不致命，但会让用户误判 agent 在死循环、把正常的工具调用看成坏掉的指标、或在保存 checkpoint 时意外等待一次提取。action-streak 的误报最危险——它会在普通“读-改-跑”工作流里触发 Nudge/Force_judge，甚至 Abort。表格多空行和流式粘连则直接影响可读性。
 
-**影响范围**: `lib/par_code_doom_loop.ml`、`lib/par_code_ui_markdown.ml|.mli`、`lib/par_code_ui.ml`、`lib/par_code_repl_io.ml`、`lib/par_code_repl.ml`、`lib/par_code_checkpoint.ml|.mli`、`lib/par_code_max_mode.ml`、`lib/par_code_session.ml`、`test/test_par_code_doom_loop.ml`、`test/test_par_code_ui.ml`、`test/test_par_code_repl.ml`、`test/test_par_code_session.ml`。
+**影响范围**: `lib/par_code_doom_loop.ml`、`lib/par_code_ui_markdown.ml|.mli`、`lib/par_code_ui.ml`、`lib/par_code_repl_io.ml`、`lib/par_code_repl.ml`、`lib/par_code_checkpoint.ml|.mli`、`lib/par_code_max_mode.ml`、`lib/par_code_session.ml`、`test/test_par_code_doom_loop.ml`、`test/test_par_code_ui.ml`、`test/test_par_code_repl.ml`、`test/test_par_code_session.ml`、`dune-project`、`test/test_par_code.ml`、`par_code.opam`、README/CHANGES/STRATEGY/AGENTS。
+
+**发布**: 版本号 `0.8.2`（`dune-project` + 版本断言 + 重新生成的 `par_code.opam`），tag `v0.8.2` 发布；三个平台产物由 release workflow 构建。
 
 **回退方式**: 回退本提交即可；无 schema、config 或 CLI 变更。`/cost` 会重新显示 SDK 的原始指标列表（含恒零项）。
 

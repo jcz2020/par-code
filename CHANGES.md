@@ -1,5 +1,47 @@
 # CHANGES
 
+## v0.8.2 — P2 cleanup from the live walkthrough
+
+> **Status**: Released 2026-11-03.
+>
+> **Release note**: the v0.8.0 walkthrough left seven P2 findings. Six were
+> interaction or visibility defects that made normal work look stuck; they are
+> fixed here. The seventh — bash rejecting `$((...))` — is an upstream PAR
+> `Bash_blacklist` false positive and remains documented as a known limitation.
+
+### Fixed — interaction
+
+- **Doom-loop no longer counts routine bash or edit sequences.** `bash` and
+  `edit`/`write`/`apply_patch` have their own retry/repeat detectors; counting
+  them in the action-streak signal made four ordinary bash calls or four
+  distinct file edits look like a loop. The streak now covers the remaining
+  non-info tools (e.g. `delegate`).
+- **Streamed text no longer glues to tool lines.** A pending markdown line is
+  flushed before any tool/status line, and `Tool_call_start` ends its own line
+  — `... tests now.Now running ...` becomes two lines.
+- **Tables are single-spaced.** `par plan list`, `/help`, `/cost` and
+  `/session` rows no longer carry an embedded newline on top of the renderer's
+  separator.
+
+### Fixed — visibility and sessions
+
+- **`/cost` reports real operational numbers.** Tool invocations are recorded
+  from the engine's `Tool_invoked` event, `tools_visible` is computed from the
+  main agent's unique tools, and SDK counters that are never incremented in
+  0.12-beta are no longer shown as dead zeros.
+- **Manual `/checkpoint` no longer triggers memory extraction.** Saving a
+  checkpoint is not a request to run an extra LLM call; periodic checkpoints
+  still refresh memory.
+- **Zero-row migration notices are gone.** `session list/fork/show` only print
+  `[migration] ...` when rows were actually backfilled.
+
+### Known limitation
+
+- **bash `$((...))` is still rejected.** PAR 0.12-beta's `Bash_blacklist`
+  `dollar-paren` regex (`\$\(.*\)`) matches arithmetic expansion as well as
+  command substitution. par-code does not patch PAR; the finding is recorded
+  in `docs/DECISIONS.md` as upstream feedback.
+
 ## v0.8.1 — Hardening from a live walkthrough
 
 > **Status**: Released 2026-11-03.

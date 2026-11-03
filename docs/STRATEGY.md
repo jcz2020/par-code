@@ -304,6 +304,12 @@ table) and is operationalized per-version in `.sisyphus/plans/v<ver>.md`
   `embedding_model`, and failed edits no longer count as doom-loop repeats.
   Also one plan file per submission, fork ids resolve, UTF-8-safe CLI output,
   and `--db-uri` honored.
+- **v0.8.2 ✅ shipped 2026-11-03** — P2 cleanup from the v0.8.0 live audit:
+  action-streak exempts bash/edit (their own signals remain), pending markdown
+  is flushed before tool lines, `/cost` records `Tool_invoked` and computes
+  `tools_visible` (dead SDK counters dropped), manual `/checkpoint` skips
+  extraction, zero-row migration notices are suppressed, and tables are
+  single-spaced. `$((...))` remains an upstream `Bash_blacklist` false positive.
 - v0.9.0+ — self-improvement, compose mode, ecosystem, code intelligence,
   safety, polish → v1.0
 
@@ -364,6 +370,7 @@ per global rules) lives in `docs/DECISIONS.md`. Strategic-level entries:
 | 2026-11-01 | v0.7.5: SDK floor moves to the `0.12.0-beta` release tag; `apply_patch` adopted with prompt-level routing against `edit` and proven by a live two-file dogfood; doom-loop editor classification extended so patch-based loops are still caught | Active |
 | 2026-11-02 | v0.8.0 shipped — max mode: read-only candidates registered as their own agent (read-only by construction, not by prompt), dedicated selector agent, answer path reuses the existing turn bookkeeping via a synthesized invoke result, execution stays single-writer, max mode skipped in goal chains and plan mode. REPL support layer split into `par_code_repl_io` to stay under the file-size limit. Post-review fix: the adopted winner transcript is rewritten to the user's own message so the candidate wrapper never reaches the saved session | Active |
 | 2026-11-03 | v0.8.1 hardening: sanitize provider payloads (drop orphan tool results, normalize non-object tool-call arguments), configure a real context window and let the SDK summarize instead of truncating, gate embeddings on `embedding_model`, ignore failed edits in doom-loop, and fix plan dedupe / fork ids / UTF-8 truncation / `--db-uri` | Active |
+| 2026-11-03 | v0.8.2 P2 cleanup: action-streak exempts bash/edit, streaming text is separated from tool lines, `/cost` counts tool invocations and computes `tools_visible` (SDK event counters are never incremented in 0.12-beta), manual `/checkpoint` skips extraction, zero-row migration notices are suppressed, and table rows are single-spaced | Active |
 
 ## 10. Revision Protocol
 
