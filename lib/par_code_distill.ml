@@ -102,7 +102,7 @@ let one_line s =
 
 let render_skill_file (p : proposal) =
   Printf.sprintf
-    "---\nschema_version: 1\nid: %s\nname: %s\ndescription: %s\ntrigger: manual\ntool_filter: all\n---\n\n%s\n"
+    "---\nschema_version: 1\nid: %s\nname: %s\ndescription: %s\ntrigger: manual\ntool_filter: All\n---\n\n%s\n"
     p.id (one_line p.name) (one_line p.description) p.body
 
 let rec mkdir_p dir =
@@ -127,7 +127,8 @@ let write_skill ~base_dir ~(force : bool) (p : proposal) :
   ((string * string option), string) result =
   if not (valid_id p.id) then Error "invalid skill id"
   else
-    let dir = Filename.concat base_dir p.id in
+    try begin
+      let dir = Filename.concat base_dir p.id in
     let path = Filename.concat dir "skill.md" in
     if Sys.file_exists path && not force then
       Error (Printf.sprintf "skill %s already exists at %s (use --force)" p.id path)
@@ -161,7 +162,12 @@ let write_skill ~base_dir ~(force : bool) (p : proposal) :
         in
         Sys.rename tmp path;
         Ok (path, backup)
-    end
+      end
+    end with
+    | Sys_error msg -> Error msg
+    | Unix.Unix_error (e, fn, arg) ->
+      Error (Printf.sprintf "%s: %s%s" fn (Unix.error_message e)
+               (if arg = "" then "" else " (" ^ arg ^ ")"))
 
 let build_context ~(rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option)
     ~(conv : Types.conversation option) (request : string) =
@@ -227,6 +233,9 @@ let run ~(rt : Runtime.runtime) ~(ui : Par_code_ui.backend)
               if user then Skill_loader.default_user_skills_dir ()
               else Skill_loader.default_project_skills_dir ()
             in
+            if user then
+              Par_code_ui.render_notice ui
+                "Note: a project skill with the same id shadows a user skill.";
             let path = Filename.concat (Filename.concat base_dir proposal.id) "skill.md" in
             Par_code_ui.render_notice ui "Proposed skill:";
             Par_code_ui.render_notice ui
@@ -236,8 +245,11 @@ let run ~(rt : Runtime.runtime) ~(ui : Par_code_ui.backend)
             Par_code_ui.render_notice ui
               (Printf.sprintf "  path: %s" path);
             Par_code_ui.render_notice ui "  body:";
-            Par_code_ui.render_notice ui
-              (last_n proposal.body 2000);
+            let preview =
+              if String.length proposal.body <= 2000 then proposal.body
+              else String.sub proposal.body 0 2000 ^ "\n[...]"
+            in
+            Par_code_ui.render_notice ui preview;
             match
               Par_code_ui.prompt_confirm ~backend:ui
                 (Printf.sprintf "Write this skill? [y/N] ")

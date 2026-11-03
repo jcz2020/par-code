@@ -20,7 +20,9 @@ let with_temp_base f =
   let base = Filename.temp_file "test_distill" "" in
   Sys.remove base;
   Unix.mkdir base 0o700;
-  Fun.protect ~finally:(fun () -> rm_rf base) (fun () -> f base)
+  let skills = Filename.concat base "skills" in
+  Unix.mkdir skills 0o700;
+  Fun.protect ~finally:(fun () -> rm_rf base) (fun () -> f skills)
 
 let proposal ?(id = "demo") ?(name = "Demo") ?(description = "demo skill")
     ?(body = "step 1\nstep 2") () : Par_code_distill.proposal =
