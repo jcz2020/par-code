@@ -1,6 +1,6 @@
 # lib/ — the `par_code` library
 
-**Score 15** — 52 files (29 `.ml`, 22 `.mli`, `dune`), 9.4k LOC. Earned its file: the entire product core; every other directory consumes it.
+**Score 15** — 52 files (29 `.ml`, 22 `.mli`, `dune`), 9.5k LOC. Earned its file: the entire product core; every other directory consumes it.
 
 Flat directory — no subdirs; the module set IS the architecture. All modules are top-level `Par_code_*` (`(wrapped false)` in `dune`).
 
@@ -9,19 +9,23 @@ Flat directory — no subdirs; the module set IS the architecture. All modules a
 | Task | Modules (LOC) |
 |---|---|
 | Runtime bootstrap: tools, agents, middleware, bash approval | `par_code_setup.ml` (680) |
-| REPL loop, slash commands, goal-chain driver | `par_code_repl.ml` (847) + `par_code_repl_io.ml` (302) |
-| Rendering: image algebra, ANSI backend, `render_*` | `par_code_ui.ml` (754) + `par_code_ui_markdown.ml` (318) |
+| REPL loop, slash commands, goal-chain driver | `par_code_repl.ml` (868) + `par_code_repl_io.ml` (333) |
+| Rendering: image algebra, ANSI backend, `render_*` | `par_code_ui.ml` (776) + `par_code_ui_markdown.ml` (320) |
 | Config (38 fields) + wizard | `par_code_config.ml` (699) + `par_code_config_wizard.ml` (218) |
 | Memory: Sqlite_memory proxy, FTS5/vec0, export | `par_code_memory.ml` (609) + `par_code_memory_tools.ml` (282) |
 | Plan mode: six-section gate, synthesizer fallback | `par_code_plan_tools.ml` (574) |
-| Long-session continuity | `par_code_checkpoint.ml` (447) |
-| Goals: lifecycle / judge / chain / doom-loop / progress | `par_code_goal.ml` (134), `par_code_judge.ml`, `par_code_chain.ml` (300), `par_code_doom_loop.ml` (271), `par_code_progress.ml` |
-| Best-of-N: candidates + selector | `par_code_max_mode.ml` + `par_code_selector.ml` |
-| Subagents / sessions / approvals / upgrade | `par_code_delegate.ml`, `par_code_session.ml`, `par_code_approvals.ml`, `par_code_upgrade.ml` (350) |
+| Long-session continuity | `par_code_checkpoint.ml` (449) |
+| Goals: lifecycle / judge / chain / doom-loop / progress | `par_code_goal.ml` (134), `par_code_judge.ml` (128), `par_code_chain.ml` (300), `par_code_doom_loop.ml` (278), `par_code_progress.ml` (46) |
+| Best-of-N: candidates + selector | `par_code_max_mode.ml` (168) + `par_code_selector.ml` (133) |
+| Subagents / sessions / approvals / upgrade | `par_code_delegate.ml` (148), `par_code_session.ml` (210), `par_code_approvals.ml` (136), `par_code_upgrade.ml` (350) |
 
 ## CONVENTIONS
 
-- 800-line file limit — extract when exceeded. `repl` (847) is the known violation; `repl_io` and `config_wizard` exist because of this rule.
+- 800-line file limit — extract when exceeded. `repl` (868) is the known violation; `repl_io` and `config_wizard` exist because of this rule.
+- v0.8.2 工具行边界：`Par_code_ui_markdown.has_pending` + `push "\n"` 在渲染工具/状态行前刷出半行（保留 code-block context）；`Tool_call_start` 独占一行；表格/help/cost/session 用无内嵌换行的 image，`render_line` 补一个行尾换行。
+- v0.8.2 `/cost`：事件回调对 `Tool_invoked` 调 `Runtime.record_tool_invocation`（每次调用一次，bash 不重复计）；max-mode 候选各自记录，胜者事件重放走不带 `~rt` 的回调；`tools_visible` 由主 agent 去重工具数计算；SDK 0.12-beta 的 `events_*` / budget 计数器不展示。
+- 手动 `/checkpoint` 传 `~extract:false`；周期 `maybe_checkpoint` 仍提取记忆（v0.8.2+）。
+- doom-loop action-streak 排除 bash 与编辑类工具（各有 bash_retry / edit_repeat）；其余非 info 工具仍计数（v0.8.2+）。
 - Pure-core extraction for testability: decision logic lives in side-effect-free modules (`progress`, `chain`, `doom_loop`, `json_extract`, `plan_tools.gate_response`).
 - Errors are polymorphic variants RETURNED across module boundaries, never raised: ``[> `Db_error of string]``, ``[> `Plan_error of string]``, upgrade's ``[> `Http of string | `Offline]``.
 - Atomic writes for ALL persisted state: temp file + `Sys.rename` (config, approvals, goal, doom-loop incidents). This fixed a ~10% config-save flake.
@@ -38,7 +42,9 @@ Flat directory — no subdirs; the module set IS the architecture. All modules a
 - NEVER git write ops from agent code. `git_tools` exposes only `git status --porcelain=v1 -b` and `git log --format=%H|%s|%ai` — that is the planner's whole allowlist.
 - Parallel agents (explore subagent, max-mode candidates) share ONE read-only tool list by construction — no candidate races another on the workspace.
 - Approval classification fails CLOSED: `..` or `:` in a path, or any unmapped error → `Unknown` → human prompt; delete-class commands (`rm/mv/dd/shred/truncate`) are always `External_path`.
-- Do NOT await the checkpoint fiber — fire-and-forget (`par_code_checkpoint.ml:443`).
+- Do NOT await the checkpoint fiber — fire-and-forget (`par_code_checkpoint.ml:428`).
+- NEVER render a tool/status line while markdown has a pending half-line — route through `render_event_line` / `flush_pending_line` first.
+- NEVER call `Runtime.record_tool_invocation` from the max-mode winner replay callback — replay is render/doom only, or `/cost` double-counts.
 - Config key `doom_loop_threshold` is DEPRECATED → `doom_bash_retries` / `doom_edit_matches` / `doom_action_streak`.
 - `lib/par_code_version.ml` is GENERATED by the `dune` rule from `dune-project (version …)` — gitignored, never hand-edit.
-- Embedded agent prompt (`par_code_config.ml:82-84`): NEVER amend git config, NEVER commit unless the user explicitly asks, never bypass safety checks, never retry failing commands in a loop.
+- Embedded agent prompt (`par_code_config.ml:65,79,82`): NEVER amend git config, NEVER commit unless the user explicitly asks, never bypass safety checks, never retry failing commands in a loop.

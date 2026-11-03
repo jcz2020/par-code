@@ -1,14 +1,15 @@
 # test/ — Alcotest unit suite
 
-**Score 8** — 42 files, 7.6k LOC (26 top-level + the `integration/` subtree, which has its own AGENTS.md). Earned its file: distinct domain (unit-harness conventions).
+**Score 8** — 42 files, 7.2k LOC (25 Alcotest exe + `test/dune`, plus the `integration/` subtree, which has its own AGENTS.md). Earned its file: distinct domain (unit-harness conventions).
 
-One executable per lib module: `test_par_code_<feature>.ml` mirrors `lib/par_code_<feature>.ml`, plus `test_par_code.ml` (cross-cutting: version, config paths, agent id, JSON round-trip), `test_par_code_payload_dump.ml`, `test_par_code_repl_plan_mode.ml`, `test_par_code_ui_prompt.ml`. ~464 cases / ~742 checks.
+One executable per lib module: `test_par_code_<feature>.ml` mirrors `lib/par_code_<feature>.ml`, plus `test_par_code.ml` (cross-cutting: version, config paths, agent id, JSON round-trip), `test_par_code_payload_dump.ml`, `test_par_code_repl_plan_mode.ml`, `test_par_code_ui_prompt.ml`. ~460 cases.
 
 ## WHERE TO LOOK
 
 | Task | File |
 |---|---|
-| Release bump: hardcoded version assertion | `test_par_code.ml:2` — asserts `Par_code_version.version = "0.8.1"` |
+| Release bump: hardcoded version assertion | `test_par_code.ml:2` — asserts `Par_code_version.version = "0.8.2"` |
+| v0.8.2 P2 regressions | `test_par_code_doom_loop.ml` (action-streak exemptions), `test_par_code_ui.ml` (table/tool-boundary), `test_par_code_repl.ml` (metric helpers), `test_par_code_session.ml` (migration stderr) |
 | Largest suites | `test_par_code_config.ml` (699 LOC, 92 checks), `test_par_code_plan_tools.ml` (579) |
 | Slowest (real SQLite + FTS5/vec0 in temp dirs) | `test_par_code_memory.ml` (500), `test_par_code_checkpoint.ml` (455) |
 | Mock runtime (no LLM) | `test_par_code_setup.ml` — `Eio_mock.Backend.run`, `:memory:` persistence, consumes the production `Par_code_setup.planner_tool_names` |
@@ -22,6 +23,7 @@ One executable per lib module: `test_par_code_<feature>.ml` mirrors `lib/par_cod
 - Assertion style: fully-qualified `Alcotest.(check …)` in 24 files; `test_par_code_approvals.ml` alone uses bare `test_case`.
 - `test_par_code_approvals.ml` and `test_par_code_session.ml` are cwd-sensitive (`Par.Workspace.of_cwd`, `git rev-parse`) — run from the project root.
 - No LLM, no network: failure paths use the dead endpoint `http://127.0.0.1:9` (instant connection refused).
+- UI exact-output tests use a temp-file backend (`with_backend_output`, `NO_COLOR=1`) and assert the flattened string; no tty.
 
 ## ANTI-PATTERNS
 
