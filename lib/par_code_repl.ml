@@ -855,6 +855,18 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
             end else
               Par_code_ui.render_warning ui "usage: /skills | /skills reload";
             loop ()
+          | "/distill" ->
+            let rest =
+              if String.length trimmed > 8 then
+                String.trim (String.sub trimmed 8 (String.length trimmed - 8))
+              else ""
+            in
+            if !Par_code_mode.current = Par_code_mode.Plan then
+              Par_code_ui.render_warning ui
+                "/distill writes a skill file; switch to build mode first (/build)"
+            else
+              Par_code_distill.run ~rt ~ui ~mem_db ~conv:!conv ~args:rest;
+            loop ()
           | cmd when String.length cmd > 1 ->
             let id = String.sub cmd 1 (String.length cmd - 1) in
             (match Par_code_skills.find_manual id with

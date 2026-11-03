@@ -373,6 +373,23 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
          (match Runtime.register_agent rt extractor with
           | Error e -> ui_render_warning (Printf.sprintf "Warning: extractor agent registration failed: %s" (error_to_string e))
           | Ok () -> ()));
+    (* Register the skill-distiller agent (v0.9.0 W2). Tools=[] — pure generation. *)
+    (match Runtime.make_agent
+       ~id:Par_code_distill.distiller_agent_id
+       ~context_window_override:context_window
+       ~context_strategy:None
+       ~system_prompt:(Types.stable_prompt Par_code_distill.distiller_system_prompt)
+       ~model:model_cfg
+       ~tools:[]
+       ~middleware:[think_tag_strip_middleware]
+       ~max_iterations:1
+       () with
+     | Error e ->
+       ui_render_warning (Printf.sprintf "Warning: distiller agent not registered: %s" (error_to_string e))
+     | Ok d ->
+       (match Runtime.register_agent rt d with
+        | Error e -> ui_render_warning (Printf.sprintf "Warning: distiller agent registration failed: %s" (error_to_string e))
+        | Ok () -> ()));
     (* Register the plan-synthesizer agent (v0.7.2 W2). Tools=[] —
        invoke_generate rejects tool-carrying agents, so the synthesis fallback
        needs a dedicated no-tool agent with a plan-shape system prompt. *)
