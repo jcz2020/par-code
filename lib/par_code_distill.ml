@@ -279,5 +279,5 @@ let run ~(rt : Runtime.runtime) ~(ui : Par_code_ui.backend)
                  Par_code_ui.render_notice ui
                    (Printf.sprintf "Run /%s <args>." proposal.id))
             | _ ->
-              Par_code_ui.render_notice ui "[distill] cancelled")
+              Par_code_ui.render_notice ui "[distill] cancelled"))
   end
