@@ -157,7 +157,7 @@ let read_body (e : entry) : (string, string) result =
     let content = really_input_string ic len in
     close_in ic;
     let lines = String.split_on_char '\n' content in
-    let rec drop_frontmatter = function
+    let drop_frontmatter = function
       | [] -> []
       | line :: rest when String.trim line = "---" ->
         let rec after_open = function
