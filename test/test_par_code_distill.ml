@@ -99,14 +99,18 @@ let test_write_and_read () =
     | Ok (path, backup) ->
       Alcotest.(check bool) "no backup" true (backup = None);
       Alcotest.(check bool) "file exists" true (Sys.file_exists path);
-      (match Skill_loader.parse_skill_file ~path with
-       | Error msg -> Alcotest.fail ("generated skill does not parse: " ^ msg)
-       | Ok d ->
-         Alcotest.(check string) "id" "demo" d.id;
-         Alcotest.(check bool) "manual trigger" true (d.trigger = Par.Types.Manual));
-      let e = { Par_code_skills.descriptor = (match Skill_loader.parse_skill_file ~path with
-          | Ok d -> d | Error _ -> assert false);
-                source = Par_code_skills.Project } in
+      let user = Filename.concat (Filename.dirname base) "user" in
+      (try Unix.mkdir user 0o700 with
+       | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+      let entries, errs =
+        Par_code_skills.scan ~project_dir:base ~user_dir:user ()
+      in
+      Alcotest.(check int) "one entry" 1 (List.length entries);
+      Alcotest.(check int) "no parse errors" 0 (List.length errs);
+      let e = List.hd entries in
+      Alcotest.(check string) "id" "demo" e.Par_code_skills.descriptor.id;
+      Alcotest.(check bool) "manual trigger" true
+        (e.Par_code_skills.descriptor.trigger = Par.Types.Manual);
       (match Par_code_skills.read_body e with
        | Ok body -> Alcotest.(check string) "body round-trip" "step 1\nstep 2" body
        | Error msg -> Alcotest.fail ("read_body failed: " ^ msg)))
