@@ -123,7 +123,8 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
   let turn_token_ref : Types.cancellation_token option ref = ref None in
   let in_invoke = ref false in
   let cancel_pending = ref false in
-  let on_tool_event = make_tool_event_callback ui ~doom:(Some doom_detector)
+  let make_tool_event ?rt () =
+    make_tool_event_callback ui ?rt ~doom:(Some doom_detector)
       ~goal_active:(fun () ->
         match !Par_code_goal.current with
         | Some g when g.Par_code_goal.status = Par_code_goal.Active -> true
@@ -142,7 +143,12 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                (Types.Guard_cancelled ("doom-loop: " ^ msg))
            | None -> ())
         | Par_code_doom_loop.Force_judge _ -> doom_force_judge := true
-        | _ -> ()) () in
+        | _ -> ()) ()
+  in
+  let on_tool_event = make_tool_event ~rt () in
+  (* Replaying the winning candidate's events must render them (and feed the
+     doom detector) without recording their tool invocations a second time. *)
+  let replay_tool_event = make_tool_event () in
   (* W5: SIGINT ladder — 1st Ctrl+C during an invoke cancels the turn
      (goal pauses on return), 2nd force-exits (Signal_ignore closes the
      reentrant save window first, Oracle R4). At the prompt / outside a
@@ -377,7 +383,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                             else 0
                           in
                           let winner = List.nth cands idx in
-                          List.iter on_tool_event winner.Par_code_max_mode.events;
+                          List.iter replay_tool_event winner.Par_code_max_mode.events;
                           let failed =
                             List.length outcome.Par_code_max_mode.failures
                           in
@@ -667,6 +673,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                 (try
                    Par_code_checkpoint.run_checkpoint ~rt t
                      ~session_id:sid ~project_id:pid c ~turn_number:!turn_count
+                     ~extract:false
                  with exn ->
                    Par_code_ui.render_error ui (Printf.sprintf "[checkpoint failed: %s]" (Printexc.to_string exn)))
               | _ ->
@@ -686,7 +693,21 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
          | "/quit" | "/exit" ->
              exit_normally ()
           | "/cost" ->
-            let metrics = Runtime.metrics_snapshot rt in
+            let metrics =
+              let agents =
+                Runtime.list_agents rt
+                |> List.map (fun (a : Types.agent_config) ->
+                     (a.id,
+                      List.map (fun (t : Types.tool_descriptor) -> t.name)
+                        a.tools))
+              in
+              let visible =
+                Par_code_repl_io.tools_visible_of_agents
+                  ~agent_id:Par_code_setup.agent_id agents
+              in
+              Par_code_repl_io.operational_metrics
+                ~sdk:(Runtime.metrics_snapshot rt) ~tools_visible:visible
+            in
             let context_tokens = match !conv with
               | Some c -> Par_code_context.token_estimate c
               | None -> 0
@@ -819,7 +840,7 @@ let run_single_shot (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) 
   (match Runtime.invoke rt
      ~agent_id:Par_code_setup.agent_id
      ~message
-     ~on_tool_event:(make_tool_event_callback ui ())
+     ~on_tool_event:(make_tool_event_callback ui ~rt ())
      ~on_chunk:(Some stream_cb)
      ~enable_handoff:true
      ?system_prompt_appendix:memory_appendix

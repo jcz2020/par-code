@@ -46,8 +46,12 @@ let migrate_legacy_scopes db =
     ignore (Sqlite3.step stmt);
     let migrated = Sqlite3.changes db in
     ignore (Sqlite3.finalize stmt);
-    Printf.eprintf "[migration] %d of %d legacy conversations backfilled with project scope\n"
-      migrated count
+    (* Only report an actual migration. Repeating "0 of N" on every
+       session-list/fork/show call is pure noise — those rows have no
+       checkpoint to backfill from and will never migrate. *)
+    if migrated > 0 then
+      Printf.eprintf "[migration] %d of %d legacy conversations backfilled with project scope\n"
+        migrated count
   end
 
 let list_sessions ~limit : (session_info list, string) result =

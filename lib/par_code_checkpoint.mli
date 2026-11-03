@@ -48,6 +48,7 @@ val format_checkpoints : checkpoint_entry list -> string
     omitted when the corresponding list is empty. *)
 
 val run_checkpoint :
+  ?extract:bool ->
   rt:Par.Runtime.runtime ->
   Par_code_memory.t ->
   session_id:string -> project_id:string ->
@@ -57,6 +58,8 @@ val run_checkpoint :
     REPL command (user wants verification, willing to wait) and called
     internally by [maybe_checkpoint]'s async dispatcher.
     Preserves v0.4.0's [~save:false ~update_current:false] isolation.
+    [extract] defaults to true for the periodic path; the manual /checkpoint
+    command passes false so saving does not also run memory extraction.
     Non-fatal on error. *)
 
 val maybe_checkpoint :

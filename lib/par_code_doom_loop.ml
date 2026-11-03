@@ -201,7 +201,14 @@ let record (t : t) (evt : tool_event) : action =
   let action_action =
     let kind = classify_tool ~tool_name:evt.tool_name ~args_json:evt.args_json
       ~is_bash:(evt.tool_name = "bash") in
-    if kind = "info" then begin
+    (* bash and the edit tools already have dedicated signals (bash_retry /
+       edit_repeat). Counting them here made four routine bash calls or four
+       distinct file edits look like a loop, so they reset the streak. *)
+    if evt.tool_name = "bash" || is_edit_tool evt.tool_name then begin
+      t.action_kind <- "";
+      t.action_count <- 0;
+      Continue
+    end else if kind = "info" then begin
       t.action_kind <- kind;
       t.action_count <- 0;
       Continue

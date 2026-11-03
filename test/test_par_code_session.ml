@@ -1,5 +1,24 @@
 open Par_code_session
 
+let with_captured_stderr f =
+  let path = Filename.temp_file "test_stderr" ".log" in
+  let fd = Unix.openfile path [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+  let saved = Unix.dup Unix.stderr in
+  Unix.dup2 fd Unix.stderr;
+  Unix.close fd;
+  Fun.protect
+    ~finally:(fun () ->
+      flush stderr;
+      Unix.dup2 saved Unix.stderr;
+      Unix.close saved)
+    f;
+  let ic = open_in_bin path in
+  let n = in_channel_length ic in
+  let s = really_input_string ic n in
+  close_in ic;
+  Sys.remove path;
+  s
+
 let test_format_age_seconds () =
   let now = Unix.gettimeofday () in
   Alcotest.(check string) "30 seconds" "30s ago" (format_age (now -. 30.0))
@@ -89,7 +108,8 @@ let test_migrate_no_checkpoints () =
   ignore (Sqlite3.exec db "CREATE TABLE checkpoints (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, project_id TEXT NOT NULL, turn_number INTEGER NOT NULL, checkpoint_json TEXT NOT NULL, created_at REAL NOT NULL)");
   ignore (Sqlite3.exec db
     "INSERT INTO conversations VALUES ('sess-orphan', '')");
-  Par_code_session.migrate_legacy_scopes db;
+  let stderr = with_captured_stderr (fun () ->
+    Par_code_session.migrate_legacy_scopes db) in
   let get_scope sid =
     let stmt = Sqlite3.prepare db "SELECT scope FROM conversations WHERE session_id = ?" in
     ignore (Sqlite3.bind_text stmt 1 sid);
@@ -100,6 +120,8 @@ let test_migrate_no_checkpoints () =
   in
   Alcotest.(check string) "orphan left empty"
     "" (get_scope "sess-orphan");
+  Alcotest.(check string) "no migration noise when nothing migrated"
+    "" stderr;
   ignore (Sqlite3.db_close db);
   Sys.remove path
 
