@@ -208,6 +208,7 @@ let run ~(rt : Runtime.runtime) ~(ui : Par_code_ui.backend)
     Par_code_ui.render_notice ui
       "usage: /distill <what to turn into a skill> [--user] [--force]"
   else begin
+    Par_code_ui.render_notice ui "[distilling...]";
     let message = build_context ~rt ~mem_db ~conv request in
     match
       Runtime.invoke_generate rt ~agent_id:distiller_agent_id
