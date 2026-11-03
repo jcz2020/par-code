@@ -80,6 +80,38 @@ let test_format_output_metrics_list () =
   Alcotest.(check bool) "shows metric b" true (string_contains output "b: 2");
   Alcotest.(check bool) "shows metric c" true (string_contains output "c: 3")
 
+let test_tools_visible_counts_unique () =
+  let agents =
+    [ ("main", [ "read"; "bash"; "read" ]); ("other", [ "write" ]) ] in
+  Alcotest.(check int) "unique tools of main" 2
+    (tools_visible_of_agents ~agent_id:"main" agents);
+  Alcotest.(check int) "unknown agent" 0
+    (tools_visible_of_agents ~agent_id:"missing" agents)
+
+let test_operational_metrics_filters_dead_counters () =
+  let sdk =
+    [ ("llm_requests_total", 4)
+    ; ("events_published_total", 0)
+    ; ("events_dropped_total", 0)
+    ; ("task_completed_total", 1)
+    ; ("tool_invocations_total", 7)
+    ; ("tool_schema_tokens_estimate", 0)
+    ; ("tools_visible", 0)
+    ; ("tools_deferred", 0)
+    ]
+  in
+  let m = operational_metrics ~sdk ~tools_visible:12 in
+  Alcotest.(check bool) "keeps llm requests" true
+    (List.mem ("llm_requests_total", 4) m);
+  Alcotest.(check bool) "keeps tool invocations" true
+    (List.mem ("tool_invocations_total", 7) m);
+  Alcotest.(check bool) "adds computed tools_visible" true
+    (List.mem ("tools_visible", 12) m);
+  Alcotest.(check bool) "drops dead event counter" false
+    (List.mem_assoc "events_published_total" m);
+  Alcotest.(check bool) "drops budget-only counter" false
+    (List.mem_assoc "tools_deferred" m)
+
 let () =
   Alcotest.run "par_repl"
     [ "cost_state", [
@@ -92,5 +124,9 @@ let () =
         Alcotest.test_case "output_zero"         `Quick test_format_output_zero;
         Alcotest.test_case "output_with_data"    `Quick test_format_output_with_data;
         Alcotest.test_case "output_metrics_list" `Quick test_format_output_metrics_list;
+      ];
+      "operational_metrics", [
+        Alcotest.test_case "tools_visible_unique" `Quick test_tools_visible_counts_unique;
+        Alcotest.test_case "filters_dead_counters" `Quick test_operational_metrics_filters_dead_counters;
       ];
     ]

@@ -34,10 +34,23 @@ let make_stream_cb ?(cancelled = fun () -> false) ui =
 
 let make_tool_event_callback (ui : Par_code_ui.backend) ?(doom = None)
     ?(on_doom_action : Par_code_doom_loop.action -> unit = fun _ -> ())
-    ?(goal_active : unit -> bool = fun () -> false) () =
+    ?(goal_active : unit -> bool = fun () -> false)
+    ?rt () =
   let start_times : (string, float) Hashtbl.t = Hashtbl.create 8 in
   let tool_args_buf : (string, string) Hashtbl.t = Hashtbl.create 8 in
   fun (evt : Types.event) ->
+    (* PAR 0.12-beta defines Metrics.incr_tool_invocations but never calls it,
+       so /cost reported 0 despite live tool use. Record from the event stream;
+       retire when the runtime records invocations itself. *)
+    (match rt with
+     | Some rt ->
+       (* [Tool_invoked] is the engine's per-call event and also covers bash
+          (which separately emits Bash_invoked), so counting it alone avoids
+          double-counting. *)
+       (match evt with
+        | Types.Tool_invoked _ -> Runtime.record_tool_invocation rt
+        | _ -> ())
+     | None -> ());
     (match evt, doom with
      | Types.Bash_invoked { task_id; argv; _ }, Some _ ->
        Hashtbl.replace tool_args_buf (Types.Task_id.to_string task_id)
@@ -212,6 +225,24 @@ let format_cost_output ~cost ~context_tokens ~turn_count ~metrics =
     Buffer.add_string b (Printf.sprintf "  %s: %d\n" k v)) metrics;
   Buffer.add_string b "\nNote: excludes async checkpoint/extraction calls.\n";
   Buffer.contents b
+
+(* /cost operational metrics. The SDK's event counters (events_published_total,
+   events_dropped_total) are never incremented in 0.12-beta, and the schema /
+   budget counters are only populated when a budget is configured. Showing
+   those dead zeros made the whole section look broken, so keep the counters
+   that are real and add the tools visible to the main agent. *)
+let tools_visible_of_agents ~agent_id agents =
+  match List.assoc_opt agent_id agents with
+  | None -> 0
+  | Some names -> List.length (List.sort_uniq String.compare names)
+
+let operational_metrics ~sdk ~tools_visible =
+  let keep =
+    [ "llm_requests_total"; "task_completed_total";
+      "task_failed_total"; "tool_invocations_total" ]
+  in
+  let base = List.filter (fun (k, _) -> List.mem k keep) sdk in
+  base @ [ ("tools_visible", tools_visible) ]
 
 (* --- Payload debug dump (v0.7.3+) ---------------------------------------- *)
 (* When the provider rejects a replayed conversation (HTTP 400 / Invalid_input),

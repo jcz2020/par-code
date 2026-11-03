@@ -101,6 +101,26 @@ let test_info_resets_action_streak () =
   let r = record d (make_evt "delegate") in
   Alcotest.(check bool) "info resets streak" true (r = Continue)
 
+let test_action_streak_ignores_bash () =
+  let d = create ~bash_retries:100 ~edit_matches:100 ~action_streak:2 () in
+  let r = ref Continue in
+  for _ = 1 to 6 do
+    r := record d (make_evt "bash" ~args:(`String "git status")
+                     ~output:(Some "clean"))
+  done;
+  Alcotest.(check bool) "routine bash calls never trip action streak" true
+    (!r = Continue)
+
+let test_action_streak_ignores_edits () =
+  let d = create ~bash_retries:100 ~edit_matches:100 ~action_streak:2 () in
+  let r = ref Continue in
+  for i = 1 to 6 do
+    r := record d
+           (make_evt "edit" ~output:(Some (Printf.sprintf "file %d changed" i)))
+  done;
+  Alcotest.(check bool) "distinct edits never trip action streak" true
+    (!r = Continue)
+
 let test_custom_thresholds () =
   let d = create ~bash_retries:2 ~edit_matches:1 ~action_streak:3 () in
   let _ = record d (make_bash_evt "pytest") in
@@ -177,7 +197,9 @@ let () =
         Alcotest.test_case "failed edits ignored" `Quick test_failed_edits_never_abort ];
       "action_streak",
       [ Alcotest.test_case "4 same-kind nudges" `Quick test_action_streak_nudge;
-        Alcotest.test_case "info resets streak" `Quick test_info_resets_action_streak ];
+        Alcotest.test_case "info resets streak" `Quick test_info_resets_action_streak;
+        Alcotest.test_case "bash is exempt" `Quick test_action_streak_ignores_bash;
+        Alcotest.test_case "edits are exempt" `Quick test_action_streak_ignores_edits ];
       "config_and_state",
       [ Alcotest.test_case "custom thresholds" `Quick test_custom_thresholds;
         Alcotest.test_case "action count tracks" `Quick test_action_count_tracks ];

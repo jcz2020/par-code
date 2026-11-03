@@ -270,6 +270,8 @@ let render_normal_line line =
 (* Push / flush                                                               *)
 (* -------------------------------------------------------------------------- *)
 
+let has_pending (st : state) : bool = st.line_buf <> ""
+
 let push (st : state) (chunk : string) : state * string =
   let buf_content = st.line_buf ^ chunk in
   let buf_len = String.length buf_content in

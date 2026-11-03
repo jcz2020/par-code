@@ -30,6 +30,10 @@ val initial : state
     syntax — incomplete constructs are buffered in [state]. *)
 val push : state -> string -> state * string
 
+(** True when [push] is holding a partial line that has not been emitted yet.
+    Callers use this to flush the line before an out-of-band status line. *)
+val has_pending : state -> bool
+
 (** End of stream. Flush any remaining buffer, closing unclosed
     constructs gracefully (unclosed code block emits remaining content
     with code styling; unclosed inline markers emit literally). *)

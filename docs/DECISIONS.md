@@ -1,5 +1,24 @@
 # Decisions
 
+## [2026-11-03] v0.8.2：清理真机审计的 P2（交互噪声与死指标）
+
+**Tag**: Release
+
+**变更前**: v0.8.0 真机审计留下 7 条 P2：① 连续 4 次正常 bash 调用被 doom-loop 的 action-streak 判成循环；② 流式文本与工具状态行粘连（`now.Now running`），因为 markdown 行缓冲在工具事件前没有刷出；③ `/cost` 的 `tool_invocations_total`、`events_published_total`、`tools_visible` 恒为 0；④ 手动 `/checkpoint` 顺带触发一次记忆提取；⑤ `session list/fork/show` 反复打印 `[migration] 0 of 33 legacy conversations ...`；⑥ `par plan list`、`/help`、`/cost` 的两列表格行间多空行；⑦ bash 拒绝 `$((...))` 算术展开。
+
+**变更后**: action-streak 排除 `bash` 与编辑类工具（它们分别由 bash_retry / edit_repeat 负责），其余非 info 工具的连续计数保持不变；`Par_code_ui_markdown` 新增 `has_pending`，`Par_code_ui` 在渲染任何工具/状态行前先刷出 pending markdown 行，`Tool_call_start` 改为独占一行；`/cost` 在事件回调里对 `Tool_invoked` 调用 `Runtime.record_tool_invocation`（每个工具调用一次，bash 不重复计），`tools_visible` 由主 agent 的去重工具数实时计算，SDK 从未递增的事件/预算计数器不再展示；手动 `/checkpoint` 传 `~extract:false`，周期 checkpoint 仍保留提取；迁移提示只在真正迁移了行时打印；表格行不再内嵌 `\n`，由 `render_line` 统一补一个行尾换行。
+
+**原因**: 这些 P2 单条不致命，但会让用户误判 agent 在死循环、把正常的工具调用看成坏掉的指标、或在保存 checkpoint 时意外等待一次提取。action-streak 的误报最危险——它会在普通“读-改-跑”工作流里触发 Nudge/Force_judge，甚至 Abort。表格多空行和流式粘连则直接影响可读性。
+
+**影响范围**: `lib/par_code_doom_loop.ml`、`lib/par_code_ui_markdown.ml|.mli`、`lib/par_code_ui.ml`、`lib/par_code_repl_io.ml`、`lib/par_code_repl.ml`、`lib/par_code_checkpoint.ml|.mli`、`lib/par_code_max_mode.ml`、`lib/par_code_session.ml`、`test/test_par_code_doom_loop.ml`、`test/test_par_code_ui.ml`、`test/test_par_code_repl.ml`、`test/test_par_code_session.ml`。
+
+**回退方式**: 回退本提交即可；无 schema、config 或 CLI 变更。`/cost` 会重新显示 SDK 的原始指标列表（含恒零项）。
+
+**已知限制**:
+- **bash `$((...))` 仍会被拒**：这是 PAR 0.12-beta 的 `Bash_blacklist` 中 `dollar-paren` 正则 `\$\(.*\)` 的误匹配（它本意是拦 `$(...)` 命令替换）。par-code 按项目规则不改 PAR；已记录为上游反馈，建议把正则收窄到 `\$\([^()]` 或单独解析算术展开。
+- **`/cost` 的 tool_invocations 口径**：只统计主 agent 与 max-mode 候选的 `Tool_invoked`；checkpoint/extractor/judge/selector 等辅助调用与 delegate 子 agent 的内部工具调用不计入，这与原有“excludes async checkpoint/extraction calls”的说明一致。
+- **SDK 指标缺口**：`events_published_total` / `events_dropped_total` 在 0.12-beta 中从未递增；`tools_visible` 仅在配置了 `max_tool_schema_tokens` 时由 SDK 填充。par-code 不再展示这些死值，等上游补上计数后可恢复。
+
 ## [2026-11-03] v0.8.1：真机走查后的会话韧性修复
 
 **Tag**: Release

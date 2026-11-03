@@ -291,6 +291,36 @@ let reasoning_streaming_across_chunks () =
   Alcotest.(check string) "chunk2 renders" "real" r2;
   Alcotest.(check string) "buffer empty" "" (Buffer.contents buf)
 
+(* ── Render edge cases ─────────────────────────────────────────────── *)
+
+let with_backend_output f =
+  (* Force plain output regardless of the terminal running the test. *)
+  Unix.putenv "NO_COLOR" "1";
+  let path = Filename.temp_file "test_par_ui" ".out" in
+  let oc = open_out path in
+  let b = create_backend_out oc in
+  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> f b);
+  let ic = open_in_bin path in
+  let n = in_channel_length ic in
+  let s = really_input_string ic n in
+  close_in ic;
+  Sys.remove path;
+  s
+
+let render_table_is_single_spaced () =
+  let out = with_backend_output (fun b ->
+    render_table b ~headers:["A"; "B"] ~rows:[["1"; "2"]; ["3"; "4"]]) in
+  Alcotest.(check string) "one newline per row"
+    "A  B\n-  -\n1  2\n3  4\n" out
+
+let tool_call_starts_on_a_fresh_line () =
+  let out = with_backend_output (fun b ->
+    render_llm_chunk b (Par.Types.Text_delta { text = "now." });
+    render_llm_chunk b
+      (Par.Types.Tool_call_start { tool_call_id = "call-1"; name = "bash" })) in
+  Alcotest.(check string) "buffered text is flushed before the tool line"
+    "now.\n→ bash...\n" out
+
 (* ── Test runner ─────────────────────────────────────────────────────── *)
 
 let () =
@@ -355,5 +385,9 @@ let () =
         Alcotest.test_case "unclosed_discarded" `Quick think_unclosed_discarded_by_flush;
         Alcotest.test_case "opening_tag_held" `Quick think_opening_tag_held;
         Alcotest.test_case "reasoning_streaming" `Quick reasoning_streaming_across_chunks;
+      ];
+      "render_edges", [
+        Alcotest.test_case "table_single_spaced" `Quick render_table_is_single_spaced;
+        Alcotest.test_case "tool_boundary_newline" `Quick tool_call_starts_on_a_fresh_line;
       ];
     ]

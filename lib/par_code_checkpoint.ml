@@ -357,7 +357,7 @@ let format_checkpoints (entries : checkpoint_entry list) : string =
     ) entries;
     Buffer.contents buf
 
-let run_checkpoint ~rt mem_db ~session_id ~project_id conv ~turn_number =
+let run_checkpoint ?(extract = true) ~rt mem_db ~session_id ~project_id conv ~turn_number =
   (* Synchronous checkpoint path. Used by:
      - Manual /checkpoint REPL command (user explicitly asked; willing to wait
        for verification)
@@ -383,14 +383,16 @@ let run_checkpoint ~rt mem_db ~session_id ~project_id conv ~turn_number =
          let entry =
            { entry with turn_number; timestamp = Unix.gettimeofday () }
          in
-         (* v0.4.1 Pillar D: confirmed no-op. Both periodic maybe_checkpoint
-            and the manual /checkpoint REPL command route through run_checkpoint,
-            so both trigger extraction here. No separate wiring needed. *)
+         (* Periodic checkpoints also refresh memory (v0.4.1 Pillar D). The
+            manual /checkpoint command passes ~extract:false: saving a
+            checkpoint is not a request to run an extra LLM extraction. *)
          (match store_checkpoint mem_db ~session_id ~project_id entry with
           | Ok () ->
             ui_notice (Printf.sprintf "[checkpoint stored at turn %d]" turn_number);
-            Par_code_extractor.run_extraction rt mem_db
-              ~project_id conv
+            if extract then
+              Par_code_extractor.run_extraction rt mem_db
+                ~project_id conv
+            else ()
           | Error (`Db_error e) ->
             ui_error (Printf.sprintf "[checkpoint store failed: %s]" e)))
 

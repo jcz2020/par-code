@@ -138,7 +138,11 @@ let run_candidates ~(rt : Runtime.runtime) ~(agent_id : string)
     match
       Runtime.invoke rt ~agent_id ~message:prompt ?conversation
         ?system_prompt_appendix ~update_current:false ~save:false
-        ~on_tool_event:(fun e -> events := e :: !events)
+        ~on_tool_event:(fun e ->
+          (match e with
+           | Types.Tool_invoked _ -> Runtime.record_tool_invocation rt
+           | _ -> ());
+          events := e :: !events)
         ~cancellation_token ()
     with
     | Ok r ->

@@ -428,6 +428,26 @@ let flush_markdown backend =
   end;
   backend.markdown_state <- Par_code_ui_markdown.initial
 
+(* A status/tool line must not be appended to a half-rendered markdown line.
+   [push "\n"] renders the pending line and keeps the code-block context, so
+   text that was streamed before the tool call appears before the tool line
+   instead of being glued to the next chunk ("now.Now running"). *)
+let flush_pending_line backend =
+  if Par_code_ui_markdown.has_pending backend.markdown_state then begin
+    let new_state, output =
+      Par_code_ui_markdown.push backend.markdown_state "\n"
+    in
+    backend.markdown_state <- new_state;
+    if output <> "" then begin
+      output_string backend.out output;
+      flush backend.out
+    end
+  end
+
+let render_event_line backend img =
+  flush_pending_line backend;
+  render_line backend img
+
 let render_llm_chunk backend (chunk : Par.Types.llm_response_chunk) =
   let close_thinking_window () =
     match backend.thinking_start with
@@ -458,7 +478,8 @@ let render_llm_chunk backend (chunk : Par.Types.llm_response_chunk) =
     end
   | Tool_call_start { tool_call_id = _; name } ->
     close_thinking_window ();
-    render backend (textf "→ %s..." name ~style:(style ~dim:true ()))
+    render_event_line backend
+      (textf "→ %s..." name ~style:(style ~dim:true ()))
   | Tool_call_delta _ ->
     close_thinking_window ()
   | Usage_update _ ->
@@ -472,16 +493,17 @@ let render_llm_chunk backend (chunk : Par.Types.llm_response_chunk) =
 let render_tool_event backend (evt : Par.Types.event) =
   match evt with
   | Tool_invoked _ ->
-    (* Tool started — wait for completion to show summary *)
-    ()
+    (* Tool started — wait for completion to show summary, but make sure any
+       streamed text that preceded the tool call is not left buffered. *)
+    flush_pending_line backend
   | Tool_completed { tool_name; duration_ms; _ } ->
-    render_line backend (textf "  → %s ✓ (%.1fms)" tool_name duration_ms
+    render_event_line backend (textf "  → %s ✓ (%.1fms)" tool_name duration_ms
       ~style:(style ~fg:Green ()))
   | Tool_failed { tool_name; _ } ->
-    render_line backend (textf "  → %s ✗" tool_name
+    render_event_line backend (textf "  → %s ✗" tool_name
       ~style:(style ~fg:Red ~bold:true ()))
   | Tool_progress { tool_name; message; _ } ->
-    render_line backend (textf "  → %s: %s" tool_name message
+    render_event_line backend (textf "  → %s: %s" tool_name message
       ~style:(style ~dim:true ()))
   | Bash_invoked { argv; risk; _ } ->
     let cmd = String.concat " " argv in
@@ -490,7 +512,7 @@ let render_tool_event backend (evt : Par.Types.event) =
       | "medium" -> style ~fg:Yellow ()
       | _ -> style ~fg:Cyan ()
     in
-    render_line backend (textf "  $ %s" cmd ~style:risk_style)
+    render_event_line backend (textf "  $ %s" cmd ~style:risk_style)
   | Bash_completed { exit_code; duration; stdout_truncated; stderr_truncated; _ } ->
     let exit_style = if exit_code = 0
       then style ~fg:Green ()
@@ -500,7 +522,7 @@ let render_tool_event backend (evt : Par.Types.event) =
       if stdout_truncated || stderr_truncated then " [output truncated]"
       else ""
     in
-    render_line backend
+    render_event_line backend
       (textf "  exit %d (%.1fs)%s" exit_code duration truncation ~style:exit_style)
   | Task_created _
   | Task_started _
@@ -566,13 +588,13 @@ type cost_summary = {
 }
 
 let render_cost backend summary =
-  let line label value = textf "  %-20s %s\n" label value in
+  let line label value = textf "  %-20s %s" label value in
   let metrics_lines =
-    List.map (fun (k, v) -> textf "  %-20s %d\n" k v) summary.metrics
+    List.map (fun (k, v) -> textf "  %-20s %d" k v) summary.metrics
   in
   let image =
     vcat [
-      text "Session usage:\n" ~style:(style ~bold:true ());
+      text "Session usage:" ~style:(style ~bold:true ());
       line "LLM calls:" (string_of_int summary.llm_calls);
       line "Prompt tokens:" (string_of_int summary.prompt_tokens);
       line "Output tokens:" (string_of_int summary.completion_tokens);
@@ -580,24 +602,24 @@ let render_cost backend summary =
       line "Context size:"
         (Printf.sprintf "%d tokens (current)" summary.context_tokens);
       line "Turns completed:" (string_of_int summary.turn_count);
-      text "\nOperational metrics:\n" ~style:(style ~bold:true ());
+      vpad 1 0 (text "Operational metrics:" ~style:(style ~bold:true ()));
       vcat metrics_lines;
-      text "\nNote: excludes async checkpoint/extraction calls.\n"
-        ~style:(style ~dim:true ());
+      vpad 1 0 (text "Note: excludes async checkpoint/extraction calls."
+        ~style:(style ~dim:true ()));
     ]
   in
-  render backend image
+  render_line backend image
 
 let render_session_info backend ~agent_id ~session_id ~turn_count ~message_count =
   let image =
     vcat [
-      textf "%-10s %s\n" "Agent:" agent_id;
-      textf "%-10s %s\n" "Session:" session_id;
-      textf "%-10s %d\n" "Turns:" turn_count;
-      textf "%-10s %d\n" "Messages:" message_count;
+      textf "%-10s %s" "Agent:" agent_id;
+      textf "%-10s %s" "Session:" session_id;
+      textf "%-10s %d" "Turns:" turn_count;
+      textf "%-10s %d" "Messages:" message_count;
     ]
   in
-  render backend image
+  render_line backend image
 
 (* D2. Delegation rendering *)
 
@@ -699,10 +721,10 @@ let prompt_string mode =
   prefix ^ "par> "
 
 let render_help backend =
-  let item cmd desc = textf "  %-12s %s\n" cmd desc in
+  let item cmd desc = textf "  %-12s %s" cmd desc in
   let image =
     vcat [
-      text "Commands:\n" ~style:(style ~bold:true ());
+      text "Commands:" ~style:(style ~bold:true ());
       item "/help" "Show this help";
       item "/session" "Show session info";
       item "/health" "Show runtime health";
@@ -717,7 +739,7 @@ let render_help backend =
       item "/quit" "Exit";
     ]
   in
-  render backend image
+  render_line backend image
 
 (* F. Table builder *)
 
@@ -742,13 +764,13 @@ let render_table backend ~headers ~rows =
       if len >= w then cell
       else cell ^ String.make (w - len) ' '
     ) cells in
-    text (String.concat "  " padded ^ "\n")
+    text (String.concat "  " padded)
   in
   let separator =
     text (String.concat "  "
-            (List.map (fun w -> String.make w '-') widths) ^ "\n")
+            (List.map (fun w -> String.make w '-') widths))
   in
   let header_row = format_row headers in
   let data_rows = List.map format_row rows in
   let image = vcat (header_row :: separator :: data_rows) in
-  render backend image
+  render_line backend image
