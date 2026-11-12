@@ -2819,6 +2819,8 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 
 **影响范围**：`par_code_distill.run`（新增 `?cancellation_token` 与 `?on_invoke`，尾随 `()` 以避免 warning 16）、REPL `/distill` 分支。
 
+**实测补充（2026-11-12）**：取消的生效点是「下一个 streamed chunk 或流结束」——SDK 只在流式累加器里检查 token。真机验证时 SIGINT 把 provider 的流提前关掉，`invoke` 返回 `Ok` + 空文本（不是 `Cancelled` 错误），于是 `run` 打印了误导性的 `model did not return a JSON object`。因此 `run` 在 `Ok` 分支也必须检查 token：已取消就只打印 `[distill] cancelled`，绝不进解析/校验/写盘（否则一个完整回复仍会被送去征求写入确认）。副作用：取消不会像本地事件那样瞬时，最长等到模型的下一个分块。
+
 **回退方式**：改回 `invoke_generate` 并去掉 token 发布（Ctrl+C 恢复为退出 REPL）。
 
 ## [2026-11-12] v0.9.0 `/skills reload` 只报精确 drift：PAR 无 skill 重绑入口

@@ -50,7 +50,11 @@
   from outside. The token is published through the REPL's SIGINT ladder for
   the duration of the model call only, so the confirmation prompt keeps
   prompt-time signal behaviour. The first Ctrl+C prints `[distill] cancelled`
-  and returns to the prompt; the second still force-exits.
+  and returns to the prompt; the second still force-exits. The SDK only checks
+  cancellation between streamed chunks, so the abort lands when the provider's
+  stream yields its next chunk or ends; a cancelled call never falls through to
+  parsing or writing, even if the provider answers with a partial or empty
+  reply.
 - **Tests**: `/distill` argument parsing (`--id`, `--id=`, `--user`,
   `--force`, dangling-flag errors), the pinned-id override, built-in skill id
   rejection, and `Par_code_skills.frontmatter_diff` (an unchanged skill

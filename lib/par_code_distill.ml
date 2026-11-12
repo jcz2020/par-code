@@ -330,6 +330,17 @@ let run ~(rt : Runtime.runtime) ~(ui : Par_code_ui.backend)
             ~on_chunk:(Some (fun (_ : Types.llm_response_chunk) -> ()))
             ?cancellation_token ())
       in
+      (* A cancelled call must never fall through to parsing: when the provider
+         stream dies from the signal the SDK can return [Ok] with empty text,
+         which would otherwise surface as a bogus "no JSON object" error — and
+         a complete-looking reply would still be offered for writing. *)
+      let cancelled =
+        match cancellation_token with
+        | Some tok -> Par.Cancellation.is_cancelled tok
+        | None -> false
+      in
+      if cancelled then Par_code_ui.render_notice ui "[distill] cancelled"
+      else
       match result with
       | Error (Types.Cancelled _, _) ->
         Par_code_ui.render_notice ui "[distill] cancelled"
