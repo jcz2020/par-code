@@ -91,6 +91,27 @@ let scan ?(user_dir = Skill_loader.default_user_skills_dir ())
 let already_registered (rt : Runtime.runtime) id =
   List.exists (fun (d : Types.skill_descriptor) -> d.id = id) (Runtime.list_skills rt)
 
+(* The descriptor the runtime currently holds for [id] (None when the id is
+   not registered). PAR 0.12-beta exposes no unregister/replace on
+   [Runtime], so this is the only way to tell "already registered, nothing
+   changed" from "already registered, frontmatter drifted". *)
+let registered_descriptor (rt : Runtime.runtime) id =
+  List.find_opt (fun (d : Types.skill_descriptor) -> d.id = id) (Runtime.list_skills rt)
+
+(* Frontmatter fields that differ between two descriptors of the same id.
+   Only these matter to a reload: [body_path] points at the same file, so a
+   body-only edit is invisible to the runtime binding. *)
+let frontmatter_diff (old_d : Types.skill_descriptor) (new_d : Types.skill_descriptor) =
+  let fields = ref [] in
+  let add name changed = if changed then fields := name :: !fields in
+  add "name" (old_d.name <> new_d.name);
+  add "description" (old_d.description <> new_d.description);
+  add "trigger" (old_d.trigger <> new_d.trigger);
+  add "tool_filter" (old_d.tool_filter <> new_d.tool_filter);
+  add "system_prompt_override"
+    (old_d.system_prompt_override <> new_d.system_prompt_override);
+  List.rev !fields
+
 let discover_and_register ~(rt : Runtime.runtime)
     ?(user_dir = Skill_loader.default_user_skills_dir ())
     ?(project_dir = Skill_loader.default_project_skills_dir ())
@@ -121,12 +142,23 @@ let discover_and_register ~(rt : Runtime.runtime)
            if already_registered rt id then begin
              (* /skills reload: keep the fresh descriptor for body/description
                 reads; the runtime binding's frontmatter changes need a restart
-                because the SDK exposes no unregister/replace via Runtime. *)
+                because the SDK exposes no unregister/replace via Runtime.
+                Only report a problem when the frontmatter actually drifted —
+                an unchanged skill must reload silently. *)
              Hashtbl.replace custom id e;
              registered := e :: !registered;
-             rejected :=
-               (id, "already registered; frontmatter changes require restart")
-               :: !rejected
+             (match registered_descriptor rt id with
+              | Some old_d ->
+                let changed = frontmatter_diff old_d e.descriptor in
+                if changed <> [] then
+                  rejected :=
+                    (id,
+                     Printf.sprintf
+                       "frontmatter changed (%s); the runtime binding keeps the old \
+                        values until restart"
+                       (String.concat ", " changed))
+                    :: !rejected
+              | None -> ())
            end else
              rejected := (id, error_to_string err) :: !rejected)
     candidates;

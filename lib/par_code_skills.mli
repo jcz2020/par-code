@@ -15,6 +15,11 @@ type entry = {
 val reserved_commands : string list
 (** Built-in REPL command ids; skills with these ids are rejected. *)
 
+val builtin_skill_ids : string list
+(** Built-in SDK skill ids ([Builtin_skills.builtin_skills]); a file-backed
+    skill with one of these ids is rejected instead of silently shadowing the
+    SDK skill. *)
+
 val source_string : source -> string
 (** "project" or "user", for [/skills] output. *)
 
@@ -35,9 +40,10 @@ val discover_and_register :
   (entry list * (string * string) list)
 (** Scan + register. Returns (registered, rejected/warnings). Rejected reasons
     include reserved/builtin id conflicts, parse errors, non-manual triggers
-    when [auto_activate] is false, and registration errors. On reload, an
-    already-registered id keeps the new descriptor for body reads but records
-    a restart warning because the SDK has no public unregister/replace. *)
+    when [auto_activate] is false, and registration errors. On reload an
+    already-registered id keeps the fresh descriptor (body and listing are
+    live) and is reported only when its frontmatter actually drifted from the
+    runtime binding, which PAR 0.12-beta cannot replace without a restart. *)
 
 val reload :
   rt:Par.Runtime.runtime ->
@@ -57,6 +63,12 @@ val find_manual : string -> entry option
 
 val read_body : entry -> (string, string) result
 (** Read the markdown body after the frontmatter. Empty or >64 KB is an error. *)
+
+val frontmatter_diff :
+  Par.Types.skill_descriptor -> Par.Types.skill_descriptor -> string list
+(** Frontmatter fields (name/description/trigger/tool_filter/system_prompt_override)
+    that differ between an already-registered descriptor and a freshly parsed
+    one. Empty list = reload changed nothing the runtime binding holds. *)
 
 val clear : unit -> unit
 (** Test hook: reset the in-memory registry. *)

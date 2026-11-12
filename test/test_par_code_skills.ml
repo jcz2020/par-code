@@ -98,7 +98,57 @@ let test_reserved_commands () =
   Alcotest.(check bool) "help is reserved" true
     (List.mem "help" Par_code_skills.reserved_commands);
   Alcotest.(check bool) "custom id is free" false
-    (List.mem "daily-standup" Par_code_skills.reserved_commands)
+    (List.mem "daily-standup" Par_code_skills.reserved_commands);
+  Alcotest.(check bool) "builtin skill ids are not commands" false
+    (List.mem "summarizer" Par_code_skills.reserved_commands);
+  Alcotest.(check bool) "summarizer is a builtin skill" true
+    (List.mem "summarizer" Par_code_skills.builtin_skill_ids)
+
+let parse_skill path =
+  match Par.Skill_loader.parse_skill_file ~path with
+  | Ok d -> d
+  | Error msg -> Alcotest.failf "parse_skill_file %s: %s" path msg
+
+let test_frontmatter_diff () =
+  with_temp_base (fun base ->
+    let write ~name ~description ~trigger =
+      let path = Filename.concat base "skill.md" in
+      let oc = open_out path in
+      Printf.sprintf
+        "---\nschema_version: 1\nid: demo\nname: %s\ndescription: %s\ntrigger: %s\n---\n\nbody\n"
+        name description trigger
+      |> output_string oc;
+      close_out oc;
+      parse_skill path
+    in
+    let a = write ~name:"Demo" ~description:"old line" ~trigger:"manual" in
+    (* Re-parsing the same bytes must report no drift: otherwise every reload
+       would warn about every registered skill. *)
+    let same = write ~name:"Demo" ~description:"old line" ~trigger:"manual" in
+    Alcotest.(check (list string)) "unchanged" []
+      (Par_code_skills.frontmatter_diff a same);
+    let retitled = write ~name:"Demo 2" ~description:"old line" ~trigger:"manual" in
+    Alcotest.(check (list string)) "name only" [ "name" ]
+      (Par_code_skills.frontmatter_diff a retitled);
+    let edited = write ~name:"Demo 2" ~description:"new line" ~trigger:"manual" in
+    Alcotest.(check (list string)) "name + description"
+      [ "name"; "description" ]
+      (Par_code_skills.frontmatter_diff a edited));
+  (* The trivial body-only edit is invisible to the frontmatter diff: the body
+     is read from disk on every invocation, so it needs no restart warning. *)
+  with_temp_base (fun base ->
+    let write body =
+      let path = Filename.concat base "skill.md" in
+      let oc = open_out path in
+      Printf.sprintf
+        "---\nschema_version: 1\nid: demo\nname: Demo\ndescription: d\ntrigger: manual\n---\n\n%s\n"
+        body
+      |> output_string oc;
+      close_out oc;
+      parse_skill path
+    in
+    Alcotest.(check (list string)) "body only" []
+      (Par_code_skills.frontmatter_diff (write "step 1") (write "step 2")))
 
 let test_registry_empty_after_clear () =
   Par_code_skills.clear ();
@@ -117,6 +167,7 @@ let () =
       ];
       "contracts", [
         Alcotest.test_case "reserved commands" `Quick test_reserved_commands;
+        Alcotest.test_case "frontmatter drift" `Quick test_frontmatter_diff;
         Alcotest.test_case "registry clear" `Quick test_registry_empty_after_clear;
       ];
     ]
