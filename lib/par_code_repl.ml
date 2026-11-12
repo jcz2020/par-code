@@ -200,7 +200,9 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
       Oracle R1 skips the ladder on errored turns). history_add/
       history_save stay in loop()'s input branch — chained messages are
       not user input. *)
-    let execute_turn ~(chained : bool) (message : string) : Par_code_chain.turn_outcome =
+    let execute_turn ?(skills : string list option)
+        ?(skill_appendix : string option)
+        ~(chained : bool) (message : string) : Par_code_chain.turn_outcome =
       (if
          !max_mode_on && not !max_chain_notice
          && (chained
@@ -216,6 +218,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
       let max_turn_active () =
         !max_mode_on
         && (not chained)
+        && skills = None
         && !Par_code_mode.current = Par_code_mode.Build
         && (match !Par_code_goal.current with
             | Some g when g.Par_code_goal.status = Par_code_goal.Active -> false
@@ -291,6 +294,14 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                 | None, Some p, Some g -> Some (p ^ g)
                 | Some m, Some p, Some g -> Some (m ^ p ^ g)
               in
+               let turn_appendix =
+                 match combined_appendix, skill_appendix with
+                 | None, None -> None
+                 | Some a, None -> Some a
+                 | None, Some s -> Some ("## Skill Instructions\n\n" ^ s)
+                 | Some a, Some s ->
+                   Some (a ^ "\n\n## Skill Instructions\n\n" ^ s)
+               in
                let mode_before_invoke = !Par_code_mode.current in
                invoke_start_time := Unix.gettimeofday ();
                hit_cap := false;
@@ -320,7 +331,8 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                           ~on_tool_event
                           ~on_chunk:(Some stream_cb)
                           ~enable_handoff:true
-                          ?system_prompt_appendix:combined_appendix
+                          ?system_prompt_appendix:turn_appendix
+                          ?skills
                           ~cancellation_token:turn_token
                           ()
                       in
@@ -808,7 +820,107 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                 (Printf.sprintf "Goal set: %s\nAgent will be evaluated by the judge after each turn. Use goal_done tool when you believe the goal is met." rest)
             end;
             loop ()
-          | _ -> Par_code_ui.render_error ui (Printf.sprintf "Unknown command: %s (try /help)" cmd));
+          | "/skills" ->
+            let rest =
+              if String.length trimmed > 7 then
+                String.trim (String.sub trimmed 7 (String.length trimmed - 7))
+              else ""
+            in
+            if rest = "reload" then begin
+              let registered, rejected = Par_code_skills.reload ~rt () in
+              Par_code_ui.render_notice ui
+                (Printf.sprintf "[skills] reloaded: %d custom command(s)"
+                   (List.length registered));
+              List.iter
+                (fun (id, reason) ->
+                   Par_code_ui.render_warning ui
+                     (Printf.sprintf "[skills] %s: %s" id reason))
+                rejected
+            end else if rest = "" then begin
+              let entries = Par_code_skills.list_custom () in
+              if entries = [] then
+                Par_code_ui.render_notice ui
+                  "No custom skills. Add .par/skills/<id>/skill.md (or ~/.par/skills/) and run /skills reload."
+              else begin
+                Par_code_ui.render_notice ui "Custom commands:";
+                List.iter
+                  (fun (e : Par_code_skills.entry) ->
+                     Par_code_ui.render_notice ui
+                       (Printf.sprintf "  /%s  %s  [%s]"
+                          e.Par_code_skills.descriptor.id
+                          e.Par_code_skills.descriptor.description
+                          (Par_code_skills.source_string e.Par_code_skills.source)))
+                  entries
+              end
+            end else
+              Par_code_ui.render_warning ui "usage: /skills | /skills reload";
+            loop ()
+          | "/distill" ->
+            let rest =
+              if String.length trimmed > 8 then
+                String.trim (String.sub trimmed 8 (String.length trimmed - 8))
+              else ""
+            in
+            if !Par_code_mode.current = Par_code_mode.Plan then
+              Par_code_ui.render_warning ui
+                "/distill writes a skill file; switch to build mode first (/build)"
+            else begin
+              (* v0.9.0 W2: the distiller is a real LLM call. Scope the turn
+                 token to it so the first Ctrl+C cancels that call instead of
+                 killing the REPL; the second press still force-exits. The
+                 confirmation prompt runs outside the scope, so it keeps the
+                 normal prompt-time signal behaviour. *)
+              let tok =
+                Par.Cancellation.create_token (Par.Runtime.cancellation_root rt)
+              in
+              Par_code_distill.run ~rt ~ui ~mem_db ~conv:!conv ~args:rest
+                ~cancellation_token:tok
+                ~on_invoke:(fun active ->
+                  if active then begin
+                    cancel_pending := false;
+                    in_invoke := true;
+                    turn_token_ref := Some tok
+                  end else begin
+                    turn_token_ref := None;
+                    in_invoke := false
+                  end)
+                ()
+            end;
+            loop ()
+          | cmd when String.length cmd > 1 ->
+            let id = String.sub cmd 1 (String.length cmd - 1) in
+            (match Par_code_skills.find_manual id with
+             | None ->
+               Par_code_ui.render_error ui
+                 (Printf.sprintf "Unknown command: %s (try /help or /skills)" cmd)
+             | Some entry ->
+               let args =
+                 if String.length trimmed > String.length cmd then
+                   String.trim
+                     (String.sub trimmed (String.length cmd)
+                        (String.length trimmed - String.length cmd))
+                 else ""
+               in
+               if args = "" then
+                 Par_code_ui.render_notice ui
+                   (Printf.sprintf "usage: /%s <args> \xe2\x80\x94 %s"
+                      entry.Par_code_skills.descriptor.id
+                      entry.Par_code_skills.descriptor.description)
+               else
+                 (match Par_code_skills.read_body entry with
+                  | Error e ->
+                    Par_code_ui.render_error ui
+                      (Printf.sprintf "[skill %s] %s"
+                         entry.Par_code_skills.descriptor.id e)
+                  | Ok body ->
+                    ignore
+                      (execute_turn ~chained:false
+                         ~skills:[entry.Par_code_skills.descriptor.id]
+                         ~skill_appendix:body args)))
+          | _ ->
+            Par_code_ui.render_error ui
+              (Printf.sprintf "Unknown command: %s (try /help)" cmd)
+         );
          loop ()
        end else begin
            (match LNoise.history_add trimmed with Ok () -> () | Error _ -> ());

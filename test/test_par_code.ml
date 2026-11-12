@@ -42,10 +42,19 @@ let test_config_roundtrip () =
     Alcotest.(check int) "max_iterations roundtrip" cfg.max_iterations cfg'.max_iterations;
     Alcotest.(check (option string)) "api_base roundtrip" cfg.api_base cfg'.api_base
 
+let test_mask_api_key () =
+  Alcotest.(check string) "short key" "****"
+    (Par_code_config.mask_api_key "abcd");
+  Alcotest.(check string) "medium key" "a****f"
+    (Par_code_config.mask_api_key "abcdef");
+  Alcotest.(check string) "long key" "sk-t****1234"
+    (Par_code_config.mask_api_key "sk-test-1234")
+
 let () =
   Alcotest.run "par"
     [ "version", [ Alcotest.test_case "version" `Quick test_version;
                    Alcotest.test_case "version_info prefix" `Quick test_version_info_prefix ];
       "identity", [ Alcotest.test_case "agent_id" `Quick test_agent_id ];
       "config", [ Alcotest.test_case "paths are ~/.par" `Quick test_config_paths;
-                  Alcotest.test_case "JSON round-trip" `Quick test_config_roundtrip ] ]
+                  Alcotest.test_case "JSON round-trip" `Quick test_config_roundtrip;
+                  Alcotest.test_case "api key mask" `Quick test_mask_api_key ] ]

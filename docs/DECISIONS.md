@@ -1,5 +1,21 @@
 # Decisions
 
+## [2026-11-03] v0.9.0 范围裁决：self-improvement，执行级 best-of-N 推迟
+
+**Tag**: Scope
+
+**变更前**: README/STRATEGY 承诺 v0.9.0 = self-improvement（`/dream` + `/distill` + 自定义 slash 命令），但 `docs/v0.8.0-ROADMAP.md` 决策 4 把执行级 best-of-N（每候选一个 worktree、胜者 diff 回灌）也推迟到 v0.9.0；两处范围来源冲突，且 v0.9.0 没有规格文件。
+
+**变更后**: v0.9.0 = self-improvement；执行级 best-of-N 推迟到 v0.10+，触发条件仍是“用户频繁要求换个实现再来一版”。规格落到 `docs/v0.9.0-ROADMAP.md`（R1 决策 1..7）；实施顺序 W0/W1（skill 发现 + 自定义 `/命令` + `/skills`）先行，W2 `/distill`、W3 `/dream` 随后。版本号仍为 0.8.2，发布时才 bump 0.9.0。
+
+**原因**: README/STRATEGY 是对外承诺；执行级 best-of-N 的退役条件尚未出现，且它需要先解决 worktree 脏工作区基线，属于更高风险的范围扩张。self-improvement 直接复用 SDK 已有的 `Skill_loader` / `register_skill` 与记忆层，增量明确、可回退。
+
+**影响范围**: `docs/v0.9.0-ROADMAP.md`（新）、README roadmap 行、CHANGES（发布时）、STRATEGY、DECISIONS、AGENTS（新模块/命令）；实现从 `main`（`7130653`）切分支，发布前不 bump 版本。
+
+**回退方式**: 删除 v0.9.0 ROADMAP 与相关实现，范围回到“未定”；执行级 best-of-N 的推迟记录保留，作为后续触发条件。
+
+**已知限制**: PAR 0.12-beta 的 `skill_descriptor.body_path` 没有运行时消费者，par-code 自己读正文；Auto/Keyword 用户 skill 默认不启用（`skills_auto_activate` 随 W4 补）；`/skills reload` 对已注册 id 的 frontmatter 变更需要重启（SDK 没有公开的 unregister/replace）；`/dream`/`/distill` 的辅助 LLM 调用成本暂不计入 turn 级 `/cost`。
+
 ## [2026-11-03] v0.8.2：清理真机审计的 P2（交互噪声与死指标）
 
 **Tag**: Release
@@ -2780,6 +2796,44 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 **已知限制**：
 - CentOS 7 / Debian 10 / Ubuntu 18.04 用户无法使用预编译二进制（均已 EOL）。
 - 如未来需要覆盖 glibc < 2.28 的发行版，需引入 musl-static 构建（v0.2.3 计划）。
+
+## [2026-11-12] v0.9.0 `/distill --id`：钉住目标 id，让 `--force` 真正可达
+
+**变更前**：distiller 的 system prompt 要求模型「不要复用已有 skill id」，所以提案永远是全新 id；`validate_proposal` 的「已存在」分支只能等模型恰好撞上已有 id 才触发，`--force` 实际不可达——用户没有办法改写一个已存在的 skill。
+
+**变更后**：`/distill` 新增 `--id <id>`（也支持 `--id=<id>`）。钉住的 id 覆盖模型返回的 id（`pin_target_id`），并在调用模型之前先用 `check_target_id` 校验形状 / 保留命令 / 内置 skill id；目标 id 已存在时必须同时给 `--force`，写入前把旧文件备份到 `.par/backups/skills/`。
+
+**原因**：`--force` 的语义是「覆盖已有 skill」，但 id 由模型决定，用户无法指定目标；不给一个钉住 id 的入口，`--force` 就是死代码。
+
+**影响范围**：`par_code_distill`（`args` / `parse_args` / `pin_target_id` / `run` 签名）、REPL `/distill` 分支、`/help` 文案；skill 的 id 由用户决定，与模型无关。
+
+**回退方式**：去掉 `--id` 分支（`target_id` 恒为 `None`，`pin_target_id` 退化为恒等）→ 回到模型自选 id。
+
+## [2026-11-12] v0.9.0 `/distill` 改用 `Runtime.invoke`：Ctrl+C 取消而不是退出 REPL
+
+**变更前**：`/distill` 用 `Runtime.invoke_generate`。它内部自建 token（`Cancellation.create_token rt.cancellation_root`）且不接受外部 token；同时 `/distill` 运行在 REPL 的 `execute_turn` 之外，`in_invoke` 为 false，SIGINT 阶梯走 `Exit_now`——Ctrl+C 直接保存会话并退出整个 REPL，distiller 调用无法取消。
+
+**变更后**：改用 `Runtime.invoke ~cancellation_token`（与 judge 同一模式：tools=[] 的 agent 走一次 ReAct 迭代即返回），并传 `~on_chunk:(Some noop)` 启用流式路径，使取消能在分块之间被观察到。REPL `/distill` 分支把 token 发布到 `turn_token_ref` 并把 `in_invoke := true`，作用域仅限模型调用（确认提示阶段已经恢复），因此提示态的 Ctrl+C 语义不变。第一次 Ctrl+C 取消调用并打印 `[distill] cancelled`，第二次仍强制退出。
+
+**原因**：`invoke_generate` 没有 `?cancellation_token` 参数，无法从 REPL 取消；这是 SDK 的既有形状，不需要 PAR 改动。
+
+**影响范围**：`par_code_distill.run`（新增 `?cancellation_token` 与 `?on_invoke`，尾随 `()` 以避免 warning 16）、REPL `/distill` 分支。
+
+**实测补充（2026-11-12）**：取消的生效点是「下一个 streamed chunk 或流结束」——SDK 只在流式累加器里检查 token。真机验证时 SIGINT 把 provider 的流提前关掉，`invoke` 返回 `Ok` + 空文本（不是 `Cancelled` 错误），于是 `run` 打印了误导性的 `model did not return a JSON object`。因此 `run` 在 `Ok` 分支也必须检查 token：已取消就只打印 `[distill] cancelled`，绝不进解析/校验/写盘（否则一个完整回复仍会被送去征求写入确认）。副作用：取消不会像本地事件那样瞬时，最长等到模型的下一个分块。
+
+**回退方式**：改回 `invoke_generate` 并去掉 token 发布（Ctrl+C 恢复为退出 REPL）。
+
+## [2026-11-12] v0.9.0 `/skills reload` 只报精确 drift：PAR 无 skill 重绑入口
+
+**变更前**：`/skills reload` 对每个已注册 skill 都输出 `already registered; frontmatter changes require restart`，不区分是否真的改了。
+
+**变更后**：reload 时把运行时已注册的 descriptor 与新解析的 descriptor 逐字段比较（`frontmatter_diff`：name / description / trigger / tool_filter / system_prompt_override），只有真正漂移才警告并列出字段名。par-code 自己的视图（`/skills` 列表、`/<id>` 调度、body 读取）始终使用磁盘上的新 descriptor。
+
+**原因**：PAR 0.12-beta 的 `Runtime` 只暴露 `register_skill` / `list_skills`，没有 unregister / replace；`Skill_registry.replace` / `remove` 存在，但 `rt.skills` 是抽象 `runtime` 的私有字段、`Skill_registry.t` 也是抽象类型，par-code 无法访问。重复 id 注册返回 `Duplicate_skill`，绑定保持旧值。因此进程内重绑不可能，只能如实报告「哪些字段要重启才生效」。**PAR 侧需求**：`Runtime.replace_skill : runtime -> Types.skill_descriptor -> (unit, error_category) result`（或 `Runtime.unregister_skill`），实现为 `Skill_registry.replace` / `remove` + 重建 `activate` 闭包；紧迫性低——手动 skill 的 body 与展示已实时，只有 tool_filter / system_prompt_override 需要重启。
+
+**影响范围**：`par_code_skills`（`frontmatter_diff` / `registered_descriptor` / `builtin_skill_ids`）、`/skills reload` 与 `/distill` 写后 reload 的警告文案。
+
+**回退方式**：恢复无条件重启提示（删掉 `frontmatter_diff` 比较）。
 
 
 

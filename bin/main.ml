@@ -98,7 +98,12 @@ let cmd_config_set field_opt value_opt =
   match field_opt, value_opt with
   | Some field, Some value ->
     let _cfg = Par_code_config.update_field ~field ~value in
-    Par_code_ui.render_notice ui (Printf.sprintf "Set %s = %s" field value)
+    let display =
+      match String.lowercase_ascii field with
+      | "api_key" | "judge_api_key" -> Par_code_config.mask_api_key value
+      | _ -> value
+    in
+    Par_code_ui.render_notice ui (Printf.sprintf "Set %s = %s" field display)
   | None, None ->
     Par_code_config_wizard.run_wizard ()
   | Some _, None ->

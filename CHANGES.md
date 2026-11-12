@@ -1,5 +1,65 @@
 # CHANGES
 
+## v0.9.0 — Self-improvement (unreleased)
+
+> **Status**: In progress on `feat/v0.9.0-skills`.
+>
+> **Scope**: user/project skills (W0/W1) and `/distill` (W2).
+
+### Added — skills
+
+- **Custom skills are discovered from `./.par/skills/<id>/skill.md` and
+  `~/.par/skills/`.** Only `trigger: manual` entries are registered as slash
+  commands; project entries shadow user entries with the same id. The SDK does
+  not consume `body_path`, so par-code reads the body and injects it as a
+  system-prompt appendix when `/<id>` is invoked.
+- **`/skills` lists discovered skills and `/skills reload` rescans both
+  directories.** Startup discovery reports rejected files as warnings; built-in
+  commands win on id conflicts.
+- **`/distill` turns a repeated workflow into a skill.** The tools-free
+  `skill-distiller` agent proposes one JSON skill from the request, recent
+  session, and memory index. par-code validates the id, reserved ids, existing
+  ids, description, and body size, shows the proposal, and writes on
+  confirmation through a temp file parsed by `Skill_loader` before the rename.
+  `--force` backs up an existing file to `.par/backups/skills/`; `--user`
+  targets the user directory. The command is Build-mode only.
+- **`test_par_code_distill.ml`** covers proposal parsing, id/description/body
+  validation, atomic write, and the `--force` backup (27th Alcotest suite).
+
+### Fixed — skills / distill
+
+- **`/distill --force` can now actually overwrite an existing skill.** The
+  distiller is told to invent a fresh id, so a model-proposed id could never
+  hit an existing skill and `--force` was unreachable in practice. `--id <id>`
+  (or `--id=<id>`) pins the target: the pinned id replaces whatever the model
+  returned, it is validated before the LLM call (id shape, reserved commands,
+  built-in skill ids), and it requires `--force` when that skill already
+  exists. The old file is backed up before the rewrite.
+- **`/skills reload` reports precise frontmatter drift.** Previously every
+  already-registered skill produced "already registered; frontmatter changes
+  require restart" on every reload, changed or not. Reload now diffs the
+  runtime's registered descriptor against the freshly parsed one and warns
+  only when `name` / `description` / `trigger` / `tool_filter` /
+  `system_prompt_override` actually differ, naming the fields. par-code's own
+  view (`/skills`, `/<id>` dispatch, body reads) always uses the on-disk
+  descriptor; the SDK runtime binding keeps the old values because PAR
+  0.12-beta exposes no unregister/replace on `Runtime` (see DECISIONS).
+- **Ctrl+C cancels the distiller call instead of exiting the REPL.** `/distill`
+  now runs on `Runtime.invoke` with a real cancellation token — the previous
+  `invoke_generate` path creates its token internally and cannot be cancelled
+  from outside. The token is published through the REPL's SIGINT ladder for
+  the duration of the model call only, so the confirmation prompt keeps
+  prompt-time signal behaviour. The first Ctrl+C prints `[distill] cancelled`
+  and returns to the prompt; the second still force-exits. The SDK only checks
+  cancellation between streamed chunks, so the abort lands when the provider's
+  stream yields its next chunk or ends; a cancelled call never falls through to
+  parsing or writing, even if the provider answers with a partial or empty
+  reply.
+- **Tests**: `/distill` argument parsing (`--id`, `--id=`, `--user`,
+  `--force`, dangling-flag errors), the pinned-id override, built-in skill id
+  rejection, and `Par_code_skills.frontmatter_diff` (an unchanged skill
+  reports no drift; a body-only edit is not drift).
+
 ## v0.8.2 — P2 cleanup from the live walkthrough
 
 > **Status**: Released 2026-11-03.
