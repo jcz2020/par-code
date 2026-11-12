@@ -53,7 +53,7 @@ par-code/
 | `Par_code_checkpoint` | module | `lib/par_code_checkpoint.ml` | 53 | 长会话连续性；手动 /checkpoint 不触发提取（v0.8.2+） |
 | `Par_code_payload.sanitize` | val | `lib/par_code_payload.ml` | 8 | invoke / 落库前的会话清洗 |
 
-\* 外部引用为 bin+test 中 `Module.` 限定引用的实测计数，签名变更按此排爆炸半径。公共面：24 个 `.mli` 共 212 `val` + 32 `type`；7 个模块无 `.mli`（config / config_wizard / extractor / memory_tools / repl / repl_io / setup），bin 直接依赖其未封装表面，改它们等于改 bin。
+\* 外部引用为 bin+test 中 `Module.` 限定引用的实测计数，签名变更按此排爆炸半径。公共面：24 个 `.mli` 共 216 `val` + 33 `type`；7 个模块无 `.mli`（config / config_wizard / extractor / memory_tools / repl / repl_io / setup），bin 直接依赖其未封装表面，改它们等于改 bin。
 
 ## CONVENTIONS
 
