@@ -864,8 +864,28 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
             if !Par_code_mode.current = Par_code_mode.Plan then
               Par_code_ui.render_warning ui
                 "/distill writes a skill file; switch to build mode first (/build)"
-            else
-              Par_code_distill.run ~rt ~ui ~mem_db ~conv:!conv ~args:rest;
+            else begin
+              (* v0.9.0 W2: the distiller is a real LLM call. Scope the turn
+                 token to it so the first Ctrl+C cancels that call instead of
+                 killing the REPL; the second press still force-exits. The
+                 confirmation prompt runs outside the scope, so it keeps the
+                 normal prompt-time signal behaviour. *)
+              let tok =
+                Par.Cancellation.create_token (Par.Runtime.cancellation_root rt)
+              in
+              Par_code_distill.run ~rt ~ui ~mem_db ~conv:!conv ~args:rest
+                ~cancellation_token:tok
+                ~on_invoke:(fun active ->
+                  if active then begin
+                    cancel_pending := false;
+                    in_invoke := true;
+                    turn_token_ref := Some tok
+                  end else begin
+                    turn_token_ref := None;
+                    in_invoke := false
+                  end)
+                ()
+            end;
             loop ()
           | cmd when String.length cmd > 1 ->
             let id = String.sub cmd 1 (String.length cmd - 1) in

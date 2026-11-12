@@ -82,6 +82,10 @@ let test_validate () =
     (match Par_code_distill.validate_proposal ~existing:[]
              ~force:false (proposal ~id:"skills" ()) with
      | Ok () -> false | Error _ -> true);
+  Alcotest.(check bool) "builtin skill id" true
+    (match Par_code_distill.validate_proposal ~existing:[]
+             ~force:false (proposal ~id:"summarizer" ()) with
+     | Ok () -> false | Error _ -> true);
   Alcotest.(check bool) "empty description" true
     (match Par_code_distill.validate_proposal ~existing:[]
              ~force:false (proposal ~description:"" ()) with
@@ -90,6 +94,54 @@ let test_validate () =
     (match Par_code_distill.validate_proposal ~existing:[]
              ~force:false (proposal ~body:(String.make (64 * 1024 + 1) 'x') ()) with
      | Ok () -> false | Error _ -> true)
+
+let test_parse_args () =
+  let check name expected_got =
+    match Par_code_distill.parse_args name with
+    | Ok a -> expected_got a
+    | Error msg -> Alcotest.failf "parse_args %S failed: %s" name msg
+  in
+  check "turn the release checklist into a skill" (fun a ->
+    Alcotest.(check bool) "no user" false a.Par_code_distill.user;
+    Alcotest.(check bool) "no force" false a.Par_code_distill.force;
+    Alcotest.(check bool) "no target" true (a.Par_code_distill.target_id = None);
+    Alcotest.(check string) "request kept"
+      "turn the release checklist into a skill" a.Par_code_distill.request);
+  check "--user --force ship it" (fun a ->
+    Alcotest.(check bool) "user" true a.Par_code_distill.user;
+    Alcotest.(check bool) "force" true a.Par_code_distill.force;
+    Alcotest.(check string) "request" "ship it" a.Par_code_distill.request);
+  check "--id release-notes --force rewrite" (fun a ->
+    Alcotest.(check bool) "target" true
+      (a.Par_code_distill.target_id = Some "release-notes");
+    Alcotest.(check bool) "force" true a.Par_code_distill.force;
+    Alcotest.(check string) "request" "rewrite" a.Par_code_distill.request);
+  check "--id=release-notes rewrite" (fun a ->
+    Alcotest.(check bool) "target" true
+      (a.Par_code_distill.target_id = Some "release-notes");
+    Alcotest.(check string) "request" "rewrite" a.Par_code_distill.request);
+  (* A dangling --id must not fall through as request text. *)
+  (match Par_code_distill.parse_args "rewrite --id" with
+   | Ok _ -> Alcotest.fail "expected an error for a missing --id value"
+   | Error _ -> ());
+  (match Par_code_distill.parse_args "--id --force rewrite" with
+   | Ok a when a.Par_code_distill.target_id <> None ->
+     Alcotest.fail "--force must not be consumed as the --id value"
+   | Ok _ -> ()
+   | Error _ -> ());
+  (match Par_code_distill.parse_args "x --id=" with
+   | Ok _ -> Alcotest.fail "expected an error for an empty --id= value"
+   | Error _ -> ())
+
+let test_pin_target_id () =
+  let p = proposal ~id:"model-pick" () in
+  Alcotest.(check string) "no pin keeps the model id" "model-pick"
+    (Par_code_distill.pin_target_id None p).Par_code_distill.id;
+  Alcotest.(check string) "pin wins over the model id" "release-notes"
+    (Par_code_distill.pin_target_id (Some "release-notes") p).Par_code_distill.id;
+  (* Everything except the id comes from the model. *)
+  let pinned = Par_code_distill.pin_target_id (Some "release-notes") p in
+  Alcotest.(check string) "name kept" "Demo" pinned.Par_code_distill.name
 
 let test_write_and_read () =
   with_temp_base (fun base ->
@@ -145,6 +197,8 @@ let () =
       "validation", [
         Alcotest.test_case "id rules" `Quick test_valid_id;
         Alcotest.test_case "proposal rules" `Quick test_validate;
+        Alcotest.test_case "parse args" `Quick test_parse_args;
+        Alcotest.test_case "pinned id" `Quick test_pin_target_id;
       ];
       "write", [
         Alcotest.test_case "write and read" `Quick test_write_and_read;

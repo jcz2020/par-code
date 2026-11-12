@@ -21,7 +21,8 @@ Return ONLY a JSON object:
 
 Rules:
 - id: lowercase letters, digits, and hyphens; start/end with a letter or digit;
-  do not reuse a built-in command or an existing skill id.
+  normally do not reuse a built-in command or an existing skill id. If the
+  request pins a target skill id, use exactly that id, even if it exists.
 - body: instructions for the agent (what to do, in what order, what to check).
   It is NOT a shell script and must not contain secrets, tokens, or external
   project/company names.
@@ -47,6 +48,41 @@ let error_to_string (e : Types.error_category) =
   | Types.Embedding_unsupported -> "embeddings unsupported"
   | Types.Cancelled _ -> "cancelled"
 
+let usage =
+  "usage: /distill <what to turn into a skill> [--id <id>] [--user] [--force]"
+
+(* Flags are recognized anywhere in the argument string; every other token is
+   request text. [--id <id>] pins the skill id so the distiller cannot invent
+   a different one — that is what makes [--force] reachable: the user names
+   the existing skill to rewrite instead of hoping the model picks it. *)
+type args = {
+  user : bool;
+  force : bool;
+  target_id : string option;
+  request : string;
+}
+
+let parse_args (args : string) : (args, string) result =
+  let tokens =
+    String.split_on_char ' ' args |> List.filter (fun s -> s <> "")
+  in
+  let rec go user force target_id acc = function
+    | [] -> Ok { user; force; target_id; request = String.concat " " (List.rev acc) }
+    | "--user" :: rest -> go true force target_id acc rest
+    | "--force" :: rest -> go user true target_id acc rest
+    | "--id" :: id :: rest ->
+      if String.length id > 1 && id.[0] = '-' then Error usage
+      else go user force (Some id) acc rest
+    | "--id" :: [] -> Error usage
+    | tok :: rest ->
+      if String.length tok >= 5 && String.sub tok 0 5 = "--id=" then begin
+        let v = String.sub tok 5 (String.length tok - 5) in
+        if v = "" then Error usage
+        else go user force (Some v) acc rest
+      end else go user force target_id (tok :: acc) rest
+  in
+  go false false None [] tokens
+
 let last_n s n =
   let len = String.length s in
   if len <= n then s else String.sub s (len - n) n
@@ -60,6 +96,24 @@ let valid_id id =
     in
     String.for_all is_ok id
     && id.[0] <> '-' && id.[len - 1] <> '-'
+
+(* The pinned target id wins over whatever id the model returns: /distill
+   --id foo must write foo, otherwise [--force] could never reach an existing
+   skill (the distiller is told to invent a fresh id). *)
+let pin_target_id (target : string option) (p : proposal) : proposal =
+  match target with
+  | None -> p
+  | Some id -> { p with id }
+
+(* Early check on a user-pinned id — fail before spending an LLM call. *)
+let check_target_id (id : string) : (unit, string) result =
+  if not (valid_id id) then
+    Error "id must be lowercase letters/digits/hyphens (<=64 chars, no leading/trailing hyphen)"
+  else if List.mem id Par_code_skills.reserved_commands then
+    Error (Printf.sprintf "id %s conflicts with a built-in command" id)
+  else if List.mem id Par_code_skills.builtin_skill_ids then
+    Error (Printf.sprintf "id %s conflicts with a built-in skill" id)
+  else Ok ()
 
 let parse_proposal (text : string) : (proposal, string) result =
   let text = Par.Json_extract.strip_think_tags text in
@@ -87,6 +141,8 @@ let validate_proposal ~(existing : string list) ~(force : bool)
     Error "id must be lowercase letters/digits/hyphens (<=64 chars, no leading/trailing hyphen)"
   else if List.mem p.id Par_code_skills.reserved_commands then
     Error (Printf.sprintf "id %s conflicts with a built-in command" p.id)
+  else if List.mem p.id Par_code_skills.builtin_skill_ids then
+    Error (Printf.sprintf "id %s conflicts with a built-in skill" p.id)
   else if List.mem p.id existing && not force then
     Error (Printf.sprintf "skill %s already exists (use --force to overwrite)" p.id)
   else if p.name = "" then Error "skill name is empty"
@@ -170,7 +226,8 @@ let write_skill ~base_dir ~(force : bool) (p : proposal) :
                (if arg = "" then "" else " (" ^ arg ^ ")"))
 
 let build_context ~(rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option)
-    ~(conv : Types.conversation option) (request : string) =
+    ~(conv : Types.conversation option) ~(target_id : string option)
+    (request : string) =
   let transcript =
     match conv with
     | Some c -> last_n (Par_code_extractor.serialize_transcript c) 8000
@@ -189,96 +246,118 @@ let build_context ~(rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option)
     |> List.sort_uniq String.compare
     |> String.concat ", "
   in
+  let target =
+    match target_id with
+    | None -> ""
+    | Some id ->
+      Printf.sprintf
+        "\n\n## Target skill id\nThe user asked to (re)write the skill with id `%s`.\nUse exactly this id, even if it already exists — the rewrite \
+         overwrites it." id
+  in
   Printf.sprintf
-    "## Request\n%s\n\n## Recent session\n%s\n\n## Project memory index\n%s\n\n## Existing skill ids\n%s"
-    request transcript memory_index existing
+    "## Request\n%s%s\n\n## Recent session\n%s\n\n## Project memory index\n%s\n\n## Existing skill ids\n%s"
+    request target transcript memory_index existing
+
+let confirm_and_write ~(rt : Runtime.runtime) ~(ui : Par_code_ui.backend)
+    (parsed : args) (proposal : proposal) =
+  let base_dir =
+    if parsed.user then Skill_loader.default_user_skills_dir ()
+    else Skill_loader.default_project_skills_dir ()
+  in
+  if parsed.user then
+    Par_code_ui.render_notice ui
+      "Note: a project skill with the same id shadows a user skill.";
+  let path = Filename.concat (Filename.concat base_dir proposal.id) "skill.md" in
+  Par_code_ui.render_notice ui "Proposed skill:";
+  Par_code_ui.render_notice ui
+    (Printf.sprintf "  /%s  %s" proposal.id proposal.name);
+  Par_code_ui.render_notice ui
+    (Printf.sprintf "  %s" proposal.description);
+  Par_code_ui.render_notice ui
+    (Printf.sprintf "  path: %s" path);
+  Par_code_ui.render_notice ui "  body:";
+  let preview =
+    if String.length proposal.body <= 2000 then proposal.body
+    else String.sub proposal.body 0 2000 ^ "\n[...]"
+  in
+  Par_code_ui.render_notice ui preview;
+  match Par_code_ui.prompt_confirm ~backend:ui "Write this skill? [y/N] " with
+  | Some ("y" | "yes") ->
+    (match write_skill ~base_dir ~force:parsed.force proposal with
+     | Error msg ->
+       Par_code_ui.render_error ui
+         (Printf.sprintf "[distill] %s" msg)
+     | Ok (written, backup) ->
+       Par_code_ui.render_success ui
+         (Printf.sprintf "[distill] wrote %s" written);
+       (match backup with
+        | Some b ->
+          Par_code_ui.render_notice ui
+            (Printf.sprintf "[distill] backup: %s" b)
+        | None -> ());
+       let registered, rejected = Par_code_skills.reload ~rt () in
+       Par_code_ui.render_notice ui
+         (Printf.sprintf "[distill] registered %d skill(s)"
+            (List.length registered));
+       List.iter
+         (fun (id, reason) ->
+            Par_code_ui.render_warning ui
+              (Printf.sprintf "[distill] %s: %s" id reason))
+         rejected;
+       Par_code_ui.render_notice ui
+         (Printf.sprintf "Run /%s <args>." proposal.id))
+  | _ ->
+    Par_code_ui.render_notice ui "[distill] cancelled"
 
 let run ~(rt : Runtime.runtime) ~(ui : Par_code_ui.backend)
     ~(mem_db : Par_code_memory.t option) ~(conv : Types.conversation option)
-    ~(args : string) : unit =
-  let parts = String.split_on_char ' ' args |> List.filter (fun s -> s <> "") in
-  let user = List.mem "--user" parts in
-  let force = List.mem "--force" parts in
-  let request =
-    parts
-    |> List.filter (fun s -> s <> "--user" && s <> "--force")
-    |> String.concat " " |> String.trim
-  in
-  if request = "" then
-    Par_code_ui.render_notice ui
-      "usage: /distill <what to turn into a skill> [--user] [--force]"
-  else begin
-    Par_code_ui.render_notice ui "[distilling...]";
-    let message = build_context ~rt ~mem_db ~conv request in
-    match
-      Runtime.invoke_generate rt ~agent_id:distiller_agent_id
-        ~save:false ~update_current:false ~message ()
-    with
-    | Error (e, _) ->
-      Par_code_ui.render_error ui
-        (Printf.sprintf "[distill] distiller failed: %s" (error_to_string e))
-    | Ok result ->
-      (match parse_proposal result.Types.text with
+    ?cancellation_token ?(on_invoke = fun _ -> ()) ~(args : string) () : unit =
+  match parse_args args with
+  | Error msg -> Par_code_ui.render_warning ui msg
+  | Ok parsed when parsed.request = "" ->
+    Par_code_ui.render_notice ui usage
+  | Ok parsed ->
+    let proceed () =
+      Par_code_ui.render_notice ui "[distilling...]";
+      let message =
+        build_context ~rt ~mem_db ~conv ~target_id:parsed.target_id parsed.request
+      in
+      let result =
+        on_invoke true;
+        Fun.protect ~finally:(fun () -> on_invoke false) (fun () ->
+          Runtime.invoke rt ~agent_id:distiller_agent_id ~message
+            ~save:false ~update_current:false
+            ~on_chunk:(Some (fun (_ : Types.llm_response_chunk) -> ()))
+            ?cancellation_token ())
+      in
+      match result with
+      | Error (Types.Cancelled _, _) ->
+        Par_code_ui.render_notice ui "[distill] cancelled"
+      | Error (e, _) ->
+        Par_code_ui.render_error ui
+          (Printf.sprintf "[distill] distiller failed: %s" (error_to_string e))
+      | Ok result ->
+        let text =
+          match result.Types.response.Types.text with Some t -> t | None -> ""
+        in
+        (match parse_proposal text with
+         | Error msg ->
+           Par_code_ui.render_error ui (Printf.sprintf "[distill] %s" msg)
+         | Ok raw ->
+           let proposal = pin_target_id parsed.target_id raw in
+           let existing =
+             Runtime.list_skills rt
+             |> List.map (fun (d : Types.skill_descriptor) -> d.id)
+           in
+           (match validate_proposal ~existing ~force:parsed.force proposal with
+            | Error msg ->
+              Par_code_ui.render_error ui (Printf.sprintf "[distill] %s" msg)
+            | Ok () -> confirm_and_write ~rt ~ui parsed proposal))
+    in
+    match parsed.target_id with
+    | Some id ->
+      (match check_target_id id with
        | Error msg ->
          Par_code_ui.render_error ui (Printf.sprintf "[distill] %s" msg)
-       | Ok proposal ->
-         let existing =
-           Runtime.list_skills rt
-           |> List.map (fun (d : Types.skill_descriptor) -> d.id)
-         in
-         (match validate_proposal ~existing ~force proposal with
-          | Error msg ->
-            Par_code_ui.render_error ui (Printf.sprintf "[distill] %s" msg)
-          | Ok () ->
-            let base_dir =
-              if user then Skill_loader.default_user_skills_dir ()
-              else Skill_loader.default_project_skills_dir ()
-            in
-            if user then
-              Par_code_ui.render_notice ui
-                "Note: a project skill with the same id shadows a user skill.";
-            let path = Filename.concat (Filename.concat base_dir proposal.id) "skill.md" in
-            Par_code_ui.render_notice ui "Proposed skill:";
-            Par_code_ui.render_notice ui
-              (Printf.sprintf "  /%s  %s" proposal.id proposal.name);
-            Par_code_ui.render_notice ui
-              (Printf.sprintf "  %s" proposal.description);
-            Par_code_ui.render_notice ui
-              (Printf.sprintf "  path: %s" path);
-            Par_code_ui.render_notice ui "  body:";
-            let preview =
-              if String.length proposal.body <= 2000 then proposal.body
-              else String.sub proposal.body 0 2000 ^ "\n[...]"
-            in
-            Par_code_ui.render_notice ui preview;
-            match
-              Par_code_ui.prompt_confirm ~backend:ui
-                (Printf.sprintf "Write this skill? [y/N] ")
-            with
-            | Some ("y" | "yes") ->
-              (match write_skill ~base_dir ~force proposal with
-               | Error msg ->
-                 Par_code_ui.render_error ui
-                   (Printf.sprintf "[distill] %s" msg)
-               | Ok (written, backup) ->
-                 Par_code_ui.render_success ui
-                   (Printf.sprintf "[distill] wrote %s" written);
-                 (match backup with
-                  | Some b ->
-                    Par_code_ui.render_notice ui
-                      (Printf.sprintf "[distill] backup: %s" b)
-                  | None -> ());
-                 let registered, rejected = Par_code_skills.reload ~rt () in
-                 Par_code_ui.render_notice ui
-                   (Printf.sprintf "[distill] registered %d skill(s)"
-                      (List.length registered));
-                 List.iter
-                   (fun (id, reason) ->
-                      Par_code_ui.render_warning ui
-                        (Printf.sprintf "[distill] %s: %s" id reason))
-                   rejected;
-                 Par_code_ui.render_notice ui
-                   (Printf.sprintf "Run /%s <args>." proposal.id))
-            | _ ->
-              Par_code_ui.render_notice ui "[distill] cancelled"))
-  end
+       | Ok () -> proceed ())
+    | None -> proceed ()

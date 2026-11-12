@@ -734,7 +734,7 @@ let render_help backend =
       item "/goal" "Set a goal for the agent (judge verifies completion)";
       item "/max" "Best-of-N: run N candidate answers, keep the best (on|off|2-5)";
       item "/skills" "List custom skills (reload: /skills reload)";
-      item "/distill" "Turn a repeated workflow into a reusable skill";
+      item "/distill" "Turn a repeated workflow into a skill (--id/--user/--force)";
       item "/reset" "Reset conversation";
       item "/checkpoint" "Force a session checkpoint";
       item "/checkpoints" "List session checkpoints";
