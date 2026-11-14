@@ -233,7 +233,13 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
       ?embedding_base_url:cfg.Par_code_config.embedding_base_url
       ?embedding_model:cfg.Par_code_config.embedding_model
       net in
-  match Runtime.create ~persistence:pers ~llm ~embeddings ~config:runtime_config switch with
+  match
+    Runtime.create ~persistence:pers ~llm ~embeddings ~config:runtime_config
+      ~mcp_servers:cfg.Par_code_config.mcp_servers
+      ~mcp_process_mgr:(Eio.Stdenv.process_mgr env)
+      ~mcp_net:net ~mcp_clock:(Eio.Stdenv.clock env)
+      switch
+  with
   | Error e ->
     ui_render_error (Printf.sprintf "Error creating runtime: %s" (error_to_string e));
     exit 1

@@ -48,6 +48,9 @@ type config = {
   bash_approval : string;
   max_mode : bool;
   max_candidates : int;
+  (* v0.11.0: MCP servers to start with the runtime. Parsed straight into the
+     SDK's own type so there is no second schema to drift. *)
+  mcp_servers : Par.Mcp_types.server_config list;
 }
 
 let default_system_prompt = {|
@@ -153,6 +156,7 @@ let default = {
   bash_approval = "ask";
   max_mode = false;
   max_candidates = 3;
+  mcp_servers = [];
 }
 
 let config_dir () =
@@ -208,6 +212,8 @@ let to_json (cfg : config) : Yojson.Safe.t =
     ("bash_approval", `String cfg.bash_approval);
     ("max_mode", `Bool cfg.max_mode);
     ("max_candidates", `Int cfg.max_candidates);
+    ( "mcp_servers"
+    , `List (List.map Par.Mcp_types.server_config_to_yojson cfg.mcp_servers) );
   ]
 
 let of_json (json : Yojson.Safe.t) : (config, string) result =
@@ -285,6 +291,16 @@ let of_json (json : Yojson.Safe.t) : (config, string) result =
          | _ -> default.bash_approval);
       max_mode = get_b "max_mode" default.max_mode;
       max_candidates = get_i "max_candidates" default.max_candidates;
+      mcp_servers =
+        (match json |> member "mcp_servers" with
+         | `List items ->
+           List.filter_map
+             (fun item ->
+                match Par.Mcp_types.server_config_of_yojson item with
+                | Ok cfg -> Some cfg
+                | Error _ -> None)
+             items
+         | _ -> []);
     }
   with exn -> Error (Printexc.to_string exn)
 
@@ -395,6 +411,7 @@ let merge
     bash_approval = Option.value bash_approval ~default:cfg.bash_approval;
     max_mode = cfg.max_mode;
     max_candidates = cfg.max_candidates;
+    mcp_servers = cfg.mcp_servers;
   }
 
 let require_config () =

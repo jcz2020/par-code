@@ -2996,3 +2996,11 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 **上游 issue**：https://github.com/jcz2020/par/issues/33
 
 **2026-11-14 验证（PAR `v0.16.2-beta.20261114`）——已修复，可关闭**：同一条 `..` 命令放进 `/flow run`，终端弹出 `⚠ bash: ... [y/a/N]`，答 `N` 后命令未执行（`ABSENT`），流程 7.3 秒正常收尾。对照上一版：同样的流程无提示直接写穿工作区。上游在审计中还找出三处同类绕过，一并修了。
+## 2026-11-14 · MCP 复用 SDK 的 server_config，不手工合并描述符
+
+- **tag**：mcp-w0-reuse-sdk-schema / no-manual-descriptor-merge
+- **before**：配置文件里若加 MCP 服务器，par-code 需要自己定义一套 schema；工具要手工并进 agent。
+- **after**：`mcp_servers` 字段直接用 `Par.Mcp_types.server_config`（含 `server_config_of_yojson`），`Runtime.create` 传 `~mcp_servers ~mcp_process_mgr ~mcp_net ~mcp_clock`；工具由 SDK 自动注入，par-code 只额外提供 `/mcp` 列表。
+- **reason**：两套 schema 必然漂移；手工合并会与 SDK 的自动注入撞名 —— 实测启动直接失败（`duplicate tool name: echo`），这是最有力的证据。
+- **scope**：仅 stdio（`command`/`args`/`env`/`cwd`/`startup_timeout`）；HTTP/SSE、OAuth、热重载留到后续版本。
+- **rollback**：删掉 config 字段与 create 的两个可选参数即可回到无 MCP 状态（`mcp_servers` 缺省为 `[]`）。

@@ -940,6 +940,21 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                         | _ -> Par_code_ui.render_notice ui "(no text)");
                      orphans := List.filter (fun (o, _) -> o <> id) !orphans)));
             loop ()
+          | "/mcp" ->
+            let tools = Runtime.mcp_tool_descriptors rt in
+            if tools = [] then
+              Par_code_ui.render_notice ui
+                "No MCP tools. Add \"mcp_servers\" to ~/.par/config.json (stdio \
+                 first: name, command, args, env)."
+            else begin
+              Par_code_ui.render_notice ui
+                (Printf.sprintf "MCP tools (%d):" (List.length tools));
+              List.iter
+                (fun (td : Par.Types.tool_descriptor) ->
+                   Par_code_ui.render_notice ui ("  " ^ td.name))
+                tools
+            end;
+            loop ()
           | "/flow" ->
             let rest =
               if String.length trimmed > 5 then
