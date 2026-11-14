@@ -2903,3 +2903,17 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 **影响范围**：`lib/par_code_repl.ml`（两处 invoke、孤儿提示、`/resume` 分支）、`lib/par_code_setup.ml`（persistence ref）、`lib/par_code_ui.ml`（help 行）、`test/test_par_code_repl.ml`（`resume_hint` 用例）。
 
 **回退方式**：去掉两处 `~durable:true` 即回到旧行为；`/resume` 在无孤儿时不显示。
+
+## [2026-11-14] v0.10.0 W2 工作流接线：`.par/flows/*.json` + `/flow`
+
+**变更前**：PAR 的 workflow 引擎只在 setup 里注册了持久化字段，从未被调用（README 能力表：「engine not yet invoked — roadmap v0.10.0」）。用户没有任何办法定义或运行一个流程。
+
+**变更后**：流程定义放在 `.par/flows/<id>.json`（内容就是一个 PAR `workflow_def`：steps / variables / failure_policy / timeout / parallel_limit）。`/flow` 列出定义，`/flow run <id>` 同步执行，`/flow status [run-id]`、`/flow cancel <run-id>`、`/flow resume <run-id>` 管运行。
+
+**原因**：这是路线图 v0.10 Compose 的底座 —— Compose 要"给一段 spec 跑完 plan→execute→review"，前提是能定义并驱动一个流程。用文件而不是配置项，是因为流程要能评审、能 diff、能像 skill 一样分享。
+
+**影响范围**：`lib/par_code_flow.ml/.mli`（新）、`lib/par_code_repl.ml`（`/flow` 分支）、`lib/par_code_ui.ml`（help 行）、`test/test_par_code_flow.ml`（新）、`test/dune`。
+
+**回退方式**：删掉 `/flow` 分支与 `par_code_flow`，引擎回到"只注册不调用"的旧状态。
+
+**附：为什么是同步执行**：REPL 的输入走 linenoise（Eio 之外的阻塞 C 调用），`submit_workflow_async` 叉出去的 fiber 在提示符等待时永远得不到调度 —— 真机验证时流程一直停在 `running`。改用 `submit_workflow` 阻塞调用方后 22.1 秒完成（`completed (success, 22.1s)`）。代价是 `/flow cancel` 只能作用于上一个进程留下的运行。

@@ -47,6 +47,26 @@
   `Domain_name.t` for SNI itself. The UI's event renderer now ends in a catch-all
   instead of enumerating every observability event.
 
+### Added — workflows
+
+- **`/flow` runs a workflow defined in `.par/flows/<id>.json`.** The file holds
+  a PAR `workflow_def` — steps, variables, failure policy, timeout, parallel
+  limit — so a flow is reviewable and shareable the way a skill is. par-code
+  owns only the file convention and the command: `/flow` lists the definitions,
+  `/flow run <id>` executes one, `/flow status [run-id]`, `/flow cancel
+  <run-id>`, `/flow resume <run-id>`.
+- **Runs execute synchronously, on purpose.** The REPL reads input through a
+  blocking C call outside Eio, so a fiber forked by `submit_workflow_async`
+  never gets scheduled while the prompt waits — the run stayed `running`
+  forever in a live test. `/flow run` uses `submit_workflow` and says out loud
+  that it blocks; `/flow cancel` therefore applies to a run left by an earlier
+  process (suspended for approval or orphaned by a crash).
+- **Definition format.** `[@@deriving yojson]` decides it: a step is
+  `["Agent_call", {...}]`, a nullary variant such as the failure policy is
+  `["Continue_on_failure"]`, and `variables` is a list of `[name, value]`
+  pairs. `test_par_code_flow.ml` pins a full example so the format cannot drift
+  silently.
+
 ### Added — crash recovery
 
 - **`/resume` continues an interrupted run.** REPL turns and `par ask` now call

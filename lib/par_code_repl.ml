@@ -46,6 +46,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
   Par_code_ui.render_banner ui ~version:Par_code_version.version;
   let conv : Types.conversation option ref = ref (load_initial_conv ui rt resume) in
   let orphans = ref (Runtime.list_orphaned_invokes rt) in
+  let last_flow : string option ref = ref None in
   (match resume_hint !orphans with
    | Some line -> Par_code_ui.render_warning ui line
    | None -> ());
@@ -938,6 +939,112 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                           Par_code_ui.render_notice ui t
                         | _ -> Par_code_ui.render_notice ui "(no text)");
                      orphans := List.filter (fun (o, _) -> o <> id) !orphans)));
+            loop ()
+          | "/flow" ->
+            let rest =
+              if String.length trimmed > 5 then
+                String.trim (String.sub trimmed 5 (String.length trimmed - 5))
+              else ""
+            in
+            let words =
+              String.split_on_char ' ' rest
+              |> List.filter (fun s -> s <> "")
+            in
+            let with_run id f =
+              let run_id = Par.Types.Workflow_run_id.of_string id in
+              f run_id
+            in
+            (match words with
+             | [] ->
+               (match Par_code_flow.available () with
+                | [] ->
+                  Par_code_ui.render_notice ui
+                    "No flows yet. Add .par/flows/<id>.json with a PAR \
+                     workflow_def."
+                | ids ->
+                  Par_code_ui.render_notice ui "Flows:";
+                  List.iter
+                    (fun id -> Par_code_ui.render_notice ui ("  " ^ id))
+                    ids)
+             | [ "run"; id ] ->
+               (match Par_code_flow.load id with
+                | Error msg ->
+                  Par_code_ui.render_error ui ("[flow] " ^ msg)
+                | Ok def ->
+                  (* The REPL's input is a blocking C call outside Eio, so a fiber
+                     forked by [submit_workflow_async] never gets scheduled while
+                     we sit at the prompt. Run the workflow synchronously in the
+                     caller instead; the notice says we are blocking. *)
+                  Par_code_ui.render_notice ui
+                    (Printf.sprintf "[flow] running %s (blocks the REPL)" id);
+                  (match
+                     Runtime.submit_workflow rt (Par_code_flow.workflow_of def)
+                   with
+                   | Error e ->
+                     Par_code_ui.render_error ui
+                       ("[flow] could not start: "
+                       ^ Par_code_setup.error_to_string e)
+                   | Ok run_id ->
+                     let id = Par.Types.Workflow_run_id.to_string run_id in
+                     last_flow := Some id;
+                     (match Runtime.get_workflow_status rt run_id with
+                      | Error e ->
+                        Par_code_ui.render_error ui
+                          ("[flow] " ^ Par_code_setup.error_to_string e)
+                      | Ok st ->
+                        Par_code_ui.render_success ui
+                          (Printf.sprintf "[flow] %s %s" id
+                             (Par_code_flow.status_line st)))))
+             | [ "status" ] | [ "status"; _ ] ->
+               let id =
+                 match words with
+                 | [ _; id ] -> Some id
+                 | _ -> !last_flow
+               in
+               (match id with
+                | None ->
+                  Par_code_ui.render_notice ui
+                    "[flow] no run yet; /flow status <run-id>"
+                | Some id ->
+                  with_run id (fun run_id ->
+                      match Runtime.get_workflow_status rt run_id with
+                      | Error e ->
+                        Par_code_ui.render_error ui
+                          ("[flow] " ^ Par_code_setup.error_to_string e)
+                      | Ok st ->
+                        Par_code_ui.render_notice ui
+                          (Printf.sprintf "[flow] %s: %s" id
+                             (Par_code_flow.status_line st))))
+             | [ "cancel"; id ] ->
+               with_run id (fun run_id ->
+                   match Runtime.cancel_workflow rt run_id with
+                   | Error e ->
+                     Par_code_ui.render_error ui
+                       ("[flow] " ^ Par_code_setup.error_to_string e)
+                   | Ok () ->
+                     Par_code_ui.render_notice ui
+                       (Printf.sprintf "[flow] %s cancelled" id))
+             | [ "resume"; id ] ->
+               with_run id (fun run_id ->
+                   match Runtime.recover_workflow rt run_id with
+                   | Error e ->
+                     Par_code_ui.render_error ui
+                       ("[flow] " ^ Par_code_setup.error_to_string e)
+                   | Ok None ->
+                     Par_code_ui.render_notice ui
+                       (Printf.sprintf "[flow] %s resumed (still suspended)" id)
+                   | Ok (Some r) ->
+                     Par_code_ui.render_success ui
+                       (Printf.sprintf "[flow] %s done: %s in %.1fs" id
+                          (match r.Types.status with
+                           | `Success -> "success"
+                           | `Partial -> "partial"
+                           | `Failed -> "failed")
+                          r.Types.elapsed))
+             | _ ->
+               Par_code_ui.render_warning ui
+                 "usage: /flow | /flow run <id> | /flow status [run-id] | \
+                  /flow cancel <run-id> | /flow resume <run-id>");
             loop ()
           | "/distill" ->
             let rest =
