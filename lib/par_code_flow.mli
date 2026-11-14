@@ -32,4 +32,12 @@ val status_line : Par.Types.workflow_status -> string
     run and the failure category of a failed one. *)
 
 val workflow_of : Par.Types.workflow_def -> Par.Types.workflow
-(** Wrap a definition for [Runtime.submit_workflow_async]. *)
+(** Wrap a definition for [Runtime.submit_workflow]. *)
+
+val interactive_agents : string list
+(** Agent ids that can stop and wait for a human: [par] and [general] carry bash
+    and write tools, [planner] asks whether to switch mode. *)
+
+val agent_ids : Par.Types.workflow_def -> string list
+(** Every [agent_id] a definition names, sorted. Pure: the definition is walked
+    as JSON, so a new step shape needs no second visitor. *)

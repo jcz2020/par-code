@@ -2944,3 +2944,15 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 **回退方式**：删掉示例并把 `load` 的回落去掉。
 
 **遗留（重要）**：工作流步骤**不会把工具事件渲染到 REPL，也没有人能回答审批**。真机验证时两版都卡死过：先用 `planner` 阶段，它在流程里弹"切 build 模式？[y/N]"；换成 `par` 真写文件，又卡在写/命令阶段的交互上。所以本切片的三段全部只读，写阶段必须等"工作流审批接线"之后再做。`/flow run` 是同步阻塞且中途无输出的，用户只能等终态。
+
+## [2026-11-14] v0.10.0 工作流可见性：进度轮询 + 交互 agent 预警
+
+**变更前**：`/flow run` 同步阻塞且中途无任何输出；一个跑两分钟的流程，用户面对的是冻结的提示符。若定义里写了会停下等人的 agent（`planner` / `par` / `general`），流程会静默挂死到超时。
+
+**变更后**：`/flow run` 在提交前先扫描定义里的 `agent_id`，命中交互类 agent 就按名字警告；提交后起一个后台 fiber，每 5 秒打印 `[flow] still running (Ns)`，直到运行结束。轮询能工作是因为 `submit_workflow` 阻塞在 Eio 内部，调度器仍会跑其他 fiber —— 与 REPL 输入那个纯 C 阻塞不同。
+
+**原因**：真机验证时三段式跑了 97.7 秒，期间提示符毫无动静，只能靠外部观察进程判断死活；这不是可接受的终端体验。
+
+**影响范围**：`lib/par_code_repl.ml`（`/flow run` 分支）、`lib/par_code_flow.ml/.mli`（`agent_ids` / `interactive_agents`）、`lib/par_code_setup.ml`（暴露 clock）。
+
+**回退方式**：删掉轮询 fiber 与预警分支。

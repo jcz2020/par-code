@@ -971,30 +971,61 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                 | Error msg ->
                   Par_code_ui.render_error ui ("[flow] " ^ msg)
                 | Ok def ->
-                  (* The REPL's input is a blocking C call outside Eio, so a fiber
-                     forked by [submit_workflow_async] never gets scheduled while
-                     we sit at the prompt. Run the workflow synchronously in the
-                     caller instead; the notice says we are blocking. *)
+                  let unsafe =
+                    List.filter
+                      (fun a -> List.mem a Par_code_flow.interactive_agents)
+                      (Par_code_flow.agent_ids def)
+                  in
+                  (match unsafe with
+                   | [] -> ()
+                   | ids ->
+                     Par_code_ui.render_warning ui
+                       (Printf.sprintf
+                          "[flow] %s can stop and wait for a human, but a workflow \
+                           step has nobody to answer it: the run may hang. Use a \
+                           read-only agent."
+                          (String.concat ", " ids)));
                   Par_code_ui.render_notice ui
                     (Printf.sprintf "[flow] running %s (blocks the REPL)" id);
-                  (match
-                     Runtime.submit_workflow rt (Par_code_flow.workflow_of def)
-                   with
-                   | Error e ->
-                     Par_code_ui.render_error ui
-                       ("[flow] could not start: "
-                       ^ Par_code_setup.error_to_string e)
-                   | Ok run_id ->
-                     let id = Par.Types.Workflow_run_id.to_string run_id in
-                     last_flow := Some id;
-                     (match Runtime.get_workflow_status rt run_id with
-                      | Error e ->
-                        Par_code_ui.render_error ui
-                          ("[flow] " ^ Par_code_setup.error_to_string e)
-                      | Ok st ->
-                        Par_code_ui.render_success ui
-                          (Printf.sprintf "[flow] %s %s" id
-                             (Par_code_flow.status_line st)))))
+                  (* [submit_workflow] blocks inside Eio, so other fibers still
+                     run: a poller can show that the run is alive. *)
+                  let finished = ref false in
+                  (match Par_code_setup.clock () with
+                   | Some clock ->
+                     Eio.Fiber.fork
+                       ~sw:(Par.Runtime.cancellation_root rt)
+                       (fun () ->
+                          let start = Unix.gettimeofday () in
+                          while not !finished do
+                            (try Eio.Time.sleep clock 5.0 with _ -> ());
+                            if not !finished then
+                              Par_code_ui.render_notice ui
+                                (Printf.sprintf "[flow] still running (%.0fs)"
+                                   (Unix.gettimeofday () -. start))
+                          done)
+                   | None -> ());
+                  Fun.protect
+                    ~finally:(fun () -> finished := true)
+                    (fun () ->
+                       match
+                         Runtime.submit_workflow rt
+                           (Par_code_flow.workflow_of def)
+                       with
+                       | Error e ->
+                         Par_code_ui.render_error ui
+                           ("[flow] could not start: "
+                           ^ Par_code_setup.error_to_string e)
+                       | Ok run_id ->
+                         let id = Par.Types.Workflow_run_id.to_string run_id in
+                         last_flow := Some id;
+                         (match Runtime.get_workflow_status rt run_id with
+                          | Error e ->
+                            Par_code_ui.render_error ui
+                              ("[flow] " ^ Par_code_setup.error_to_string e)
+                          | Ok st ->
+                            Par_code_ui.render_success ui
+                              (Printf.sprintf "[flow] %s %s" id
+                                 (Par_code_flow.status_line st)))))
              | [ "status" ] | [ "status"; _ ] ->
                let id =
                  match words with

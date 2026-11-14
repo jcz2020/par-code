@@ -59,8 +59,13 @@
   blocking C call outside Eio, so a fiber forked by `submit_workflow_async`
   never gets scheduled while the prompt waits — the run stayed `running`
   forever in a live test. `/flow run` uses `submit_workflow` and says out loud
-  that it blocks; `/flow cancel` therefore applies to a run left by an earlier
-  process (suspended for approval or orphaned by a crash).
+  that it blocks. Because that call blocks *inside* Eio, a second fiber keeps
+  running: a poller prints `[flow] still running (Ns)` every five seconds, so a
+  long flow is visibly alive instead of a frozen prompt.
+- **A step that names an agent which can stop for a human is called out before
+  the run starts.** `par` / `general` (bash, writes) and `planner` (asks whether
+  to switch mode) have no one to answer inside a workflow step, so `/flow run`
+  warns by name rather than hanging silently.
 - **Definition format.** `[@@deriving yojson]` decides it: a step is
   `["Agent_call", {...}]`, a nullary variant such as the failure policy is
   `["Continue_on_failure"]`, and `variables` is a list of `[name, value]`

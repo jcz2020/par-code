@@ -59,6 +59,10 @@ let ensure_rng () = Mirage_crypto_rng_unix.use_default ()
 let persistence_service : Types.persistence_service option ref = ref None
 let persistence () = !persistence_service
 
+(* The REPL needs a clock to pace a progress poller while [/flow run] blocks. *)
+let clock_ref : _ Eio.Time.clock option ref = ref None
+let clock () = !clock_ref
+
 let make_persistence_service (cfg : Par_code_config.config) =
   let (`Sqlite path) = Par_code_config.to_persistence_config cfg in
   let retention = cfg.Par_code_config.event_retention_days *. 24. *. 60. *. 60. in
@@ -222,6 +226,7 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
   let _ = persistence_config in
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun switch ->
+  clock_ref := Some (Eio.Stdenv.clock env);
   let net = Eio.Stdenv.net env in
   let llm = make_llm_service provider_tag cfg.Par_code_config.api_key cfg.Par_code_config.api_base net in
   let embeddings = make_embedding_service provider_tag cfg.Par_code_config.api_key cfg.Par_code_config.api_base

@@ -65,3 +65,22 @@ let status_line = function
 
 let workflow_of (def : Types.workflow_def) : Types.workflow =
   { Types.def; on_complete = None }
+
+(* Agents that can stop and wait for a human: [par] and [general] carry bash and
+   write tools, [planner] asks whether to switch mode. A workflow step has no
+   channel for either, so a run that names one can hang with no way to answer. *)
+let interactive_agents = [ "par"; "planner"; "general" ]
+
+let agent_ids (def : Types.workflow_def) : string list =
+  let rec walk = function
+    | `Assoc fields ->
+      List.concat_map
+        (fun (key, value) ->
+           if key = "agent_id" then
+             match value with `String s -> [ s ] | _ -> []
+           else walk value)
+        fields
+    | `List items -> List.concat_map walk items
+    | _ -> []
+  in
+  walk (Types.workflow_def_to_yojson def) |> List.sort_uniq String.compare
