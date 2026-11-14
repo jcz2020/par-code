@@ -87,7 +87,7 @@ RUN opam init --disable-sandboxing -y --bare --no-setup && \
     eval $(opam env --switch=default)
 
 # Pin the PAR SDK (not yet on the public opam repository) to the
-# v0.16.1-beta release tag. Pinning the branch tip instead would make the
+# v0.16.2-beta release tag. Pinning the branch tip instead would make the
 # bundle depend on whatever upstream's main happened to be — an upstream
 # change with a new required record field breaks the build without any
 # par-code change.
@@ -96,7 +96,7 @@ RUN opam init --disable-sandboxing -y --bare --no-setup && \
 # to 2.7.0 cascades the solver to eio.1.3 (which allows uring < 2.14.0).
 RUN eval $(opam env --switch=default) && \
     opam pin add uring 2.7.0 -y && \
-    opam pin add par https://github.com/jcz2020/par.git#v0.16.1-beta.20261114 -y; \
+    opam pin add par https://github.com/jcz2020/par.git#v0.16.2-beta.20261114 -y; \
     rc=$?; \
     if [ "$rc" -ne 0 ] && [ "$rc" -ne 31 ]; then exit "$rc"; fi
 

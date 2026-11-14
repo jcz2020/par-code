@@ -374,19 +374,19 @@ install_from_source() {
 
     _par_mirror="${PAR_PAR_MIRROR:-$_mirror}"
     _par_url="https://${_par_mirror}/jcz2020/par.git"
-    # Pinned to the v0.16.1-beta release tag: a branch-tip pin would install
+    # Pinned to the v0.16.2-beta release tag: a branch-tip pin would install
     # an SDK whose newer required record fields this par-code version does not
     # know about, so the source build would fail. Mirrors must carry the tag.
-    info "pinning PAR SDK (v0.16.1-beta tag)..."
+    info "pinning PAR SDK (v0.16.2-beta tag)..."
     # Skip only when the pin already points at the required version. The old
     # check (`grep -q '^par '`) never matched: `opam pin list` prints the name
     # WITH the version ("par.0.12.0-beta.20261023"), so the source install
     # always re-pinned.
     if opam pin list 2>/dev/null | grep -q '^par\.0\.12\.0-beta'; then
-        info "PAR SDK already pinned at v0.16.1-beta; skipping"
+        info "PAR SDK already pinned at v0.16.2-beta; skipping"
     else
         _pin_log="${TMPDIR_RESOLVED}/par_opam_pin.log"
-        opam pin add par "$_par_url#v0.16.1-beta.20261114" -y > "$_pin_log" 2>&1 || {
+        opam pin add par "$_par_url#v0.16.2-beta.20261114" -y > "$_pin_log" 2>&1 || {
             error "opam pin add par failed (exit $?)"
             tail -10 "$_pin_log" >&2; rm -f "$_pin_log"
             exit 1

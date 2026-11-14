@@ -82,7 +82,7 @@ par-code/
 2. **版本号不可自动 bump**：`dune-project` 的 `(version …)` 只在用户明确说"发布"时改；同步改 `test/test_par_code.ml:2` 断言；commit `dune build` 重新生成的 `par_code.opam`。
 3. **FTS5 必须从 amalgamation 编译**（`-DSQLITE_ENABLE_FTS5`），OS 包 sqlite3 不进 release binary。版本锁 `scripts/sqlite-amalgamation.version`（Linux Dockerfile 与 macOS 脚本共用同一版本号）；Dockerfile 提取版本只用 `grep -E '^[0-9]+'`，绝不用 `cat | tr -d`（注释行会被拼进去）。
 4. **并行 agent 禁止 git 写操作**（`stash` / `checkout -- .` / `revert` / `reset` / `clean`）；build 失败只修自己的文件，不动别人的；隔离验证用 `dune build` 的 `_build/`。违反会互相覆盖丢工作（v0.3.1 Wave 1 踩过）。
-5. **PAR SDK 钉 tag，不钉分支 tip**：`v0.16.1-beta.20261114` 固定 6 处——`dune-project`（地板）+ 5 个安装点（`.github/workflows/ci.yml` / `.github/workflows/release.yml` / `scripts/docker/linux-bundle.Dockerfile` / `scripts/build-macos.sh` / `scripts/install.sh`）。
+5. **PAR SDK 钉 tag，不钉分支 tip**：`v0.16.2-beta.20261114` 固定 6 处——`dune-project`（地板）+ 5 个安装点（`.github/workflows/ci.yml` / `.github/workflows/release.yml` / `scripts/docker/linux-bundle.Dockerfile` / `scripts/build-macos.sh` / `scripts/install.sh`）。
 6. **披露规则**：committed 产物不得出现外部项目 / 公司名。
 7. `lib/par_code_version.ml` 由 dune 生成（gitignored），不可手编。
 

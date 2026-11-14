@@ -28,12 +28,14 @@
 ### Changed — PAR SDK v0.16.0-beta.20261114
 
 - **The SDK pin moves from `v0.12.0-beta.20261023` to
-  `v0.16.1-beta.20261114`** in all six places (`dune-project` floor + the five
+  `v0.16.2-beta.20261114`** in all six places (`dune-project` floor + the five
   install points).
 - **The built-in `find` / `grep` work again** — the upstream fix for
   `jcz2020/par#32`. The tag `v0.16.0` shipped only half of it (`find` fixed,
   `grep` still anchored to the start of each line), so the pin lands on
-  `v0.16.1`, whose release carries the rest. par-code keeps no search
+  `v0.16.1`, whose release carries the rest; `v0.16.2` then carries the
+  tool-call-hook fix so an approval gate also fires inside a workflow step and
+  inside `invoke_parallel` (`jcz2020/par#33`). par-code keeps no search
   replacement of its own: the SDK tools are registered exactly as before.
 - **Migration for the four-minor API drift.** `model_config` gained
   `thinking_budget_tokens` and `context_window`; `message` lost

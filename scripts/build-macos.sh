@@ -125,7 +125,7 @@ install_dylib gmp    libgmp.dylib    libgmp.10.dylib
 info "setting up opam environment ..."
 eval "$(opam env)"
 
-# Pin PAR SDK to the v0.16.1-beta release tag — the SDK this release targets.
+# Pin PAR SDK to the v0.16.2-beta release tag — the SDK this release targets.
 # A branch-tip pin makes the bundle depend on whatever upstream's main
 # happened to be; an upstream change with a new required record field then
 # breaks the build with no par-code change involved.
@@ -135,10 +135,10 @@ eval "$(opam env)"
 # prints the name WITH the version ("par.0.12.0-beta.20261023"), so the script
 # always re-pinned and overwrote CI's tag pin with a branch-tip pin.
 if opam pin list 2>/dev/null | grep -q '^par\.0\.12\.0-beta'; then
-    info "PAR SDK already pinned at v0.16.1-beta; skipping"
+    info "PAR SDK already pinned at v0.16.2-beta; skipping"
 else
-    info "pinning PAR SDK (v0.16.1-beta tag) ..."
-    opam pin add par https://github.com/jcz2020/par.git#v0.16.1-beta.20261114 -y \
+    info "pinning PAR SDK (v0.16.2-beta tag) ..."
+    opam pin add par https://github.com/jcz2020/par.git#v0.16.2-beta.20261114 -y \
         || { rc=$?; [ "$rc" -eq 31 ] \
              || die "opam pin failed with exit $rc"; \
              warn "opam pin returned 31 (out of sync) — continuing"; }
