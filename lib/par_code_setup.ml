@@ -282,9 +282,6 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
          exit 1)
     ) tools;
     let descriptors = ref (List.map (fun (tb : Types.tool_binding) -> tb.descriptor) tools) in
-    (* v0.11.0: MCP tools go to the main agent and `general` only. `explore`
-       and the max-mode candidates filter by name, so they stay read-only. *)
-    descriptors := Runtime.mcp_tool_descriptors rt @ !descriptors;
     (match mem_db with
      | Some t ->
        let mem_tools = Par_code_memory_tools.tools t in
