@@ -8,8 +8,12 @@
 open Par
 
 let dir = ".par/flows"
+let example_dir = "examples/flows"
 
 let path_of id = Filename.concat dir (id ^ ".json")
+
+let candidates id =
+  [ path_of id; Filename.concat example_dir (id ^ ".json") ]
 
 (* Pure and unit-tested: parse a definition without touching the disk. *)
 let def_of_string (s : string) : (Types.workflow_def, string) result =
@@ -21,10 +25,12 @@ let def_of_string (s : string) : (Types.workflow_def, string) result =
   | exception Yojson.Json_error msg -> Error ("invalid JSON: " ^ msg)
 
 let load (id : string) : (Types.workflow_def, string) result =
-  let path = path_of id in
-  if not (Sys.file_exists path) then
-    Error (Printf.sprintf "no flow named %s (expected %s)" id path)
-  else
+  match List.find_opt Sys.file_exists (candidates id) with
+  | None ->
+    Error
+      (Printf.sprintf "no flow named %s (looked in %s and %s)" id dir
+         example_dir)
+  | Some path ->
     match (try Some (open_in_bin path) with Sys_error _ -> None) with
     | None -> Error (Printf.sprintf "cannot open %s" path)
     | Some ic ->
@@ -33,14 +39,16 @@ let load (id : string) : (Types.workflow_def, string) result =
         (fun () ->
            def_of_string (really_input_string ic (in_channel_length ic)))
 
-let available () : string list =
-  match Sys.readdir dir with
+let ids_in d =
+  match Sys.readdir d with
   | entries ->
     Array.to_list entries
     |> List.filter (fun f -> Filename.check_suffix f ".json")
     |> List.map (fun f -> Filename.chop_suffix f ".json")
-    |> List.sort String.compare
   | exception Sys_error _ -> []
+
+let available () : string list =
+  List.sort_uniq String.compare (ids_in dir @ ids_in example_dir)
 
 let status_line = function
   | Types.Wf_pending -> "pending"

@@ -34,8 +34,8 @@ let test_missing_file () =
   match Par_code_flow.load "definitely-not-a-flow" with
   | Ok _ -> Alcotest.fail "a missing file must be an error"
   | Error msg ->
-    Alcotest.(check bool) "names the path" true
-      (let needle = ".par/flows/" in
+    Alcotest.(check bool) "names the directory" true
+      (let needle = ".par/flows" in
        let n = String.length needle and h = String.length msg in
        let rec go i = i + n <= h && (String.sub msg i n = needle || go (i + 1)) in
        go 0)

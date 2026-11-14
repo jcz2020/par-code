@@ -2930,3 +2930,17 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 
 **附：为什么是同步执行**：REPL 的输入走 linenoise（Eio 之外的阻塞 C 调用），`submit_workflow_async` 叉出去的 fiber 在提示符等待时永远得不到调度 —— 真机验证时流程一直停在 `running`。改用 `submit_workflow` 阻塞调用方后 22.1 秒完成（`completed (success, 22.1s)`）。代价是 `/flow cancel` 只能作用于上一个进程留下的运行。
 ||||||| 91e4145
+
+## [2026-11-14] v0.10.0 W3 最小切片：只读三段式 flow
+
+**变更前**：`/flow` 只能跑项目里自定义的定义，仓库不自带任何示例；流程步骤之间怎么传值没有先例可循。
+
+**变更后**：新增 `examples/flows/compose.json`（规划 → 给出具体改动方案 → 评审，三步都是只读 `explore`），并把 `Par_code_flow.load` 改成先找 `.par/flows/`、再回落到 `examples/flows/`，所以示例开箱能跑。
+
+**原因**：路线图 v0.10 承诺"给一段 spec，它设计、编码、评审、测试"。最小切片先把"多阶段串联"跑通 —— 引擎会把每步结果绑成 `result_N` / `result_N.text`，所以后一步可以用 `{{result_0.text}}` 拿到前一步的输出。
+
+**影响范围**：`examples/flows/compose.json`（新）、`lib/par_code_flow.ml/.mli`（双目录查找）、`test/test_par_code_flow.ml`。
+
+**回退方式**：删掉示例并把 `load` 的回落去掉。
+
+**遗留（重要）**：工作流步骤**不会把工具事件渲染到 REPL，也没有人能回答审批**。真机验证时两版都卡死过：先用 `planner` 阶段，它在流程里弹"切 build 模式？[y/N]"；换成 `par` 真写文件，又卡在写/命令阶段的交互上。所以本切片的三段全部只读，写阶段必须等"工作流审批接线"之后再做。`/flow run` 是同步阻塞且中途无输出的，用户只能等终态。

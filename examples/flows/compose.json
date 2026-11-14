@@ -1,0 +1,26 @@
+{
+  "id": "compose",
+  "name": "Spec -> plan -> propose -> review (read-only)",
+  "version": 1,
+  "steps": ["Sequential", [
+    ["Agent_call", {
+      "agent_id": "explore",
+      "prompt_template": "Write a short, concrete plan for this request. You are read-only: no edits, no shell. Reply with the plan only, no preamble.\n\nRequest:\n{{spec}}",
+      "response_schema": null
+    }],
+    ["Agent_call", {
+      "agent_id": "explore",
+      "prompt_template": "Turn this plan into the exact edits it requires: one line per file, the change to make, and why. Do not apply anything.\n\nPlan:\n{{result_0.text}}",
+      "response_schema": null
+    }],
+    ["Agent_call", {
+      "agent_id": "explore",
+      "prompt_template": "Review the plan and the proposed edits below against the original request. List concrete problems only; say 'no problems found' when there are none.\n\nRequest:\n{{spec}}\n\nPlan:\n{{result_0.text}}\n\nProposed edits:\n{{result_1.text}}",
+      "response_schema": null
+    }]
+  ]],
+  "variables": [["spec", "Add a --dry-run flag to the flow command that prints the parsed definition instead of running it"]],
+  "failure_policy": ["Continue_on_failure"],
+  "parallel_limit": 1,
+  "timeout": 600.0
+}
