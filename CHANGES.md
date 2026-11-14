@@ -94,11 +94,11 @@ stats. A best-of-N winner could not be continued, and no token could be billed.
 `Par_code_parallel` therefore calls `Runtime.invoke` directly, where the full
 `invoke_result` survives. Recorded as a PAR gap in `docs/DECISIONS.md`.
 
-## v0.9.0 — Self-improvement (unreleased)
+## v0.9.0 — Self-improvement (2026-11-14)
 
-> **Status**: In progress on `feat/v0.9.0-skills`.
+> **Status**: Released 2026-11-14.
 >
-> **Scope**: user/project skills (W0/W1) and `/distill` (W2).
+> **Scope**: user/project skills (W0/W1) and `/distill` (W2). `/dream` (W3) is deferred to v0.9.1.
 
 ### Added — skills
 

@@ -2880,6 +2880,18 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 **回退方式**：pin 退回 `v0.12.0-beta.20261023` 并 `opam install par -y`，同时回滚上述六个模块的迁移。
 
 
+## [2026-11-14] v0.9.0 范围收窄：`/dream` 推迟到 v0.9.1
+
+**变更前**：README 的 v0.9.0 行承诺"`/dream` + `/distill` + 自定义 slash 命令"，`docs/v0.9.0-ROADMAP.md` 的 W3 是 `/dream`。
+
+**变更后**：v0.9.0 实际交付自定义 slash 命令（`/skills`）与 `/distill`；`/dream` 拆到 v0.9.1，README 新增 v0.9.1 行，CHANGES 的 Scope 段注明推迟。
+
+**原因**：`/dream` 从未实现（lib 无对应模块，REPL 无此命令）。v0.9.0 的核心价值是"把重复工作流固化成 skill"，`/distill` 已完整交付并通过单测与真机 dogfood；扣住整个版本去等一个尚未开始的记忆整理能力，会让已完成的切片无法发布。记忆整理与技能沉淀是两条主线，分开成版更符合"一版一能力"。
+
+**影响范围**：`README.md` roadmap 行（v0.9.0 标 ✅ 并收窄描述，新增 v0.9.1 行）、`CHANGES.md` 的 v0.9.0 Scope 段；无代码改动。
+
+**回退方式**：若决定先做 `/dream`，删除 v0.9.1 行、恢复 v0.9.0 原描述，并把版本号退回未发布状态。
+
 ## [2026-11-14] v0.10.0 并行归位：自建 `Par_code_parallel` 退役
 
 **变更前**：`delegate_batch` 走自建的有界扇出（`Eio.Fiber.List.map ~max_fibers`），因为这层是 0.12 时代为了绕开 `invoke_parallel` 只回 JSON 而写的。
@@ -2917,3 +2929,4 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 **回退方式**：删掉 `/flow` 分支与 `par_code_flow`，引擎回到"只注册不调用"的旧状态。
 
 **附：为什么是同步执行**：REPL 的输入走 linenoise（Eio 之外的阻塞 C 调用），`submit_workflow_async` 叉出去的 fiber 在提示符等待时永远得不到调度 —— 真机验证时流程一直停在 `running`。改用 `submit_workflow` 阻塞调用方后 22.1 秒完成（`completed (success, 22.1s)`）。代价是 `/flow cancel` 只能作用于上一个进程留下的运行。
+||||||| 91e4145
