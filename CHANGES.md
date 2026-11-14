@@ -9,19 +9,21 @@
 ### Added — parallelism
 
 - **`delegate_batch` runs up to five read-only `explore` subagents at once.**
-  Tasks run concurrently through a bounded pool; a task that fails or crashes
-  is reported in its own slot and the rest still run. UI lines and results are
-  emitted in input order, so two children never interleave on one terminal
-  line. A `general` task is rejected: two writers in one workspace collide, so
-  write parallelism waits for per-child worktrees (recorded as the next step).
-- **`Par_code_parallel` is the executor behind it.** `map ?parallel_limit` runs
-  a function over a list on Eio fibers (`Fiber.List.map ~max_fibers`), default
-  4, clamped to 1..16, input order preserved. A raised exception is captured
-  per item; `Eio.Cancel.Cancelled` is re-raised, so cancelling a turn can never
-  be mistaken for a partial success.
-- **`test_par_code_parallel.ml`** (28th Alcotest suite) covers input order,
-  empty batches, per-item exception isolation, and the concurrency bound
-  (including that work actually overlaps rather than running one at a time).
+  Tasks go through the SDK's own `Runtime.invoke_parallel
+  (~parallel_limit:4 ~failure_policy:Continue_on_failure)`, so the bound, the
+  policy and the cancellation are the SDK's, not a private copy. A task that
+  fails is reported in its own slot and the rest still run; UI lines and
+  results are emitted in input order, so two children never interleave on one
+  terminal line. A `general` task is rejected: two writers in one workspace
+  collide, so write parallelism waits for per-child worktrees.
+- **`merge_batch_results` puts the split back in order.** `invoke_parallel`
+  returns successes and failures as two lists, each in input order; this pure
+  function interleaves them back so slot i answers task i, matching on the task
+  text in order (duplicate texts still line up) and never comparing the dispatch
+  specs, which carry an approval handler.
+- **`test_par_code_delegate.ml`** covers the batch input validation and the
+  interleave: all-success, a failure in the middle, duplicate task texts, and a
+  missing result surfacing as an internal error.
 
 ### Changed — PAR SDK v0.16.0-beta.20261114
 

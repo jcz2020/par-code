@@ -2879,3 +2879,15 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 
 **回退方式**：pin 退回 `v0.12.0-beta.20261023` 并 `opam install par -y`，同时回滚上述六个模块的迁移。
 
+
+## [2026-11-14] v0.10.0 并行归位：自建 `Par_code_parallel` 退役
+
+**变更前**：`delegate_batch` 走自建的有界扇出（`Eio.Fiber.List.map ~max_fibers`），因为这层是 0.12 时代为了绕开 `invoke_parallel` 只回 JSON 而写的。
+
+**变更后**：直接调 `Runtime.invoke_parallel ~parallel_limit:4 ~failure_policy:Continue_on_failure ~cancellation_token`；新增纯函数 `merge_batch_results` 把 SDK 拆出的 successes / failures 按 `spec.input` 归并回输入序。`par_code_parallel.ml/.mli` 与其 fan-out 测试删除，原文件里的 `delegate_batch` 入参用例保留并改名为 `test_par_code_delegate.ml`。
+
+**原因**：0.15 起 `parallel_success` 带回 `conversation`，而 `delegate_batch` 只需要 text —— 自建层已经没有存在理由。按项目定位，能用 SDK 现成能力就不自己造。
+
+**影响范围**：`lib/par_code_delegate.ml/.mli`、`test/dune`、`test/test_par_code_delegate.ml`（新）、`lib/AGENTS.md`；删除 `lib/par_code_parallel.*` 与 `test/test_par_code_parallel.ml`。max-mode 不动：它要 usage，而 step 结果只回 text/tool_calls。
+
+**回退方式**：恢复 `Par_code_parallel` 与旧调用点（历史在 git 里）。
