@@ -18,7 +18,7 @@ let make_message (role : Types.message_role) (text : string) : Types.message =
   ; tool_calls = None
   ; tool_call_id = None
   ; name = None
-  ; reasoning_content = None
+  
   }
 
 let make_conv (msgs : (Types.message_role * string) list) : Types.conversation =
@@ -101,6 +101,7 @@ let test_plan_enter_handler_switches_to_plan () =
     | Types.Error _ -> Alcotest.fail "expected Success, got Error"
     | Types.Handoff _ -> Alcotest.fail "expected Success, got Handoff"
     | Types.Approval_required _ -> Alcotest.fail "expected Success, got Approval_required"
+    | Types.Success_content _ -> Alcotest.fail "expected Success json, got rich content"
   )
 
 let test_plan_enter_handler_returns_previous_mode () =

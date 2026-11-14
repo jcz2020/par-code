@@ -3,7 +3,7 @@
  (public_name par_code)
  (wrapped false)
   (libraries par par.memory yojson eio eio_main mirage-crypto-rng.unix sqlite3 logs
-             cohttp-eio tls-eio digestif uuidm linenoise))
+             cohttp-eio tls-eio digestif uuidm linenoise domain-name))
 
 (rule
  (targets par_code_version.ml)

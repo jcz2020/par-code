@@ -335,6 +335,8 @@ let to_model_config (cfg : config) : Types.model_config =
     max_tokens = cfg.max_tokens;
     top_p = cfg.top_p;
     stop_sequences = None;
+    thinking_budget_tokens = None;
+    context_window = None;
   }
 
 let to_persistence_config (cfg : config) : [ `Sqlite of string ] =

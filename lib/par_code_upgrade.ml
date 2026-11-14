@@ -53,12 +53,18 @@ let user_agent = "par-code/" ^ Par_code_version.version
 
 let tls_wrapper uri raw_flow =
   let cfg = Lazy.force Par.Http_client.tls_config in
+  (* PAR 0.16 dropped [Http_client.tls_host_of_string]; [tls-eio]'s [~host]
+     takes a [Domain_name.t], so build it here. An unparsable host keeps the
+     SNI-less path rather than silently skipping certificate checks. *)
   match Uri.host uri with
   | None -> Tls_eio.client_of_flow cfg raw_flow
   | Some host ->
-    (match Par.Http_client.tls_host_of_string host with
-     | Some h -> Tls_eio.client_of_flow cfg ~host:h raw_flow
-     | None -> Tls_eio.client_of_flow cfg raw_flow)
+    (match Domain_name.of_string host with
+     | Ok d ->
+       (match Domain_name.host d with
+        | Ok h -> Tls_eio.client_of_flow cfg ~host:h raw_flow
+        | Error _ -> Tls_eio.client_of_flow cfg raw_flow)
+     | Error _ -> Tls_eio.client_of_flow cfg raw_flow)
 
 let make_client net = Cohttp_eio.Client.make ~https:(Some tls_wrapper) net
 

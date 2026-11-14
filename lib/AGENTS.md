@@ -19,7 +19,8 @@ Flat directory — no subdirs; the module set IS the architecture. All modules a
 | Long-session continuity | `par_code_checkpoint.ml` (449) |
 | Goals: lifecycle / judge / chain / doom-loop / progress | `par_code_goal.ml` (134), `par_code_judge.ml` (128), `par_code_chain.ml` (300), `par_code_doom_loop.ml` (278), `par_code_progress.ml` (46) |
 | Best-of-N: candidates + selector | `par_code_max_mode.ml` (168) + `par_code_selector.ml` (133) |
-| Subagents / sessions / approvals / upgrade | `par_code_delegate.ml` (148), `par_code_session.ml` (210), `par_code_approvals.ml` (136), `par_code_upgrade.ml` (350) |
+| Subagents / sessions / approvals / upgrade | `par_code_delegate.ml` (300), `par_code_session.ml` (210), `par_code_approvals.ml` (136), `par_code_upgrade.ml` (350) |
+| Workflows on files (v0.10.0) | `par_code_flow.ml` (60) — `.par/flows/<id>.json` → `/flow` |
 
 ## CONVENTIONS
 
@@ -27,6 +28,10 @@ Flat directory — no subdirs; the module set IS the architecture. All modules a
 - v0.9.0 W0/W1: user skills live at `./.par/skills/<id>/skill.md` (project first) and `~/.par/skills/`; only `trigger: manual` is registered; the REPL adds `/skills` and `/<id>`; the SDK does not consume `body_path`, so `Par_code_skills.read_body` injects the body via `~system_prompt_appendix`.
 - v0.9.0 W2: `/distill` calls the tools-free `skill-distiller` agent for one JSON proposal; `par_code_distill` validates id/reserved/builtin/existing/description/body, shows it, writes via temp-file parse + rename, backs up to `.par/backups/skills/` on `--force`, then reloads; Build mode only. `--id <id>` pins the target id (overriding the model's pick) and is what makes `--force` reachable; the model call runs on `Runtime.invoke` with a REPL cancellation token (`?on_invoke` scopes it to the call), so Ctrl+C cancels instead of exiting.
 - v0.9.0 W1 reload: PAR 0.12-beta has no skill unregister/replace on `Runtime` (`rt.skills` is private, `Skill_registry.t` abstract), so a rewritten skill keeps par-code fresh (listing / dispatch / body) while the SDK binding keeps old frontmatter until restart. `Par_code_skills.frontmatter_diff` makes `/skills reload` warn only on real drift and name the fields.
+- v0.10.0 并发：`delegate_batch` 直接走 SDK 的 `Runtime.invoke_parallel`（`~parallel_limit:4 ~failure_policy:Continue_on_failure`），成功/失败两个列表各自保序，用 `merge_batch_results` 按 `spec.input` 双指针归并回输入序；**不要比较 spec 结构**——含 approval handler（函数字段），`(=)` 会抛。并行子任务必须只读（`delegate_batch` 只收 `explore`）。max-mode 仍走自己的 `Eio.Fiber.all`：它需要 usage，而 `invoke_parallel` 的 step 结果只回 text/tool_calls。
+- v0.10.0 工作流：流程定义放 `.par/flows/<id>.json`（内容就是 `workflow_def` 的 yojson），`/flow run` 用 **同步** `submit_workflow`（REPL 输入是 linenoise，`submit_workflow_async` 的 fiber 在提示符等待时不会被调度），并起一个后台 fiber 每 5 秒打 `[flow] still running (Ns)`；定义里出现 `planner`/`par`/`general` 这类可能停下的 agent 时先警告 —— **但审批提示仍会送到终端，用户看得到也能回答**，不要把它当成挂死。格式由 `[@@deriving yojson]` 决定：step 是 `["Agent_call", {...}]`，空构造子如 `["Continue_on_failure"]`，`variables` 是 `[[name, value]]`。
+- v0.10.0 崩溃恢复：REPL 与 `par ask` 的 invoke 都带 `~durable:true`；启动用 `list_orphaned_invokes` 提示孤儿行，`/resume [id|discard]` 走 `recover_invoke`；`Runtime` 没有删除入口，discard 通过 setup 暴露的 persistence service 调 `delete_invoke_checkpoint_fn`。语义至少一次：崩溃时在跑的那一轮重跑、已完成的工具批次不重跑；等审批挂起的运行不进孤儿列表。
+- v0.10.0 SDK 0.16：`message` 不再有 `reasoning_content`——推理在 `content_blocks` 的 `Reasoning_block` / `Redacted_reasoning_block` 里，`llm_response.reasoning` 是有序列表；`handler_result` 多了 `Success_content`（工具可回图像等富内容）；`persistence_service` 的 durable-invoke checkpoint / lease 六个钩子必须实现，否则 record 构造不过；`Http_client.tls_host_of_string` 已移除，自己用 `Domain_name.host` 构造 SNI。
 - v0.8.2 工具行边界：`Par_code_ui_markdown.has_pending` + `push "\n"` 在渲染工具/状态行前刷出半行（保留 code-block context）；`Tool_call_start` 独占一行；表格/help/cost/session 用无内嵌换行的 image，`render_line` 补一个行尾换行。
 - v0.8.2 `/cost`：事件回调对 `Tool_invoked` 调 `Runtime.record_tool_invocation`（每次调用一次，bash 不重复计）；max-mode 候选各自记录，胜者事件重放走不带 `~rt` 的回调；`tools_visible` 由主 agent 去重工具数计算；SDK 0.12-beta 的 `events_*` / budget 计数器不展示。
 - 手动 `/checkpoint` 传 `~extract:false`；周期 `maybe_checkpoint` 仍提取记忆（v0.8.2+）。

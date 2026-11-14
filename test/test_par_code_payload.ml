@@ -5,7 +5,7 @@ let blocks () : Types.content_block list =
 
 let msg ?tool_calls ?tool_call_id (role : Types.message_role) : Types.message =
   { Types.role; content_blocks = blocks (); tool_calls; tool_call_id;
-    name = None; reasoning_content = None }
+    name = None }
 
 let tc id args : Types.tool_call =
   { Types.id; name = "bash"; arguments = args }

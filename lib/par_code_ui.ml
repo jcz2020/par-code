@@ -463,6 +463,10 @@ let render_llm_chunk backend (chunk : Par.Types.llm_response_chunk) =
   | Reasoning_delta _ ->
     if backend.thinking_start = None then
       backend.thinking_start <- Some (Unix.gettimeofday ())
+  | Reasoning_signature _ ->
+    (* Anthropic sends the thinking signature as its own delta; nothing to
+       render, and the caller's conversation keeps it verbatim. *)
+    ()
   | Text_delta { text } ->
     close_thinking_window ();
     let safe_text = strip_think_streaming backend.think_buf text in
@@ -557,22 +561,10 @@ let render_tool_event backend (evt : Par.Types.event) =
   | Provider_fallback_attempted _
   | Llm_response_truncated _
   | Generate_continuation _
-  | Context_compressed _
-  | Context_compression_skipped _
-  | Cache_write _
-  | Cache_read _
-  | Cache_strategy_skipped _
-  | Cache_breakpoint_dropped _
-  | Cache_invalidated_by_skill _
-  | Deprecated_api_called _
-  | Approval_rejected _
-  | Approval_modified _
-  | Approval_escalated _
-  | Approval_handler_missing _
-  | Skill_activated _
-  | Skill_deactivated _
-  | Agent_tool_completed _ ->
-    (* Observability/approval events — no rendering. Could add verbose mode later. *)
+  | _ ->
+    (* Observability / approval / MCP / workflow events — no rendering. New SDK
+       events land here by default; add an explicit case when one deserves a
+       line. *)
     ()
 
 (* D. Cost / Session rendering *)
@@ -735,6 +727,8 @@ let render_help backend =
       item "/max" "Best-of-N: run N candidate answers, keep the best (on|off|2-5)";
       item "/skills" "List custom skills (reload: /skills reload)";
       item "/distill" "Turn a repeated workflow into a skill (--id/--user/--force)";
+      item "/resume" "Continue an interrupted run (/resume <id> | /resume discard)";
+      item "/flow" "Run a file-defined workflow (/flow run|status|cancel|resume)";
       item "/reset" "Reset conversation";
       item "/checkpoint" "Force a session checkpoint";
       item "/checkpoints" "List session checkpoints";

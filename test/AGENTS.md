@@ -1,6 +1,6 @@
 # test/ — Alcotest unit suite
 
-**Score 8** — 44 files, 7.4k LOC (27 Alcotest exe + `test/dune`, plus the `integration/` subtree, which has its own AGENTS.md). Earned its file: distinct domain (unit-harness conventions).
+**Score 8** — 44 files, 7.4k LOC (28 Alcotest exe + `test/dune`, plus the `integration/` subtree, which has its own AGENTS.md). Earned its file: distinct domain (unit-harness conventions).
 
 One executable per lib module: `test_par_code_<feature>.ml` mirrors `lib/par_code_<feature>.ml`, plus `test_par_code.ml` (cross-cutting: version, config paths, agent id, JSON round-trip), `test_par_code_payload_dump.ml`, `test_par_code_repl_plan_mode.ml`, `test_par_code_ui_prompt.ml`. ~473 cases.
 
@@ -18,7 +18,7 @@ One executable per lib module: `test_par_code_<feature>.ml` mirrors `lib/par_cod
 
 ## CONVENTIONS
 
-- `test/dune` lists all 27 executables in ONE explicit `(tests (names …))` stanza — a new file requires editing `dune`; nothing is auto-discovered.
+- `test/dune` lists all 28 executables in ONE explicit `(tests (names …))` stanza — a new file requires editing `dune`; nothing is auto-discovered.
 - No `.mli`, no shared helper module: the temp-dir idiom is copy-pasted per file (`Filename.temp_file` → `Sys.remove` → `Unix.mkdir` → body wrapped in `Fun.protect ~finally:(fun () -> Sys.chdir old)`).
 - `Sys.chdir` into a temp dir IS the isolation mechanism for workspace-scoped code (`.par/`, `.par/plans/`, `.par/approvals.json`).
 - Suite names are inconsistent (`par_code_<mod>` mostly, but also `par`, `Approvals`, `par_memory`, `payload`…) — do not rename piecemeal.

@@ -2835,7 +2835,49 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 
 **回退方式**：恢复无条件重启提示（删掉 `frontmatter_diff` 比较）。
 
+## [2026-11-13] v0.10.0 并发底座：自建 `Par_code_parallel`，不用 `Runtime.invoke_parallel`
 
+**变更前**：max-mode 的候选扇出是手写 `Eio.Fiber.all`，没有并发上限；`delegate` 工具一次只派一个子任务，多个互不依赖的探查只能串行，或赌模型在一轮里发多次工具调用。
+
+**变更后**：新增 `Par_code_parallel.map ?parallel_limit`——基于 `Eio.Fiber.List.map ~max_fibers`（默认 4，钳制 1..16），保持输入顺序，逐项把异常收成 `Error exn`，`Eio.Cancel.Cancelled` 原样上抛（吞掉取消会把「被取消」伪装成「部分成功」）。新增 `delegate_batch` 工具，一次并发跑 1–5 个**只读** `explore` 子任务；单个任务失败或崩溃只占自己那一格，其余照跑；UI 与结果按输入顺序输出，避免多个子代理在同一行交错。`general` 子任务被拒绝，并指回 `delegate`——同一 workspace 里两个写者会互踩（v0.3.1 的事故类型），写并行要等 per-child worktree 到位（v0.10.0 下一刀）。
+
+**原因**：SDK 的 `Runtime.invoke_parallel` 不能直接用——它把每个 spec 交给 `Workflow_engine.execute_step`，`Agent_call` 分支只回 `{"text","tool_calls"}`（`workflow_engine.ml:141-155`），conversation 与 usage 被丢弃：胜者无法续写，`/cost` 无法记账。自建扇出走 `Runtime.invoke`，完整的 `invoke_result` 得以保留。**PAR 侧需求**：让 `parallel_invoke_result.successes` 带回原始 `llm_response`（或给 `agent_dispatch_spec` 一个「返回完整响应」的开关）；紧迫性中——par-code 已绕过，功能不受阻，但其他 app 会重复实现同一层。
+
+**影响范围**：`lib/par_code_parallel.ml/.mli`（新）、`par_code_delegate`（`delegate_batch` / `batch_max_tasks` / `text_of_response`）、`par_code_setup`（工具注册）、`test/test_par_code_parallel.ml`、`test/dune`。
+
+**回退方式**：删除 `par_code_parallel` 与 `delegate_batch` 注册，回到单任务 `delegate`；max-mode 不动，仍走它自己的扇出。
+
+## [2026-11-13] PAR 缺口（P0）：`find` / `grep` 的 glob 永远匹配不到任何文件
+
+**变更前**：par-code 直接使用 SDK 内置的 `find` / `grep` 工具，并假设它们可用；`delegate` 子代理与主 agent 共用这批描述符。
+
+**变更后**：记录缺口，未动 PAR。真实 provider dogfood（`delegate_batch` 三路探查）中，`find` 与 `grep` 对所有模式返回空；单独让主 agent 直接调用这两个工具复测，结果相同（`find=EMPTY`、`grep=EMPTY`）。
+
+**原因**：`tools/builtin_tools.ml` 里两个工具都先 `Str.quote` 再替换星号。`Str.quote "*.ml"` 得到 `\*\.ml`（星号前已加转义反斜杠），随后 `Str.global_replace (Str.regexp "\\*") "[^/]*"` 只换掉星号字符、留下那个反斜杠，最终正则变成 `\[^/]*\.ml`——要求文件名里有一个字面反斜杠，所以永远不匹配。本地用同一段代码复现：`*.ml` → `\[^/]*\.ml`、`**/*.ml` → `\[^/]*\[^/]*/\[^/]*\.ml`、`*` → `\[^/]*`，对 `code.ml` 全部为 false。`grep` 是同一错误模式（`.*` 版本，行 ~1031），默认 glob 同样必死。不含 `*` 的精确名午（如 `dune`）可以匹配，所以这个 bug 在简单手测下容易漏过。
+
+**PAR 侧需求**：把 glob→regex 改成「逐字符转义后再展开通配符」，而不是先 `Str.quote` 整体再替换。另：`find` 的 `walk` 只对 `Filename.basename` 匹配，所以 `**/*.ml` 这类带目录的模式也无法工作，建议对相对路径匹配。**紧迫性：高**——编码 agent 的检索能力为 0，子代理会因此把迭代预算烧在无效调用上（本次 dogfood 中 explore 正是这样撞到 `Max iterations exceeded`）。
+
+**影响范围**：PAR `tools/builtin_tools.ml`（`glob_match` ~L927、grep 的 `glob_re` ~L1031）；par-code 侧所有依赖 `find` / `grep` 的路径（主 agent、planner、explore 子代理、max-mode 候选）。
+
+**回退方式**：无需回退（仅记录）。按项目定位**不在 par-code 侧自建替代工具**：缺陷归 PAR 修，修好发版后 par-code 跟进验证并关闭本条。
+
+**上游 issue**：https://github.com/jcz2020/par/issues/32
+
+**2026-11-13 验证（PAR `v0.16.0-beta.20261114`）**：release note 声称两个工具都修了，实测只修了一半——`find` 对 `lib` + `*.ml` 返回 32 条（与磁盘一致，已修）；`grep` 仍返回 0 条，`glob=**/*` 也为空。根因：`builtin_tools.ml:1072` 仍是 `Str.string_match regex line 0`（锚定行首，`let distiller_agent_id = ...` 在第 4 列永远不中），且 `:1063` 仍用 basename 过滤，带目录的 glob 永不匹配。证据已补到 issue 评论。**本条保持 OPEN**，等 PAR 修后半部分。
+
+**2026-11-14 验证（PAR `v0.16.1-beta.20261114`）——已修复，可关闭**：`find` 返回 32 条（与磁盘一致）；`grep` 返回 4 条带行号命中，首条为 `lib/par_code_distill.ml:328: ... Runtime.invoke rt ~agent_id:distiller_agent_id ...`（第 36 列开始——正是锤定匹配永远找不到的情形）。par-code 侧全程无替代实现，工具就是 SDK 原版。
+
+## [2026-11-13] v0.10.0 PAR SDK 升级：`v0.12.0-beta.20261023` → `v0.16.0-beta.20261114`
+
+**变更前**：par-code 钉在 `v0.12.0-beta.20261023`（6 处），`find` / `grep` 因上游缺陷全废（#32）。
+
+**变更后**：6 处 pin 全部改为 `v0.16.1-beta.20261114`（先升到 0.16.0 验证，发现只修了 `find`；PAR 在 `main` 上补齐 `grep` 后发了 0.16.1，再升一次）；本机 switch 重装为 0.16.1；按四个小版本的 API 漂移逐项迁移（`model_config` + `thinking_budget_tokens` / `context_window`；`message` 去 `reasoning_content`，推理改走 `Reasoning_block` / `Redacted_reasoning_block` 与 `llm_response.reasoning`；`invoke_result` + `invoke_id`；`persistence_service` 用 `load_recoverable_runs_fn` 替代 `load_all_suspended_workflows_fn`，并补上 durable-invoke 的 checkpoint / lease 六个钩子；`handler_result` + `Success_content`；`llm_response_chunk` + `Reasoning_signature`；`Http_client.tls_host_of_string` 没了，升级器自己构造 `Domain_name.t` 作 SNI）。
+
+**原因**：上游发布 v0.16 并修复了 #32。按项目定位，PAR 修好发版后 par-code 跟进——不绕开、不自建替代。
+
+**影响范围**：`dune-project` + 5 个安装点；`lib/par_code_config.ml` / `context.ml` / `setup.ml` / `ui.ml` / `upgrade.ml` / `repl.ml`；`test/` 四个套件的字段与构造；`lib/dune` 新增 `domain-name` 依赖。
+
+**回退方式**：pin 退回 `v0.12.0-beta.20261023` 并 `opam install par -y`，同时回滚上述六个模块的迁移。
 
 
 ## [2026-11-14] v0.9.0 范围收窄：`/dream` 推迟到 v0.9.1
@@ -2849,3 +2891,108 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 **影响范围**：`README.md` roadmap 行（v0.9.0 标 ✅ 并收窄描述，新增 v0.9.1 行）、`CHANGES.md` 的 v0.9.0 Scope 段；无代码改动。
 
 **回退方式**：若决定先做 `/dream`，删除 v0.9.1 行、恢复 v0.9.0 原描述，并把版本号退回未发布状态。
+
+## [2026-11-14] v0.10.0 并行归位：自建 `Par_code_parallel` 退役
+
+**变更前**：`delegate_batch` 走自建的有界扇出（`Eio.Fiber.List.map ~max_fibers`），因为这层是 0.12 时代为了绕开 `invoke_parallel` 只回 JSON 而写的。
+
+**变更后**：直接调 `Runtime.invoke_parallel ~parallel_limit:4 ~failure_policy:Continue_on_failure ~cancellation_token`；新增纯函数 `merge_batch_results` 把 SDK 拆出的 successes / failures 按 `spec.input` 归并回输入序。`par_code_parallel.ml/.mli` 与其 fan-out 测试删除，原文件里的 `delegate_batch` 入参用例保留并改名为 `test_par_code_delegate.ml`。
+
+**原因**：0.15 起 `parallel_success` 带回 `conversation`，而 `delegate_batch` 只需要 text —— 自建层已经没有存在理由。按项目定位，能用 SDK 现成能力就不自己造。
+
+**影响范围**：`lib/par_code_delegate.ml/.mli`、`test/dune`、`test/test_par_code_delegate.ml`（新）、`lib/AGENTS.md`；删除 `lib/par_code_parallel.*` 与 `test/test_par_code_parallel.ml`。max-mode 不动：它要 usage，而 step 结果只回 text/tool_calls。
+
+**回退方式**：恢复 `Par_code_parallel` 与旧调用点（历史在 git 里）。
+
+## [2026-11-14] v0.10.0 崩溃恢复：durable invoke + `/resume`
+
+**变更前**：REPL 的一轮与 `par ask` 都是非持久化 invoke；进程被杀，进行中的这一轮（连同已完成的工具调用）全部丢失，重启后没有任何痕迹。
+
+**变更后**：两处 invoke 都带 `~durable:true`，SDK 在首轮迭代后与每个完成的工具批次后写检查点，任何终态删除该行。`Runtime.create` 把残留行重建为孤儿，REPL 启动时用 `list_orphaned_invokes` 提示，`/resume` 调 `recover_invoke` 把会话接回，`/resume <id>` 指定，`/resume discard` 丢弃（`Runtime` 无删除入口，通过 setup 暴露的 persistence service 调 `delete_invoke_checkpoint_fn`）。
+
+**原因**：Compose 的卖点是"端到端长跑"，跑一半崩了不能续等于没做完；而 SDK 的 durable invoke 已经把这套机制做好了，属于"能用现成能力就不自己造"。
+
+**影响范围**：`lib/par_code_repl.ml`（两处 invoke、孤儿提示、`/resume` 分支）、`lib/par_code_setup.ml`（persistence ref）、`lib/par_code_ui.ml`（help 行）、`test/test_par_code_repl.ml`（`resume_hint` 用例）。
+
+**回退方式**：去掉两处 `~durable:true` 即回到旧行为；`/resume` 在无孤儿时不显示。
+
+## [2026-11-14] v0.10.0 W2 工作流接线：`.par/flows/*.json` + `/flow`
+
+**变更前**：PAR 的 workflow 引擎只在 setup 里注册了持久化字段，从未被调用（README 能力表：「engine not yet invoked — roadmap v0.10.0」）。用户没有任何办法定义或运行一个流程。
+
+**变更后**：流程定义放在 `.par/flows/<id>.json`（内容就是一个 PAR `workflow_def`：steps / variables / failure_policy / timeout / parallel_limit）。`/flow` 列出定义，`/flow run <id>` 同步执行，`/flow status [run-id]`、`/flow cancel <run-id>`、`/flow resume <run-id>` 管运行。
+
+**原因**：这是路线图 v0.10 Compose 的底座 —— Compose 要"给一段 spec 跑完 plan→execute→review"，前提是能定义并驱动一个流程。用文件而不是配置项，是因为流程要能评审、能 diff、能像 skill 一样分享。
+
+**影响范围**：`lib/par_code_flow.ml/.mli`（新）、`lib/par_code_repl.ml`（`/flow` 分支）、`lib/par_code_ui.ml`（help 行）、`test/test_par_code_flow.ml`（新）、`test/dune`。
+
+**回退方式**：删掉 `/flow` 分支与 `par_code_flow`，引擎回到"只注册不调用"的旧状态。
+
+**附：为什么是同步执行**：REPL 的输入走 linenoise（Eio 之外的阻塞 C 调用），`submit_workflow_async` 叉出去的 fiber 在提示符等待时永远得不到调度 —— 真机验证时流程一直停在 `running`。改用 `submit_workflow` 阻塞调用方后 22.1 秒完成（`completed (success, 22.1s)`）。代价是 `/flow cancel` 只能作用于上一个进程留下的运行。
+||||||| 91e4145
+
+## [2026-11-14] v0.10.0 W3 最小切片：只读三段式 flow
+
+**变更前**：`/flow` 只能跑项目里自定义的定义，仓库不自带任何示例；流程步骤之间怎么传值没有先例可循。
+
+**变更后**：新增 `examples/flows/compose.json`（规划 → 给出具体改动方案 → 评审，三步都是只读 `explore`），并把 `Par_code_flow.load` 改成先找 `.par/flows/`、再回落到 `examples/flows/`，所以示例开箱能跑。
+
+**原因**：路线图 v0.10 承诺"给一段 spec，它设计、编码、评审、测试"。最小切片先把"多阶段串联"跑通 —— 引擎会把每步结果绑成 `result_N` / `result_N.text`，所以后一步可以用 `{{result_0.text}}` 拿到前一步的输出。
+
+**影响范围**：`examples/flows/compose.json`（新）、`lib/par_code_flow.ml/.mli`（双目录查找）、`test/test_par_code_flow.ml`。
+
+**回退方式**：删掉示例并把 `load` 的回落去掉。
+
+**遗留（重要）**：工作流步骤**不会把工具事件渲染到 REPL，也没有人能回答审批**。真机验证时两版都卡死过：先用 `planner` 阶段，它在流程里弹"切 build 模式？[y/N]"；换成 `par` 真写文件，又卡在写/命令阶段的交互上。所以本切片的三段全部只读，写阶段必须等"工作流审批接线"之后再做。`/flow run` 是同步阻塞且中途无输出的，用户只能等终态。
+
+## [2026-11-14] v0.10.0 工作流可见性：进度轮询 + 交互 agent 预警
+
+**变更前**：`/flow run` 同步阻塞且中途无任何输出；一个跑两分钟的流程，用户面对的是冻结的提示符。若定义里写了会停下等人的 agent（`planner` / `par` / `general`），流程会静默挂死到超时。
+
+**变更后**：`/flow run` 在提交前先扫描定义里的 `agent_id`，命中交互类 agent 就按名字警告；提交后起一个后台 fiber，每 5 秒打印 `[flow] still running (Ns)`，直到运行结束。轮询能工作是因为 `submit_workflow` 阻塞在 Eio 内部，调度器仍会跑其他 fiber —— 与 REPL 输入那个纯 C 阻塞不同。
+
+**原因**：真机验证时三段式跑了 97.7 秒，期间提示符毫无动静，只能靠外部观察进程判断死活；这不是可接受的终端体验。
+
+**影响范围**：`lib/par_code_repl.ml`（`/flow run` 分支）、`lib/par_code_flow.ml/.mli`（`agent_ids` / `interactive_agents`）、`lib/par_code_setup.ml`（暴露 clock）。
+
+**回退方式**：删掉轮询 fiber 与预警分支。
+
+## [2026-11-14] v0.10.0 工作流内不做交互审批：直接拒绝而不是挂住
+
+**变更前**：par-code 的 bash 审批在工具处理方法内部弹终端提问。工作流步骤里没有人能回答，于是命令一直等输入，整个 `/flow run` 静默挂到超时。
+
+**变更后**：`Par_code_setup.non_interactive` 标志，`/flow run` 期间置真，`ask_user` 直接返回 false（命令被拒并把结果告诉模型），运行结束在 `Fun.protect` 里复位。定义里出现会停下等人的 agent 时仍会先警告，但文案改成"bash 会被拒绝而不是提问"。
+
+**原因**：先说结论 —— **这不是 PAR 缺口**。引擎本身有 `Human_approval` 步骤 + `Wf_suspended` + `approve_workflow`，且 `Tool_call` 步骤遇到审批会明确返回 `Approval not supported in workflow Tool_call step`，不会挂。挂住的是 par-code 自己的交互式 bash 提示，属于我们的接线问题，不该报给上游。
+
+**影响范围**：`lib/par_code_setup.ml`（标志 + `ask_user` 分支）、`lib/par_code_repl.ml`（`/flow run` 的置位/复位与警告文案）。
+
+**回退方式**：删掉标志与两处置位，恢复"流程内弹问"的旧行为（不推荐）。
+
+## [2026-11-14] 更正：工作流内不禁止交互审批，提示照常送到终端
+
+**变更前**：上一条记录了"流程期间 `non_interactive` 置真，bash 审批直接拒绝而不是弹问"。
+
+**变更后**：撤掉拒绝逻辑，`non_interactive` 只作为信号保留；`/flow run` 前的警告改成"审批提示仍会送到这个终端，出现了就回答；没人看着的运行会等待"。
+
+**原因**：那个结论建立在一个没验证的前提上 —— 以为流程里的提问没人能回答。可测试本身就跑在 tmux 里，提示是可以输入 `y` 的；我把"我没去回答"当成了"无法回答"，于是写了一条不必要的限制。复核 SDK 也确认审批通道完整（`Human_approval` / `approve_workflow`，`Tool_call` 步骤遇到审批明确报不支持）。
+
+**影响范围**：`lib/par_code_setup.ml`（`ask_user` 恢复提问）、`lib/par_code_repl.ml`（警告文案）、`lib/AGENTS.md`。
+
+**回退方式**：无需回退（本更正即撤回上一条的实现部分）。
+
+## [2026-11-14] PAR 缺口：并行/工作流路径丢掉 tool_call_hooks，审批被静默绕过
+
+**变更前**：par-code 的 bash 审批注册成 `Runtime.register_tool_call_hook`（`Bash_confirm.make_hook`），在 `Runtime.invoke` 的回合里生效。
+
+**变更后**：记录缺口，未改 PAR。实测：同一条 `echo ... > ../outside-marker.txt`，在普通 REPL 回合里弹出 `[y/a/N]`（tmux 里能看到并回答）；在同一条命令放进 `/flow run` 的 `Agent_call` 步骤后，**没有任何提示直接执行**，文件被创建在工作区外。另一次 `rm -f` 同样静默放行。
+
+**原因**：`Runtime.invoke` 通过 `Invoke_context` 把 `tool_call_hooks` 带到引擎（`invoke_context.tool_call_hooks_snapshot`），但 `Workflow_engine.run_agent_call` 直接调 `Engine.run_agent ... ctx.registry`，既没有 `~tool_call_hooks`，`exec_context` 里也没有这个字段；`invoke_parallel` 同样如此。于是应用层的审批策略在这两条路径上完全失效 —— 不是"问了没人答"，而是**根本没问**。**PAR 侧需求**：把 runtime 注册的 tool_call_hooks 显式接进 `exec_context` 并传给 `Engine.run_agent`（`submit_workflow` 与 `invoke_parallel` 两条路径都要）。**紧迫性：高** —— 这是审批绕过，不是体验问题。
+
+**影响范围**：PAR `core/workflow_engine.ml`（`run_agent_call` / `exec_context`）、`core/runtime.ml`（`invoke_parallel` 的 `base_ctx`）；par-code 侧走这两条路径的所有 bash 调用（`/flow`、`delegate_batch`）。
+
+**回退方式**：无需回退（仅记录）。上游修复后，用同样的对照实验复验：普通回合与流程回合应都弹审批。
+
+**上游 issue**：https://github.com/jcz2020/par/issues/33
+
+**2026-11-14 验证（PAR `v0.16.2-beta.20261114`）——已修复，可关闭**：同一条 `..` 命令放进 `/flow run`，终端弹出 `⚠ bash: ... [y/a/N]`，答 `N` 后命令未执行（`ABSENT`），流程 7.3 秒正常收尾。对照上一版：同样的流程无提示直接写穿工作区。上游在审计中还找出三处同类绕过，一并修了。

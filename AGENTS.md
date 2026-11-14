@@ -53,7 +53,7 @@ par-code/
 | `Par_code_checkpoint` | module | `lib/par_code_checkpoint.ml` | 53 | 长会话连续性；手动 /checkpoint 不触发提取（v0.8.2+） |
 | `Par_code_payload.sanitize` | val | `lib/par_code_payload.ml` | 8 | invoke / 落库前的会话清洗 |
 
-\* 外部引用为 bin+test 中 `Module.` 限定引用的实测计数，签名变更按此排爆炸半径。公共面：24 个 `.mli` 共 216 `val` + 33 `type`；7 个模块无 `.mli`（config / config_wizard / extractor / memory_tools / repl / repl_io / setup），bin 直接依赖其未封装表面，改它们等于改 bin。
+\* 外部引用为 bin+test 中 `Module.` 限定引用的实测计数，签名变更按此排爆炸半径。公共面：25 个 `.mli` 共 221 `val` + 33 `type`；7 个模块无 `.mli`（config / config_wizard / extractor / memory_tools / repl / repl_io / setup），bin 直接依赖其未封装表面，改它们等于改 bin。
 
 ## CONVENTIONS
 
@@ -78,11 +78,11 @@ par-code/
 
 硬约束——违反即事故：
 
-1. **PAR SDK 边界**：永不改 `/root/dev/PAR`。编辑 / 创建 / 删除 / `git commit` / `git push` / rebase / 提 PR 全禁止（有 push 权限也不提）；读 PAR 源码理解 API 允许。需要 PAR 改动：先在 DECISIONS 记录需求（文件 + API + 理由 + 紧迫性）→ 向用户陈述 → **等用户决定**，期间按 PAR 现状推进或 par-code 侧绕开。误改了：`git -C /root/dev/PAR status` → `checkout -- .` 回滚 → 报告，等指示。
+1. **PAR SDK 边界**：永不改 `/root/dev/PAR`。编辑 / 创建 / 删除 / `git commit` / `git push` / rebase / 提 PR 全禁止（有 push 权限也不提）；读 PAR 源码理解 API 允许。需要 PAR 改动时，**唯一动作是报缺陷**：先按六字段记进 `docs/DECISIONS.md`（文件 + API + 理由 + 紧迫性），再以本项目身份在 `jcz2020/par` 开 GitHub issue（`gh issue create --repo jcz2020/par`，正文写文件、用 `--body-file`）；即使用户已裁定要改，也走 issue，不在 PAR 仓库改代码 / 提交 / 提 PR。报完**等 PAR 项目自己修**，修好发版后 par-code 再跟进验证；**不在 par-code 侧自建替代实现** —— 绕开会把缺陷盖住，抵消本项目作为 PAR 验证案例的意义（STRATEGY §2：发现限制时第一反应是修 PAR，而不是绕开）。误改了：`git -C /root/dev/PAR status` → `checkout -- .` 回滚 → 报告，等指示。
 2. **版本号不可自动 bump**：`dune-project` 的 `(version …)` 只在用户明确说"发布"时改；同步改 `test/test_par_code.ml:2` 断言；commit `dune build` 重新生成的 `par_code.opam`。
 3. **FTS5 必须从 amalgamation 编译**（`-DSQLITE_ENABLE_FTS5`），OS 包 sqlite3 不进 release binary。版本锁 `scripts/sqlite-amalgamation.version`（Linux Dockerfile 与 macOS 脚本共用同一版本号）；Dockerfile 提取版本只用 `grep -E '^[0-9]+'`，绝不用 `cat | tr -d`（注释行会被拼进去）。
 4. **并行 agent 禁止 git 写操作**（`stash` / `checkout -- .` / `revert` / `reset` / `clean`）；build 失败只修自己的文件，不动别人的；隔离验证用 `dune build` 的 `_build/`。违反会互相覆盖丢工作（v0.3.1 Wave 1 踩过）。
-5. **PAR SDK 钉 tag，不钉分支 tip**：`v0.12.0-beta.20261023` 固定 6 处——`dune-project`（地板）+ 5 个安装点（`.github/workflows/ci.yml` / `.github/workflows/release.yml` / `scripts/docker/linux-bundle.Dockerfile` / `scripts/build-macos.sh` / `scripts/install.sh`）。
+5. **PAR SDK 钉 tag，不钉分支 tip**：`v0.16.2-beta.20261114` 固定 6 处——`dune-project`（地板）+ 5 个安装点（`.github/workflows/ci.yml` / `.github/workflows/release.yml` / `scripts/docker/linux-bundle.Dockerfile` / `scripts/build-macos.sh` / `scripts/install.sh`）。
 6. **披露规则**：committed 产物不得出现外部项目 / 公司名。
 7. `lib/par_code_version.ml` 由 dune 生成（gitignored），不可手编。
 

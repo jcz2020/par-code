@@ -112,6 +112,18 @@ let test_operational_metrics_filters_dead_counters () =
   Alcotest.(check bool) "drops budget-only counter" false
     (List.mem_assoc "tools_deferred" m)
 
+let test_resume_hint () =
+  Alcotest.(check bool) "no orphans" true (Par_code_repl.resume_hint [] = None);
+  match Par_code_repl.resume_hint [ ("run-1", "par"); ("run-2", "par") ] with
+  | None -> Alcotest.fail "expected a hint for two orphans"
+  | Some line ->
+    Alcotest.(check bool) "counts them" true
+      (string_contains line "2 interrupted");
+    Alcotest.(check bool) "names the latest" true
+      (string_contains line "run-1");
+    Alcotest.(check bool) "mentions discard" true
+      (string_contains line "discard")
+
 let () =
   Alcotest.run "par_repl"
     [ "cost_state", [
@@ -128,5 +140,8 @@ let () =
       "operational_metrics", [
         Alcotest.test_case "tools_visible_unique" `Quick test_tools_visible_counts_unique;
         Alcotest.test_case "filters_dead_counters" `Quick test_operational_metrics_filters_dead_counters;
+      ];
+      "resume", [
+        Alcotest.test_case "hint_text" `Quick test_resume_hint;
       ];
     ]

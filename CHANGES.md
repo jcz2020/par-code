@@ -1,5 +1,106 @@
 # CHANGES
 
+## v0.10.0 — Parallel delegation (unreleased)
+
+> **Status**: In progress on `feat/v0.10.0-parallel`.
+>
+> **Scope**: bounded concurrent fan-out and batch subagent delegation.
+
+### Added — parallelism
+
+- **`delegate_batch` runs up to five read-only `explore` subagents at once.**
+  Tasks go through the SDK's own `Runtime.invoke_parallel
+  (~parallel_limit:4 ~failure_policy:Continue_on_failure)`, so the bound, the
+  policy and the cancellation are the SDK's, not a private copy. A task that
+  fails is reported in its own slot and the rest still run; UI lines and
+  results are emitted in input order, so two children never interleave on one
+  terminal line. A `general` task is rejected: two writers in one workspace
+  collide, so write parallelism waits for per-child worktrees.
+- **`merge_batch_results` puts the split back in order.** `invoke_parallel`
+  returns successes and failures as two lists, each in input order; this pure
+  function interleaves them back so slot i answers task i, matching on the task
+  text in order (duplicate texts still line up) and never comparing the dispatch
+  specs, which carry an approval handler.
+- **`test_par_code_delegate.ml`** covers the batch input validation and the
+  interleave: all-success, a failure in the middle, duplicate task texts, and a
+  missing result surfacing as an internal error.
+
+### Changed — PAR SDK v0.16.0-beta.20261114
+
+- **The SDK pin moves from `v0.12.0-beta.20261023` to
+  `v0.16.2-beta.20261114`** in all six places (`dune-project` floor + the five
+  install points).
+- **The built-in `find` / `grep` work again** — the upstream fix for
+  `jcz2020/par#32`. The tag `v0.16.0` shipped only half of it (`find` fixed,
+  `grep` still anchored to the start of each line), so the pin lands on
+  `v0.16.1`, whose release carries the rest; `v0.16.2` then carries the
+  tool-call-hook fix so an approval gate also fires inside a workflow step and
+  inside `invoke_parallel` (`jcz2020/par#33`). par-code keeps no search
+  replacement of its own: the SDK tools are registered exactly as before.
+- **Migration for the four-minor API drift.** `model_config` gained
+  `thinking_budget_tokens` and `context_window`; `message` lost
+  `reasoning_content` (reasoning now travels as `Reasoning_block` /
+  `Redacted_reasoning_block` content blocks, and `llm_response.reasoning` is the
+  ordered list); `invoke_result` gained `invoke_id`; `persistence_service`
+  replaced `load_all_suspended_workflows_fn` with `load_recoverable_runs_fn` and
+  gained the durable-invoke checkpoint and lease hooks; `handler_result` gained
+  `Success_content`; `llm_response_chunk` gained `Reasoning_signature`;
+  `Http_client.tls_host_of_string` is gone, so the updater builds the
+  `Domain_name.t` for SNI itself. The UI's event renderer now ends in a catch-all
+  instead of enumerating every observability event.
+
+### Added — workflows
+
+- **`/flow` runs a workflow defined in `.par/flows/<id>.json`.** The file holds
+  a PAR `workflow_def` — steps, variables, failure policy, timeout, parallel
+  limit — so a flow is reviewable and shareable the way a skill is. par-code
+  owns only the file convention and the command: `/flow` lists the definitions,
+  `/flow run <id>` executes one, `/flow status [run-id]`, `/flow cancel
+  <run-id>`, `/flow resume <run-id>`.
+- **Runs execute synchronously, on purpose.** The REPL reads input through a
+  blocking C call outside Eio, so a fiber forked by `submit_workflow_async`
+  never gets scheduled while the prompt waits — the run stayed `running`
+  forever in a live test. `/flow run` uses `submit_workflow` and says out loud
+  that it blocks. Because that call blocks *inside* Eio, a second fiber keeps
+  running: a poller prints `[flow] still running (Ns)` every five seconds, so a
+  long flow is visibly alive instead of a frozen prompt.
+- **A step that names an agent which can stop for a human is called out before
+  the run starts.** `par` / `general` (bash, writes) and `planner` (asks whether
+  to switch mode) have no one to answer inside a workflow step, so `/flow run`
+  warns by name rather than hanging silently.
+- **Definition format.** `[@@deriving yojson]` decides it: a step is
+  `["Agent_call", {...}]`, a nullary variant such as the failure policy is
+  `["Continue_on_failure"]`, and `variables` is a list of `[name, value]`
+  pairs. `test_par_code_flow.ml` pins a full example so the format cannot drift
+  silently.
+
+### Added — crash recovery
+
+- **`/resume` continues an interrupted run.** REPL turns and `par ask` now call
+  `Runtime.invoke ~durable:true`: the SDK checkpoints after the first iteration
+  and after every completed tool batch, and deletes the row on every terminal
+  outcome, so a crash leaves exactly one recoverable row. `Runtime.create`
+  rehydrates it; the REPL warns at startup and `/resume` calls
+  `recover_invoke`.
+- **Semantics: at-least-once.** The iteration in flight when the process died
+  runs again; completed tool batches do not. A run suspended for an approval is
+  not in the orphan list and `recover_invoke` refuses it.
+- `/resume <id>` picks a specific interrupted run; `/resume discard` drops them.
+  `Runtime` exposes no delete, so par-code keeps the persistence service in a
+  ref and deletes through `delete_invoke_checkpoint_fn`.
+- **Verified with a real crash:** two reads done, `kill -9`, restart, `/resume`
+  finished the answer with **zero** repeated tool calls, and the checkpoint row
+  was gone afterwards. Cancelling a turn leaves no row at all.
+
+### Not adopted — `Runtime.invoke_parallel`
+
+The SDK's parallel entry point is unusable for par-code's fan-out: it routes
+each spec through `Workflow_engine.execute_step`, whose `Agent_call` branch
+returns only `{"text","tool_calls"}` and drops the conversation and the usage
+stats. A best-of-N winner could not be continued, and no token could be billed.
+`Par_code_parallel` therefore calls `Runtime.invoke` directly, where the full
+`invoke_result` survives. Recorded as a PAR gap in `docs/DECISIONS.md`.
+
 ## v0.9.0 — Self-improvement (2026-11-14)
 
 > **Status**: Released 2026-11-14.

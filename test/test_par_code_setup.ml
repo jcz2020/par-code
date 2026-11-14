@@ -39,7 +39,9 @@ let test_model : Types.model_config =
     temperature = 0.0;
     max_tokens = None;
     top_p = None;
-    stop_sequences = None }
+    stop_sequences = None;
+    thinking_budget_tokens = None;
+    context_window = None }
 
 let with_test_runtime f =
   Eio_mock.Backend.run (fun () ->
@@ -230,7 +232,7 @@ let test_apply_patch_edits_workspace_file () =
             "--- a/a.ml\n+++ b/a.ml\n@@ -1 +1,2 @@\n+(* module a *)\n let a = 1\n" in
           let input = `Assoc [ "patch", `String patch; "dry_run", `Bool false ] in
           let tok : Par.Types.cancellation_token =
-            { switch = sw; cancelled = false; reason = None } in
+            Par.Cancellation.create_token sw in
           (match tb.handler input tok with
            | Par.Types.Success _ ->
              let content = read_file file in
@@ -245,7 +247,7 @@ let test_apply_patch_edits_workspace_file () =
                     find 0))
            | Par.Types.Error e ->
              Alcotest.failf "apply_patch rejected a valid diff: %s" e.message
-           | Par.Types.Handoff _ | Par.Types.Approval_required _ ->
+           | Par.Types.Handoff _ | Par.Types.Approval_required _ | Par.Types.Success_content _ ->
              Alcotest.fail "apply_patch must neither hand off nor require approval"))
 
 (* Multi-file patches need a `diff --git` header per file section: a bare
@@ -282,7 +284,7 @@ let test_apply_patch_multi_file () =
             ^ "diff --git a/b.ml b/b.ml\n--- a/b.ml\n+++ b/b.ml\n@@ -1 +1,2 @@\n+(* module b *)\n let b = 2\n" in
           let input = `Assoc [ "patch", `String patch; "dry_run", `Bool false ] in
           let tok : Par.Types.cancellation_token =
-            { switch = sw; cancelled = false; reason = None } in
+            Par.Cancellation.create_token sw in
           (match tb.handler input tok with
           | Par.Types.Success _ ->
             Alcotest.(check bool) "a.ml patched" true
@@ -291,7 +293,7 @@ let test_apply_patch_multi_file () =
               (starts_with ~prefix:"(* module b *)" (read_file b))
           | Par.Types.Error e ->
             Alcotest.failf "apply_patch rejected a valid multi-file diff: %s" e.message
-          | Par.Types.Handoff _ | Par.Types.Approval_required _ ->
+          | Par.Types.Handoff _ | Par.Types.Approval_required _ | Par.Types.Success_content _ ->
             Alcotest.fail "apply_patch must neither hand off nor require approval"))
 
 let () =
