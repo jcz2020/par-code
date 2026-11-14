@@ -2980,3 +2980,15 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 **影响范围**：`lib/par_code_setup.ml`（`ask_user` 恢复提问）、`lib/par_code_repl.ml`（警告文案）、`lib/AGENTS.md`。
 
 **回退方式**：无需回退（本更正即撤回上一条的实现部分）。
+
+## [2026-11-14] PAR 缺口：并行/工作流路径丢掉 tool_call_hooks，审批被静默绕过
+
+**变更前**：par-code 的 bash 审批注册成 `Runtime.register_tool_call_hook`（`Bash_confirm.make_hook`），在 `Runtime.invoke` 的回合里生效。
+
+**变更后**：记录缺口，未改 PAR。实测：同一条 `echo ... > ../outside-marker.txt`，在普通 REPL 回合里弹出 `[y/a/N]`（tmux 里能看到并回答）；在同一条命令放进 `/flow run` 的 `Agent_call` 步骤后，**没有任何提示直接执行**，文件被创建在工作区外。另一次 `rm -f` 同样静默放行。
+
+**原因**：`Runtime.invoke` 通过 `Invoke_context` 把 `tool_call_hooks` 带到引擎（`invoke_context.tool_call_hooks_snapshot`），但 `Workflow_engine.run_agent_call` 直接调 `Engine.run_agent ... ctx.registry`，既没有 `~tool_call_hooks`，`exec_context` 里也没有这个字段；`invoke_parallel` 同样如此。于是应用层的审批策略在这两条路径上完全失效 —— 不是"问了没人答"，而是**根本没问**。**PAR 侧需求**：把 runtime 注册的 tool_call_hooks 显式接进 `exec_context` 并传给 `Engine.run_agent`（`submit_workflow` 与 `invoke_parallel` 两条路径都要）。**紧迫性：高** —— 这是审批绕过，不是体验问题。
+
+**影响范围**：PAR `core/workflow_engine.ml`（`run_agent_call` / `exec_context`）、`core/runtime.ml`（`invoke_parallel` 的 `base_ctx`）；par-code 侧走这两条路径的所有 bash 调用（`/flow`、`delegate_batch`）。
+
+**回退方式**：无需回退（仅记录）。上游修复后，用同样的对照实验复验：普通回合与流程回合应都弹审批。
