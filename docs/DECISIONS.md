@@ -3004,3 +3004,11 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 - **reason**：两套 schema 必然漂移；手工合并会与 SDK 的自动注入撞名 —— 实测启动直接失败（`duplicate tool name: echo`），这是最有力的证据。
 - **scope**：仅 stdio（`command`/`args`/`env`/`cwd`/`startup_timeout`）；HTTP/SSE、OAuth、热重载留到后续版本。
 - **rollback**：删掉 config 字段与 create 的两个可选参数即可回到无 MCP 状态（`mcp_servers` 缺省为 `[]`）。
+## 2026-11-14 · MCP 热重载：SDK 无接口，报上游而不是本地绕
+
+- **tag**：mcp-hot-reload-upstream-gap
+- **before**：v0.11 计划里写"服务器热重载"，容易误以为改成读 config + 重连即可。
+- **after**：`/mcp` 显示每个服务器的 id/状态/pid 与工具清单，并明确提示"改配置需重启"；热重载本身不动，等上游提供 `Runtime.reload_mcp_servers`（`jcz2020/par#35`）。
+- **reason**：`rt.mcp_tools`（`core/runtime.ml:104`）是私有可变字段，只在 `create` 里写一次（`:3129`）；`Mcp_server.spawn/stop` 与 `htbl_set/remove` 虽然公开，但工具表改不了，手工重连会得到"进程在跑、每次调用都被拒"的假象 —— 比不做更糟。
+- **scope**：只影响运行时增删服务器；启动时读取配置、工具注入照常。skill 的 replace 缺失是同一类缺口，已在 issue 里一并说明。
+- **rollback**：上游提供接口后，把 `/mcp` 的提示换成真正的 reload 分支，并用同一套假 server 验证"改了 config 不重启即生效"。

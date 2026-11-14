@@ -941,18 +941,38 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                      orphans := List.filter (fun (o, _) -> o <> id) !orphans)));
             loop ()
           | "/mcp" ->
+            let running = Runtime.mcp_servers rt in
+            let rows = ref [] in
+            Par.Types.htbl_iter running (fun id srv -> rows := (id, srv) :: !rows);
             let tools = Runtime.mcp_tool_descriptors rt in
-            if tools = [] then
+            if !rows = [] then
               Par_code_ui.render_notice ui
-                "No MCP tools. Add \"mcp_servers\" to ~/.par/config.json (stdio \
-                 first: name, command, args, env)."
+                "No MCP servers. Add \"mcp_servers\" to ~/.par/config.json (stdio \
+                 first: name, command, args, env) and restart par."
             else begin
               Par_code_ui.render_notice ui
-                (Printf.sprintf "MCP tools (%d):" (List.length tools));
+                (Printf.sprintf "MCP servers (%d), tools (%d):" (!rows |> List.length)
+                   (List.length tools));
+              List.iter
+                (fun ((id : Par.Mcp_types.server_id), (srv : Par.Mcp_server.t)) ->
+                   let state =
+                     match Par.Mcp_server.status srv with
+                     | Par.Mcp_server.Ready _ -> "ready"
+                     | Par.Mcp_server.Starting -> "starting"
+                     | Par.Mcp_server.Stopped -> "stopped"
+                     | Par.Mcp_server.Failed _ -> "failed"
+                   in
+                   Par_code_ui.render_notice ui
+                     (Printf.sprintf "  %s  %s  pid %d" (id :> string) state
+                        (Par.Mcp_server.pid srv)))
+                (List.rev !rows);
               List.iter
                 (fun (td : Par.Types.tool_descriptor) ->
-                   Par_code_ui.render_notice ui ("  " ^ td.name))
-                tools
+                   Par_code_ui.render_notice ui ("    tool: " ^ td.name))
+                tools;
+              Par_code_ui.render_notice ui
+                "Config changes need a restart: the SDK binds MCP tools at \
+                 startup."
             end;
             loop ()
           | "/flow" ->

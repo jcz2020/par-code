@@ -12,7 +12,11 @@
   "command":…,"args":[…],"env":{…},"cwd":null,"startup_timeout":20}`.
 - `Runtime.create` receives the list together with `mcp_process_mgr`, `mcp_net`
   and `mcp_clock`, so stdio servers start with the runtime.
-- `/mcp` lists the tools the running servers expose.
+- `/mcp` lists every running server with its state and pid, the tools it exposes,
+  and states plainly that a config change needs a restart.
+- **Hot reload is not implemented** — the SDK binds MCP tools once at startup
+  (`runtime.ml:3129`) and `mcp_tools` is private, so a host-side reconnect would
+  leave tools registered against a dead server. Reported as `jcz2020/par#35`.
 - **No manual descriptor merge.** On 0.16.2 the SDK already puts MCP tools in the
   agents' tool set; appending `Runtime.mcp_tool_descriptors` by hand made startup
   fail with `duplicate tool name: echo`.
