@@ -1,9 +1,29 @@
 # CHANGES
 
+## v0.11.0 — Ecosystem (unreleased)
+
+> **Status**: In progress on `feat/v0.11.0-mcp`.
+
+### MCP servers (stdio)
+
+- `~/.par/config.json` gains `mcp_servers`, parsed straight into
+  `Par.Mcp_types.server_config` — the SDK owns the schema, so there is no second
+  copy to drift. Entries are flat objects: `{"type":"stdio","name":…,
+  "command":…,"args":[…],"env":{…},"cwd":null,"startup_timeout":20}`.
+- `Runtime.create` receives the list together with `mcp_process_mgr`, `mcp_net`
+  and `mcp_clock`, so stdio servers start with the runtime.
+- `/mcp` lists the tools the running servers expose.
+- **No manual descriptor merge.** On 0.16.2 the SDK already puts MCP tools in the
+  agents' tool set; appending `Runtime.mcp_tool_descriptors` by hand made startup
+  fail with `duplicate tool name: echo`.
+
+**Verified**: a 20-line fake stdio server is spawned at startup, `/mcp` prints
+`MCP tools (1): echo`, and a real provider turn called the tool end to end
+(`→ echo ✓ (0.0ms)` → `The echo tool returned "mcp-ok"`).
+
 ## v0.10.0 — Parallel delegation (unreleased)
 
-> **Status**: In progress on `feat/v0.10.0-parallel`.
->
+> **Status**: Merged to main in PR #5 (`62e8fb6`); no tag cut yet.>
 > **Scope**: bounded concurrent fan-out and batch subagent delegation.
 
 ### Added — parallelism
