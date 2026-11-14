@@ -2835,5 +2835,47 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 
 **回退方式**：恢复无条件重启提示（删掉 `frontmatter_diff` 比较）。
 
+## [2026-11-13] v0.10.0 并发底座：自建 `Par_code_parallel`，不用 `Runtime.invoke_parallel`
 
+**变更前**：max-mode 的候选扇出是手写 `Eio.Fiber.all`，没有并发上限；`delegate` 工具一次只派一个子任务，多个互不依赖的探查只能串行，或赌模型在一轮里发多次工具调用。
+
+**变更后**：新增 `Par_code_parallel.map ?parallel_limit`——基于 `Eio.Fiber.List.map ~max_fibers`（默认 4，钳制 1..16），保持输入顺序，逐项把异常收成 `Error exn`，`Eio.Cancel.Cancelled` 原样上抛（吞掉取消会把「被取消」伪装成「部分成功」）。新增 `delegate_batch` 工具，一次并发跑 1–5 个**只读** `explore` 子任务；单个任务失败或崩溃只占自己那一格，其余照跑；UI 与结果按输入顺序输出，避免多个子代理在同一行交错。`general` 子任务被拒绝，并指回 `delegate`——同一 workspace 里两个写者会互踩（v0.3.1 的事故类型），写并行要等 per-child worktree 到位（v0.10.0 下一刀）。
+
+**原因**：SDK 的 `Runtime.invoke_parallel` 不能直接用——它把每个 spec 交给 `Workflow_engine.execute_step`，`Agent_call` 分支只回 `{"text","tool_calls"}`（`workflow_engine.ml:141-155`），conversation 与 usage 被丢弃：胜者无法续写，`/cost` 无法记账。自建扇出走 `Runtime.invoke`，完整的 `invoke_result` 得以保留。**PAR 侧需求**：让 `parallel_invoke_result.successes` 带回原始 `llm_response`（或给 `agent_dispatch_spec` 一个「返回完整响应」的开关）；紧迫性中——par-code 已绕过，功能不受阻，但其他 app 会重复实现同一层。
+
+**影响范围**：`lib/par_code_parallel.ml/.mli`（新）、`par_code_delegate`（`delegate_batch` / `batch_max_tasks` / `text_of_response`）、`par_code_setup`（工具注册）、`test/test_par_code_parallel.ml`、`test/dune`。
+
+**回退方式**：删除 `par_code_parallel` 与 `delegate_batch` 注册，回到单任务 `delegate`；max-mode 不动，仍走它自己的扇出。
+
+## [2026-11-13] PAR 缺口（P0）：`find` / `grep` 的 glob 永远匹配不到任何文件
+
+**变更前**：par-code 直接使用 SDK 内置的 `find` / `grep` 工具，并假设它们可用；`delegate` 子代理与主 agent 共用这批描述符。
+
+**变更后**：记录缺口，未动 PAR。真实 provider dogfood（`delegate_batch` 三路探查）中，`find` 与 `grep` 对所有模式返回空；单独让主 agent 直接调用这两个工具复测，结果相同（`find=EMPTY`、`grep=EMPTY`）。
+
+**原因**：`tools/builtin_tools.ml` 里两个工具都先 `Str.quote` 再替换星号。`Str.quote "*.ml"` 得到 `\*\.ml`（星号前已加转义反斜杠），随后 `Str.global_replace (Str.regexp "\\*") "[^/]*"` 只换掉星号字符、留下那个反斜杠，最终正则变成 `\[^/]*\.ml`——要求文件名里有一个字面反斜杠，所以永远不匹配。本地用同一段代码复现：`*.ml` → `\[^/]*\.ml`、`**/*.ml` → `\[^/]*\[^/]*/\[^/]*\.ml`、`*` → `\[^/]*`，对 `code.ml` 全部为 false。`grep` 是同一错误模式（`.*` 版本，行 ~1031），默认 glob 同样必死。不含 `*` 的精确名午（如 `dune`）可以匹配，所以这个 bug 在简单手测下容易漏过。
+
+**PAR 侧需求**：把 glob→regex 改成「逐字符转义后再展开通配符」，而不是先 `Str.quote` 整体再替换。另：`find` 的 `walk` 只对 `Filename.basename` 匹配，所以 `**/*.ml` 这类带目录的模式也无法工作，建议对相对路径匹配。**紧迫性：高**——编码 agent 的检索能力为 0，子代理会因此把迭代预算烧在无效调用上（本次 dogfood 中 explore 正是这样撞到 `Max iterations exceeded`）。
+
+**影响范围**：PAR `tools/builtin_tools.ml`（`glob_match` ~L927、grep 的 `glob_re` ~L1031）；par-code 侧所有依赖 `find` / `grep` 的路径（主 agent、planner、explore 子代理、max-mode 候选）。
+
+**回退方式**：无需回退（仅记录）。按项目定位**不在 par-code 侧自建替代工具**：缺陷归 PAR 修，修好发版后 par-code 跟进验证并关闭本条。
+
+**上游 issue**：https://github.com/jcz2020/par/issues/32
+
+**2026-11-13 验证（PAR `v0.16.0-beta.20261114`）**：release note 声称两个工具都修了，实测只修了一半——`find` 对 `lib` + `*.ml` 返回 32 条（与磁盘一致，已修）；`grep` 仍返回 0 条，`glob=**/*` 也为空。根因：`builtin_tools.ml:1072` 仍是 `Str.string_match regex line 0`（锚定行首，`let distiller_agent_id = ...` 在第 4 列永远不中），且 `:1063` 仍用 basename 过滤，带目录的 glob 永不匹配。证据已补到 issue 评论。**本条保持 OPEN**，等 PAR 修后半部分。
+
+**2026-11-14 验证（PAR `v0.16.1-beta.20261114`）——已修复，可关闭**：`find` 返回 32 条（与磁盘一致）；`grep` 返回 4 条带行号命中，首条为 `lib/par_code_distill.ml:328: ... Runtime.invoke rt ~agent_id:distiller_agent_id ...`（第 36 列开始——正是锤定匹配永远找不到的情形）。par-code 侧全程无替代实现，工具就是 SDK 原版。
+
+## [2026-11-13] v0.10.0 PAR SDK 升级：`v0.12.0-beta.20261023` → `v0.16.0-beta.20261114`
+
+**变更前**：par-code 钉在 `v0.12.0-beta.20261023`（6 处），`find` / `grep` 因上游缺陷全废（#32）。
+
+**变更后**：6 处 pin 全部改为 `v0.16.1-beta.20261114`（先升到 0.16.0 验证，发现只修了 `find`；PAR 在 `main` 上补齐 `grep` 后发了 0.16.1，再升一次）；本机 switch 重装为 0.16.1；按四个小版本的 API 漂移逐项迁移（`model_config` + `thinking_budget_tokens` / `context_window`；`message` 去 `reasoning_content`，推理改走 `Reasoning_block` / `Redacted_reasoning_block` 与 `llm_response.reasoning`；`invoke_result` + `invoke_id`；`persistence_service` 用 `load_recoverable_runs_fn` 替代 `load_all_suspended_workflows_fn`，并补上 durable-invoke 的 checkpoint / lease 六个钩子；`handler_result` + `Success_content`；`llm_response_chunk` + `Reasoning_signature`；`Http_client.tls_host_of_string` 没了，升级器自己构造 `Domain_name.t` 作 SNI）。
+
+**原因**：上游发布 v0.16 并修复了 #32。按项目定位，PAR 修好发版后 par-code 跟进——不绕开、不自建替代。
+
+**影响范围**：`dune-project` + 5 个安装点；`lib/par_code_config.ml` / `context.ml` / `setup.ml` / `ui.ml` / `upgrade.ml` / `repl.ml`；`test/` 四个套件的字段与构造；`lib/dune` 新增 `domain-name` 依赖。
+
+**回退方式**：pin 退回 `v0.12.0-beta.20261023` 并 `opam install par -y`，同时回滚上述六个模块的迁移。
 

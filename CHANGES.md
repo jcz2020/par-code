@@ -1,5 +1,59 @@
 # CHANGES
 
+## v0.10.0 — Parallel delegation (unreleased)
+
+> **Status**: In progress on `feat/v0.10.0-parallel`.
+>
+> **Scope**: bounded concurrent fan-out and batch subagent delegation.
+
+### Added — parallelism
+
+- **`delegate_batch` runs up to five read-only `explore` subagents at once.**
+  Tasks run concurrently through a bounded pool; a task that fails or crashes
+  is reported in its own slot and the rest still run. UI lines and results are
+  emitted in input order, so two children never interleave on one terminal
+  line. A `general` task is rejected: two writers in one workspace collide, so
+  write parallelism waits for per-child worktrees (recorded as the next step).
+- **`Par_code_parallel` is the executor behind it.** `map ?parallel_limit` runs
+  a function over a list on Eio fibers (`Fiber.List.map ~max_fibers`), default
+  4, clamped to 1..16, input order preserved. A raised exception is captured
+  per item; `Eio.Cancel.Cancelled` is re-raised, so cancelling a turn can never
+  be mistaken for a partial success.
+- **`test_par_code_parallel.ml`** (28th Alcotest suite) covers input order,
+  empty batches, per-item exception isolation, and the concurrency bound
+  (including that work actually overlaps rather than running one at a time).
+
+### Changed — PAR SDK v0.16.0-beta.20261114
+
+- **The SDK pin moves from `v0.12.0-beta.20261023` to
+  `v0.16.1-beta.20261114`** in all six places (`dune-project` floor + the five
+  install points).
+- **The built-in `find` / `grep` work again** — the upstream fix for
+  `jcz2020/par#32`. The tag `v0.16.0` shipped only half of it (`find` fixed,
+  `grep` still anchored to the start of each line), so the pin lands on
+  `v0.16.1`, whose release carries the rest. par-code keeps no search
+  replacement of its own: the SDK tools are registered exactly as before.
+- **Migration for the four-minor API drift.** `model_config` gained
+  `thinking_budget_tokens` and `context_window`; `message` lost
+  `reasoning_content` (reasoning now travels as `Reasoning_block` /
+  `Redacted_reasoning_block` content blocks, and `llm_response.reasoning` is the
+  ordered list); `invoke_result` gained `invoke_id`; `persistence_service`
+  replaced `load_all_suspended_workflows_fn` with `load_recoverable_runs_fn` and
+  gained the durable-invoke checkpoint and lease hooks; `handler_result` gained
+  `Success_content`; `llm_response_chunk` gained `Reasoning_signature`;
+  `Http_client.tls_host_of_string` is gone, so the updater builds the
+  `Domain_name.t` for SNI itself. The UI's event renderer now ends in a catch-all
+  instead of enumerating every observability event.
+
+### Not adopted — `Runtime.invoke_parallel`
+
+The SDK's parallel entry point is unusable for par-code's fan-out: it routes
+each spec through `Workflow_engine.execute_step`, whose `Agent_call` branch
+returns only `{"text","tool_calls"}` and drops the conversation and the usage
+stats. A best-of-N winner could not be continued, and no token could be billed.
+`Par_code_parallel` therefore calls `Runtime.invoke` directly, where the full
+`invoke_result` survives. Recorded as a PAR gap in `docs/DECISIONS.md`.
+
 ## v0.9.0 — Self-improvement (unreleased)
 
 > **Status**: In progress on `feat/v0.9.0-skills`.
