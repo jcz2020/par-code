@@ -2968,3 +2968,15 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 **影响范围**：`lib/par_code_setup.ml`（标志 + `ask_user` 分支）、`lib/par_code_repl.ml`（`/flow run` 的置位/复位与警告文案）。
 
 **回退方式**：删掉标志与两处置位，恢复"流程内弹问"的旧行为（不推荐）。
+
+## [2026-11-14] 更正：工作流内不禁止交互审批，提示照常送到终端
+
+**变更前**：上一条记录了"流程期间 `non_interactive` 置真，bash 审批直接拒绝而不是弹问"。
+
+**变更后**：撤掉拒绝逻辑，`non_interactive` 只作为信号保留；`/flow run` 前的警告改成"审批提示仍会送到这个终端，出现了就回答；没人看着的运行会等待"。
+
+**原因**：那个结论建立在一个没验证的前提上 —— 以为流程里的提问没人能回答。可测试本身就跑在 tmux 里，提示是可以输入 `y` 的；我把"我没去回答"当成了"无法回答"，于是写了一条不必要的限制。复核 SDK 也确认审批通道完整（`Human_approval` / `approve_workflow`，`Tool_call` 步骤遇到审批明确报不支持）。
+
+**影响范围**：`lib/par_code_setup.ml`（`ask_user` 恢复提问）、`lib/par_code_repl.ml`（警告文案）、`lib/AGENTS.md`。
+
+**回退方式**：无需回退（本更正即撤回上一条的实现部分）。

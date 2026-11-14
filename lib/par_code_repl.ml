@@ -981,9 +981,9 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                    | ids ->
                      Par_code_ui.render_warning ui
                        (Printf.sprintf
-                          "[flow] %s can stop for a human; inside a flow nobody \
-                           answers. Bash will be denied rather than prompted, and \
-                           the model is told the command did not run."
+                          "[flow] %s may stop and ask for approval. The prompt still \
+                           reaches this terminal, so answer it when it appears; a run \
+                           nobody is watching waits."
                           (String.concat ", " ids)));
                   Par_code_ui.render_notice ui
                     (Printf.sprintf "[flow] running %s (blocks the REPL)" id);
