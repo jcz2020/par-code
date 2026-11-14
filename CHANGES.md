@@ -21,9 +21,11 @@
 `MCP tools (1): echo`, and a real provider turn called the tool end to end
 (`→ echo ✓ (0.0ms)` → `The echo tool returned "mcp-ok"`).
 
-## v0.10.0 — Parallel delegation (unreleased)
+## v0.10.0 — Parallel delegation (released 2026-11-14)
 
-> **Status**: Merged to main in PR #5 (`62e8fb6`); no tag cut yet.>
+> **Status**: Released as tag `v0.10.0` (PR #5, `62e8fb6`). The tag also carries
+> the v0.11.0 MCP stdio groundwork that landed on main before the cut; the rest
+> of v0.11.0 stays unreleased.>
 > **Scope**: bounded concurrent fan-out and batch subagent delegation.
 
 ### Added — parallelism

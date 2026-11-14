@@ -538,7 +538,7 @@ Version numbers stay minimal (no 1.0 until core parity is earned).
 | **v0.8.2** ✅ | P2 cleanup — doom-loop no longer counts routine bash/edit sequences; streamed text and tool lines stop gluing; `/cost` records tool invocations and computes visible tools; manual `/checkpoint` skips memory extraction; zero-row migration noise and table blank lines are gone. *"The daily loop stops lying to you."* |
 | **v0.9.0** ✅ | Self-improvement — custom slash commands + `/distill`. *"It turns my repeated workflows into reusable skills."* |
 | **v0.9.1** | Memory hygiene — `/dream` consolidates the memory index (merge/rewrite/prune, dry-run by default). *"It keeps its own notes short and accurate."* |
-| **v0.10.0** | Compose mode — spec-driven orchestration with plan/execute/review/tdd/debug/verify/merge skills. *"Give a spec, it designs, codes, reviews, and tests end-to-end."* |
+| **v0.10.0** ✅ | Compose groundwork — batch delegation on `invoke_parallel`, durable turns with `/resume`, file-defined workflows (`/flow`), and a three-stage plan→edits→review compose example; the full seven-stage set is v0.10.1. *"Give a spec, it designs, codes, reviews, and tests end-to-end."* |
 | **v0.11.0** | Ecosystem connections — MCP OAuth + hot-reload + multi-source skills (remote URLs, `.claude`/`.agents`/…). *"Connect any MCP server; pull skills from URLs."* |
 | **v0.12.0** | Code intelligence — LSP integration (diagnostics, go-to-def, references, call hierarchy) + lsp tool. *"It navigates code like an IDE."* |
 | **v0.13.0** | Safe & reversible — permission ruleset (allow/ask/deny + persisted approvals) + filesystem snapshot/undo. *"It asks before destructive ops; changes can be undone."* |
