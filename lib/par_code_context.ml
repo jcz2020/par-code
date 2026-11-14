@@ -26,6 +26,10 @@ let block_char_length (block : content_block) : int =
     String.length tool_use_id + String.length content
   | Image_block { data; _ } ->
     String.length data
+  | Reasoning_block { text; _ } ->
+    String.length text
+  | Redacted_reasoning_block { data; _ } ->
+    String.length data
 
 let message_char_length (msg : message) : int =
   let blocks_chars =
@@ -77,8 +81,7 @@ let make_summary_message (summary : string) : message =
       cache_control = None } ];
     tool_calls = None;
     tool_call_id = None;
-    name = None;
-    reasoning_content = None }
+    name = None }
 
 let compact (conv : conversation) ~budget_tokens ~summary
     ?(keep_recent = 8) () : conversation =

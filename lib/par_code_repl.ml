@@ -427,7 +427,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                                { Types.response =
                                    { Types.text =
                                        Some winner.Par_code_max_mode.text
-                                   ; reasoning_content = None
+                                   ; reasoning = []
                                    ; tool_calls = None
                                    ; finish_reason = Types.Stop
                                    ; usage = Par_code_max_mode.empty_usage
@@ -439,6 +439,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                                         ~original:message
                                         winner.Par_code_max_mode.conversation)
                                ; approval_pending = None
+                               ; invoke_id = None
                                }
                            | Par_code_selector.Execute ->
                              conv :=

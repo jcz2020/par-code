@@ -6,19 +6,19 @@ let user_msg () : message =
   { role = User;
     content_blocks = [ Text_block { text = long_text; cache_control = None } ];
     tool_calls = None; tool_call_id = None; name = None;
-    reasoning_content = None }
+    }
 
 let assistant_msg ?(tool_calls = []) () : message =
   { role = Assistant;
     content_blocks = [ Text_block { text = long_text; cache_control = None } ];
     tool_calls = (match tool_calls with [] -> None | l -> Some l);
-    tool_call_id = None; name = None; reasoning_content = None }
+    tool_call_id = None; name = None }
 
 let tool_msg ~tcid ~content () : message =
   { role = Tool;
     content_blocks = [ Text_block { text = content; cache_control = None } ];
     tool_calls = None; tool_call_id = Some tcid; name = None;
-    reasoning_content = None }
+    }
 
 let tc id = { id; name = "bash"; arguments = `Assoc [] }
 

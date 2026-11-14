@@ -146,7 +146,7 @@ let user_msg ~text () : Types.message =
   { role = Types.User;
     content_blocks = [ Types.Text_block { text; cache_control = None } ];
     tool_calls = None; tool_call_id = None; name = None;
-    reasoning_content = None }
+    }
 
 let debug_dir_in home = Filename.concat (Filename.concat home ".par") "debug"
 

@@ -146,3 +146,145 @@ let make_delegate_tool
         }
   in
   { descriptor; handler }
+
+(* ---------------------------------------------------------------------- *)
+(* delegate_batch — v0.10.0: bounded fan-out over independent subagent tasks *)
+(* ---------------------------------------------------------------------- *)
+
+let batch_max_tasks = 5
+
+let batch_input_schema : Yojson.Safe.t =
+  `Assoc
+    [ ("type", `String "object")
+    ; ( "properties"
+      , `Assoc
+          [ ( "tasks"
+            , `Assoc
+                [ ("type", `String "array")
+                ; ("minItems", `Int 1)
+                ; ("maxItems", `Int batch_max_tasks)
+                ; ( "description"
+                  , `String
+                      "Read-only 'explore' tasks to run concurrently. Use it \
+                       when the investigations do not depend on each other." )
+                ; ("items", delegate_input_schema)
+                ] )
+          ] )
+    ; ("required", `List [ `String "tasks" ])
+    ]
+
+let text_of_response (r : Types.llm_response) : string =
+  match r.text with
+  | Some t when String.length t > 0 -> t
+  | _ ->
+    (match r.finish_reason with
+     | Types.Tool_calls -> "(subagent hit max iterations - work may be incomplete)"
+     | Types.Max_tokens -> "(subagent hit max tokens - output truncated)"
+     | _ -> "(subagent returned no text)")
+
+(* Validation is pure so it can be tested without a Runtime or an LLM. *)
+let parse_batch_input (json : Yojson.Safe.t) :
+  ((string * string) list, string) result =
+  let open Yojson.Safe.Util in
+  let raw = match json |> member "tasks" with `List l -> l | _ -> [] in
+  let parsed =
+    List.filter_map
+      (fun item ->
+         match item |> member "agent_type", item |> member "task" with
+         | `String at, `String task when task <> "" -> Some (at, task)
+         | _ -> None)
+      raw
+  in
+  let count = List.length parsed in
+  if parsed = [] then
+    Error "'tasks' must contain at least one {agent_type, task} object"
+  else if count <> List.length raw then
+    Error "every 'tasks' entry needs a string 'agent_type' and a non-empty 'task'"
+  else if count > batch_max_tasks then
+    Error (Printf.sprintf "at most %d tasks per call" batch_max_tasks)
+  else
+    match List.find_opt (fun (at, _) -> at <> "explore") parsed with
+    | Some ("general", _) ->
+      Error
+        "delegate_batch runs read-only 'explore' tasks only: two 'general' \
+         subagents would edit one workspace at once. Use 'delegate' for \
+         anything that writes."
+    | Some (at, _) ->
+      Error (Printf.sprintf "Unknown agent type '%s'. Use 'explore'." at)
+    | None -> Ok parsed
+
+let make_delegate_batch_tool
+    ~rt
+    ~(ui : Par_code_ui.backend Lazy.t)
+    : Types.tool_binding =
+  let open Types in
+  let descriptor =
+    { name = "delegate_batch"
+    ; description =
+        "Run up to 5 read-only 'explore' subagents concurrently and return \
+         every result. Use this instead of calling 'delegate' several times \
+         when the investigations are independent. Read-only by design: two \
+         'general' subagents would edit the same workspace at once, so use \
+         'delegate' for anything that writes. One failing task does not abort \
+         the others."
+    ; input_schema = batch_input_schema
+    ; output_schema = None
+    ; permission = Allow
+    ; timeout = Some 900.0
+    ; concurrency_limit = None
+    ; on_update = None
+    ; cache_control = None
+    }
+  in
+  let invalid message =
+    Types.Error
+      { category = Types.Invalid_input "delegate_batch"
+      ; message
+      ; retryable = false
+      ; metadata = []
+      }
+  in
+  let handler json tok =
+    match parse_batch_input json with
+    | Error msg -> invalid msg
+    | Ok parsed ->
+      let count = List.length parsed in
+      let backend = Lazy.force ui in
+        List.iteri
+          (fun i (at, task) ->
+             Par_code_ui.render_delegation_start backend ~agent_type:at
+               ~task:(Printf.sprintf "[%d/%d] %s" (i + 1) count task))
+          parsed;
+        let results =
+          Par_code_parallel.map
+            ~parallel_limit:Par_code_parallel.default_limit
+            (fun (_at, task) ->
+               let agent_id = explore_agent_id in
+               Runtime.invoke rt ~agent_id ~message:task ~save:false
+                 ~update_current:false ~cancellation_token:tok ())
+            parsed
+        in
+        (* Render and report in input order: the terminal never has two
+           subagents writing into the same line. *)
+        let lines =
+          List.mapi
+            (fun i (r, (at, _)) ->
+               let head = Printf.sprintf "[%d/%d]" (i + 1) count in
+               match r with
+               | Result.Error exn ->
+                 let msg = Printf.sprintf "Subagent crashed: %s" (Printexc.to_string exn) in
+                 Par_code_ui.render_delegation_error backend ~agent_type:at ~error:msg;
+                 Printf.sprintf "%s crashed: %s" head (Printexc.to_string exn)
+               | Result.Ok (Result.Error (err, _)) ->
+                 let msg = Printf.sprintf "Subagent failed: %s" (error_to_string err) in
+                 Par_code_ui.render_delegation_error backend ~agent_type:at ~error:msg;
+                 Printf.sprintf "%s failed: %s" head (error_to_string err)
+               | Result.Ok (Result.Ok result) ->
+                 let text = text_of_response result.Types.response in
+                 Par_code_ui.render_delegation_result backend ~agent_type:at ~text;
+                 Printf.sprintf "%s\n%s" head text)
+            (List.combine results parsed)
+        in
+        Success (`String (String.concat "\n\n" lines))
+  in
+  { descriptor; handler }

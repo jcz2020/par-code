@@ -70,11 +70,12 @@ let make_persistence_service (cfg : Par_code_config.config) =
       load_task_state_fn = (fun task_id -> Sqlite_persistence.load_task_state t task_id);
       save_workflow_state_fn = (fun id status ckpt -> Sqlite_persistence.save_workflow_state t id status ckpt);
       load_workflow_state_fn = (fun id -> Sqlite_persistence.load_workflow_state t id);
-      load_all_suspended_workflows_fn = (fun () -> Sqlite_persistence.load_all_suspended_workflows t);
+      load_recoverable_runs_fn = (fun () -> Sqlite_persistence.load_recoverable_runs t);
       save_workflow_def_fn = (fun id def -> Sqlite_persistence.save_workflow_def t id def);
       load_all_workflow_defs_fn = (fun () -> Sqlite_persistence.load_all_workflow_defs t);
       save_conversation_fn = (fun ?scope sid conv -> Sqlite_persistence.save_conversation ?scope t sid conv);
       load_conversation_fn = (fun sid -> Sqlite_persistence.load_conversation t sid);
+      load_conversations_fn = (fun ?scope limit -> Sqlite_persistence.load_conversations ?scope t limit);
        load_most_recent_conversation_fn = (fun ?scope () -> Sqlite_persistence.load_most_recent_conversation ?scope t);
       save_pending_approval_fn = (fun ~run_id ~agent_id ~payload ~expires_at ->
         Sqlite_persistence.save_pending_approval t ~run_id ~agent_id ~payload ~expires_at);
@@ -82,6 +83,21 @@ let make_persistence_service (cfg : Par_code_config.config) =
         Sqlite_persistence.load_pending_approval t ~run_id);
       delete_pending_approval_fn = (fun ~run_id ->
         Sqlite_persistence.delete_pending_approval t ~run_id);
+      (* PAR 0.16 durable-invoke surface: checkpoints while a run is in flight
+         and the cross-runtime lease that keeps two runtimes off one row. *)
+      save_invoke_checkpoint_fn = (fun ckpt ->
+        Sqlite_persistence.save_invoke_checkpoint t ckpt);
+      load_invoke_checkpoint_fn = (fun id ->
+        Sqlite_persistence.load_invoke_checkpoint t id);
+      list_invoke_checkpoints_fn = (fun () ->
+        Sqlite_persistence.list_invoke_checkpoints t);
+      delete_invoke_checkpoint_fn = (fun id ->
+        Sqlite_persistence.delete_invoke_checkpoint t id);
+      claim_invoke_lease_fn = (fun ~invoke_id ~owner ~pid ~ttl ->
+        Sqlite_persistence.claim_invoke_lease t ~invoke_id ~owner ~pid ~ttl);
+      release_invoke_lease_fn = (fun ~invoke_id ~owner ->
+        Sqlite_persistence.release_invoke_lease t ~invoke_id ~owner);
+      list_invoke_leases_fn = (fun () -> Sqlite_persistence.list_invoke_leases t);
       close_fn = (fun () -> Sqlite_persistence.close t);
     }
 
@@ -325,6 +341,21 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
         () with
       | Ok _ -> descriptors := delegate_binding.Types.descriptor :: !descriptors
       | Error e -> ui_render_warning (Printf.sprintf "Warning: delegate tool not registered: %s" (error_to_string e)));
+     let delegate_batch_binding =
+       Par_code_delegate.make_delegate_batch_tool ~rt ~ui
+     in
+     (match Runtime.register_tool rt
+        ~name:delegate_batch_binding.Types.descriptor.Types.name
+        ~description:delegate_batch_binding.Types.descriptor.Types.description
+        ~input_schema:delegate_batch_binding.Types.descriptor.Types.input_schema
+        ~handler:delegate_batch_binding.Types.handler
+        () with
+      | Ok _ ->
+        descriptors := delegate_batch_binding.Types.descriptor :: !descriptors
+      | Error e ->
+        ui_render_warning
+          (Printf.sprintf "Warning: delegate_batch tool not registered: %s"
+             (error_to_string e)));
       let goal_done = Par_code_goal_tools.goal_done_tool_binding in
       (match Runtime.register_tool rt
          ~name:goal_done.Types.descriptor.Types.name
