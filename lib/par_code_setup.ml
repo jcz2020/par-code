@@ -51,11 +51,6 @@ let error_to_string (e : Types.error_category) =
   | Types.Cancelled Types.User_cancelled -> "Cancelled by user"
   | Types.Cancelled (Types.Guard_cancelled reason) -> Printf.sprintf "Cancelled by guard: %s" reason
 
-(* v0.10.0 W3: kept as a signal only. A workflow step can reach this prompt
-   when the terminal is still attached, so the correct answer is to warn before
-   the run, not to refuse the command. *)
-let non_interactive = ref false
-
 let ensure_rng () = Mirage_crypto_rng_unix.use_default ()
 
 (* v0.10.0 W4: [Runtime] exposes [list_orphaned_invokes] and [recover_invoke],

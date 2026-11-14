@@ -1005,11 +1005,8 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                           done)
                    | None -> ());
                   Fun.protect
-                    ~finally:(fun () ->
-                      Par_code_setup.non_interactive := false;
-                      finished := true)
+                    ~finally:(fun () -> finished := true)
                     (fun () ->
-                       Par_code_setup.non_interactive := true;
                        match
                          Runtime.submit_workflow rt
                            (Par_code_flow.workflow_of def)
