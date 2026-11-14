@@ -14,6 +14,12 @@
   and `mcp_clock`, so stdio servers start with the runtime.
 - `/mcp` lists every running server with its state and pid, the tools it exposes,
   and states plainly that a config change needs a restart.
+- **HTTP servers parse and start, but the SDK transport cannot talk to standard
+  servers yet**: `initialize` is sent with empty params (strict servers answer
+  400) and `parse_sse_response` is never called, so `text/event-stream` replies
+  fail to parse. Both reported as `jcz2020/par#37`; par-code does not reimplement
+  the protocol. `Http_timeout`'s global clock is set explicitly before
+  `Runtime.create` (`jcz2020/par#36`).
 - **Hot reload is not implemented** — the SDK binds MCP tools once at startup
   (`runtime.ml:3129`) and `mcp_tools` is private, so a host-side reconnect would
   leave tools registered against a dead server. Reported as `jcz2020/par#35`.

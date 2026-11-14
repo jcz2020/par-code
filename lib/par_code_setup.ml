@@ -233,6 +233,10 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
       ?embedding_base_url:cfg.Par_code_config.embedding_base_url
       ?embedding_model:cfg.Par_code_config.embedding_model
       net in
+  (* v0.11.0: the MCP HTTP transport borrows Http_timeout's module-level clock,
+     which the SDK only sets while building a provider HTTP client. Set it here
+     so HTTP MCP servers work regardless of provider/order (par#36). *)
+  Par.Http_timeout.set_clock (Eio.Stdenv.clock env);
   match
     Runtime.create ~persistence:pers ~llm ~embeddings ~config:runtime_config
       ~mcp_servers:cfg.Par_code_config.mcp_servers

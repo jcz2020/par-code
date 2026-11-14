@@ -3012,3 +3012,11 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 - **reason**：`rt.mcp_tools`（`core/runtime.ml:104`）是私有可变字段，只在 `create` 里写一次（`:3129`）；`Mcp_server.spawn/stop` 与 `htbl_set/remove` 虽然公开，但工具表改不了，手工重连会得到"进程在跑、每次调用都被拒"的假象 —— 比不做更糟。
 - **scope**：只影响运行时增删服务器；启动时读取配置、工具注入照常。skill 的 replace 缺失是同一类缺口，已在 issue 里一并说明。
 - **rollback**：上游提供接口后，把 `/mcp` 的提示换成真正的 reload 分支，并用同一套假 server 验证"改了 config 不重启即生效"。
+## 2026-11-14 · MCP HTTP 传输：配置与启动就位，协议缺陷留给上游
+
+- **tag**：mcp-http-upstream-defects
+- **before**：`mcp_servers` 只验证过 stdio；HTTP 条目能否工作未知。
+- **after**：HTTP 条目能解析、能启动、能连到服务器（实测服务器收到 `initialize` POST）；但 SDK 的 HTTP 传输有两处协议缺陷，标准服务器一律失败，因此只把能力边界写进文档，不在本地补协议实现。
+- **reason**：实测证据 —— (1) 客户端发出的 `initialize` 参数是空对象 `{}`，缺 `protocolVersion`/`capabilities`/`clientInfo`，官方 Python SDK 直接回 400；(2) `mcp_transport_http.ml` 里 `content_type_is`（132 行）与 `parse_sse_response`（140 行）是死代码，`request_response` 永远按纯 JSON 解析，而标准服务器默认回 `text/event-stream`。
+- **scope**：stdio 服务器不受影响（已在 v0.11.0 验证可用）。HTTP 需等 `jcz2020/par#37` 修复后再复验；另有一条前置耦合是 `jcz2020/par#36`（`Http_timeout` 全局 clock 只在构造 provider 客户端时被设置，par-code 已在 create 前显式 `set_clock`）。
+- **rollback**：上游修复后，用同一个 `MCPServer("fake-http")` + `streamable-http` 服务器跑通 `/mcp` 与一次工具调用，再把文档里的"仅 stdio"限制删掉。
