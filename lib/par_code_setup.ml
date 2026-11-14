@@ -51,6 +51,12 @@ let error_to_string (e : Types.error_category) =
   | Types.Cancelled Types.User_cancelled -> "Cancelled by user"
   | Types.Cancelled (Types.Guard_cancelled reason) -> Printf.sprintf "Cancelled by guard: %s" reason
 
+(* v0.10.0 W3: a workflow step has nobody to answer a prompt, so while a flow
+   runs a command that would ask is denied instead of blocking the REPL forever.
+   The SDK has its own approval channel (Human_approval / approve_workflow); this
+   flag only governs par-code's interactive bash prompt. *)
+let non_interactive = ref false
+
 let ensure_rng () = Mirage_crypto_rng_unix.use_default ()
 
 (* v0.10.0 W4: [Runtime] exposes [list_orphaned_invokes] and [recover_invoke],
@@ -693,6 +699,8 @@ This is the LAST thing you do. The user will be asked to confirm.
                if Par_code_approvals.matches patterns full_cmd then true
                else
                let ask_user ?(suffix="") () =
+                 if !non_interactive then false
+                 else
                  let msg = Printf.sprintf "\n\xe2\x9a\xa0 bash: %s%s [y/a/N] " full_cmd suffix in
                  let sty = Par_code_ui.style ~fg:Yellow ~bold:true () in
                  match Par_code_ui.prompt_confirm ~backend:(Lazy.force ui) ~style:sty msg with

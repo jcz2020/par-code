@@ -2956,3 +2956,15 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 **影响范围**：`lib/par_code_repl.ml`（`/flow run` 分支）、`lib/par_code_flow.ml/.mli`（`agent_ids` / `interactive_agents`）、`lib/par_code_setup.ml`（暴露 clock）。
 
 **回退方式**：删掉轮询 fiber 与预警分支。
+
+## [2026-11-14] v0.10.0 工作流内不做交互审批：直接拒绝而不是挂住
+
+**变更前**：par-code 的 bash 审批在工具处理方法内部弹终端提问。工作流步骤里没有人能回答，于是命令一直等输入，整个 `/flow run` 静默挂到超时。
+
+**变更后**：`Par_code_setup.non_interactive` 标志，`/flow run` 期间置真，`ask_user` 直接返回 false（命令被拒并把结果告诉模型），运行结束在 `Fun.protect` 里复位。定义里出现会停下等人的 agent 时仍会先警告，但文案改成"bash 会被拒绝而不是提问"。
+
+**原因**：先说结论 —— **这不是 PAR 缺口**。引擎本身有 `Human_approval` 步骤 + `Wf_suspended` + `approve_workflow`，且 `Tool_call` 步骤遇到审批会明确返回 `Approval not supported in workflow Tool_call step`，不会挂。挂住的是 par-code 自己的交互式 bash 提示，属于我们的接线问题，不该报给上游。
+
+**影响范围**：`lib/par_code_setup.ml`（标志 + `ask_user` 分支）、`lib/par_code_repl.ml`（`/flow run` 的置位/复位与警告文案）。
+
+**回退方式**：删掉标志与两处置位，恢复"流程内弹问"的旧行为（不推荐）。

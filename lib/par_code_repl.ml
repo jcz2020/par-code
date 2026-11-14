@@ -981,9 +981,9 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                    | ids ->
                      Par_code_ui.render_warning ui
                        (Printf.sprintf
-                          "[flow] %s can stop and wait for a human, but a workflow \
-                           step has nobody to answer it: the run may hang. Use a \
-                           read-only agent."
+                          "[flow] %s can stop for a human; inside a flow nobody \
+                           answers. Bash will be denied rather than prompted, and \
+                           the model is told the command did not run."
                           (String.concat ", " ids)));
                   Par_code_ui.render_notice ui
                     (Printf.sprintf "[flow] running %s (blocks the REPL)" id);
@@ -1005,8 +1005,11 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                           done)
                    | None -> ());
                   Fun.protect
-                    ~finally:(fun () -> finished := true)
+                    ~finally:(fun () ->
+                      Par_code_setup.non_interactive := false;
+                      finished := true)
                     (fun () ->
+                       Par_code_setup.non_interactive := true;
                        match
                          Runtime.submit_workflow rt
                            (Par_code_flow.workflow_of def)
