@@ -2837,3 +2837,15 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 
 
 
+
+## [2026-11-14] v0.9.0 范围收窄：`/dream` 推迟到 v0.9.1
+
+**变更前**：README 的 v0.9.0 行承诺"`/dream` + `/distill` + 自定义 slash 命令"，`docs/v0.9.0-ROADMAP.md` 的 W3 是 `/dream`。
+
+**变更后**：v0.9.0 实际交付自定义 slash 命令（`/skills`）与 `/distill`；`/dream` 拆到 v0.9.1，README 新增 v0.9.1 行，CHANGES 的 Scope 段注明推迟。
+
+**原因**：`/dream` 从未实现（lib 无对应模块，REPL 无此命令）。v0.9.0 的核心价值是"把重复工作流固化成 skill"，`/distill` 已完整交付并通过单测与真机 dogfood；扣住整个版本去等一个尚未开始的记忆整理能力，会让已完成的切片无法发布。记忆整理与技能沉淀是两条主线，分开成版更符合"一版一能力"。
+
+**影响范围**：`README.md` roadmap 行（v0.9.0 标 ✅ 并收窄描述，新增 v0.9.1 行）、`CHANGES.md` 的 v0.9.0 Scope 段；无代码改动。
+
+**回退方式**：若决定先做 `/dream`，删除 v0.9.1 行、恢复 v0.9.0 原描述，并把版本号退回未发布状态。

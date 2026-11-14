@@ -536,7 +536,8 @@ Version numbers stay minimal (no 1.0 until core parity is earned).
 | **v0.8.0** ✅ | Best-of-N reasoning — max mode: N read-only candidates answered along different strategy angles, a dedicated selector picks one and routes it to answer or single-writer execution; `/max` + `--max N` + two config fields, `/cost` counts all N. *"It tries several approaches and picks the best."* |
 | **v0.8.1** ✅ | Hardening — context truncation, malformed tool-call payloads and unconfigured embeddings can no longer break a session; one plan file per submission; fork ids resolve; UTF-8-safe CLI output; `--db-uri` honored. *"Long sessions stay healthy."* |
 | **v0.8.2** ✅ | P2 cleanup — doom-loop no longer counts routine bash/edit sequences; streamed text and tool lines stop gluing; `/cost` records tool invocations and computes visible tools; manual `/checkpoint` skips memory extraction; zero-row migration noise and table blank lines are gone. *"The daily loop stops lying to you."* |
-| **v0.9.0** | Self-improvement — `/dream` + `/distill` + custom slash commands. *"It turns my repeated workflows into reusable skills."* |
+| **v0.9.0** ✅ | Self-improvement — custom slash commands + `/distill`. *"It turns my repeated workflows into reusable skills."* |
+| **v0.9.1** | Memory hygiene — `/dream` consolidates the memory index (merge/rewrite/prune, dry-run by default). *"It keeps its own notes short and accurate."* |
 | **v0.10.0** | Compose mode — spec-driven orchestration with plan/execute/review/tdd/debug/verify/merge skills. *"Give a spec, it designs, codes, reviews, and tests end-to-end."* |
 | **v0.11.0** | Ecosystem connections — MCP OAuth + hot-reload + multi-source skills (remote URLs, `.claude`/`.agents`/…). *"Connect any MCP server; pull skills from URLs."* |
 | **v0.12.0** | Code intelligence — LSP integration (diagnostics, go-to-def, references, call hierarchy) + lsp tool. *"It navigates code like an IDE."* |
