@@ -233,7 +233,13 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
       ?embedding_base_url:cfg.Par_code_config.embedding_base_url
       ?embedding_model:cfg.Par_code_config.embedding_model
       net in
-  match Runtime.create ~persistence:pers ~llm ~embeddings ~config:runtime_config switch with
+  match
+    Runtime.create ~persistence:pers ~llm ~embeddings ~config:runtime_config
+      ~mcp_servers:cfg.Par_code_config.mcp_servers
+      ~mcp_process_mgr:(Eio.Stdenv.process_mgr env)
+      ~mcp_net:net ~mcp_clock:(Eio.Stdenv.clock env)
+      switch
+  with
   | Error e ->
     ui_render_error (Printf.sprintf "Error creating runtime: %s" (error_to_string e));
     exit 1
@@ -276,6 +282,9 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
          exit 1)
     ) tools;
     let descriptors = ref (List.map (fun (tb : Types.tool_binding) -> tb.descriptor) tools) in
+    (* v0.11.0: MCP tools go to the main agent and `general` only. `explore`
+       and the max-mode candidates filter by name, so they stay read-only. *)
+    descriptors := Runtime.mcp_tool_descriptors rt @ !descriptors;
     (match mem_db with
      | Some t ->
        let mem_tools = Par_code_memory_tools.tools t in

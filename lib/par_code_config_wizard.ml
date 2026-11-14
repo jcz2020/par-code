@@ -213,6 +213,7 @@ let run_wizard ?(ui=Par_code_ui.create_backend ()) () =
     goal_auto_chain;
     max_mode = Par_code_config.default.max_mode;
     max_candidates = Par_code_config.default.max_candidates;
+    mcp_servers = Par_code_config.default.mcp_servers;
   } in
   Par_code_config.save cfg;
   render_notice ui (Printf.sprintf "\nSaved config to %s" (Par_code_config.config_path ()))
