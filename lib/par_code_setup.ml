@@ -53,6 +53,12 @@ let error_to_string (e : Types.error_category) =
 
 let ensure_rng () = Mirage_crypto_rng_unix.use_default ()
 
+(* v0.10.0 W4: [Runtime] exposes [list_orphaned_invokes] and [recover_invoke],
+   but no way to drop a checkpoint. The delete lives on the persistence service,
+   which is built here, so keep a handle for the REPL's [/resume discard]. *)
+let persistence_service : Types.persistence_service option ref = ref None
+let persistence () = !persistence_service
+
 let make_persistence_service (cfg : Par_code_config.config) =
   let (`Sqlite path) = Par_code_config.to_persistence_config cfg in
   let retention = cfg.Par_code_config.event_retention_days *. 24. *. 60. *. 60. in
@@ -209,6 +215,7 @@ let agent_id = "par"
 let setup_runtime (cfg : Par_code_config.config) ~f =
   ensure_rng ();
   let pers = make_persistence_service cfg in
+  persistence_service := Some pers;
   let persistence_config = Par_code_config.to_persistence_config cfg in
   let provider_tag = Par_code_config.to_provider_tag cfg in
   let runtime_config = make_runtime_config cfg in

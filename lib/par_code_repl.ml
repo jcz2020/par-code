@@ -14,6 +14,28 @@ type resume_target = Par_code_repl_io.resume_target =
   | Resume_most_recent
   | Resume_of of string
 
+(* v0.10.0 W4: the SDK rehydrates interrupted durable invokes at [Runtime.create]
+   time; this is the user-facing half of crash recovery. *)
+let resume_hint (orphans : (string * string) list) : string option =
+  match orphans with
+  | [] -> None
+  | (id, agent) :: _ ->
+    Some
+      (Printf.sprintf
+         "[resume] %d interrupted run(s); latest %s (agent %s). /resume continues \
+          it, /resume <id> picks another, /resume discard drops them."
+         (List.length orphans) id agent)
+
+(* [Runtime] has no delete for a checkpoint, so drop it through the persistence
+   service we build in setup. *)
+let forget_orphan (id : string) : (unit, string) result =
+  match Par_code_setup.persistence () with
+  | None -> Error "no persistence service"
+  | Some p ->
+    (match p.Par.Types.delete_invoke_checkpoint_fn id with
+     | Ok () -> Ok ()
+     | Error e -> Error (Par_code_setup.error_to_string e))
+
 let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goal
     ?max () =
   let ui = Par_code_ui.create_backend () in
@@ -23,6 +45,10 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
   let scope = Par_code_memory.resolve_project_id () in
   Par_code_ui.render_banner ui ~version:Par_code_version.version;
   let conv : Types.conversation option ref = ref (load_initial_conv ui rt resume) in
+  let orphans = ref (Runtime.list_orphaned_invokes rt) in
+  (match resume_hint !orphans with
+   | Some line -> Par_code_ui.render_warning ui line
+   | None -> ());
   let turn_count = ref 0 in
   let session_id = ref None in
   let is_first_turn = ref true in
@@ -334,6 +360,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                           ?system_prompt_appendix:turn_appendix
                           ?skills
                           ~cancellation_token:turn_token
+                          ~durable:true
                           ()
                       in
                       if not max_turn then single message
@@ -856,6 +883,62 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
             end else
               Par_code_ui.render_warning ui "usage: /skills | /skills reload";
             loop ()
+          | "/resume" ->
+            let rest =
+              if String.length trimmed > 7 then
+                String.trim (String.sub trimmed 7 (String.length trimmed - 7))
+              else ""
+            in
+            (match !orphans with
+             | [] ->
+               Par_code_ui.render_notice ui "[resume] nothing to resume"
+             | _ when rest = "discard" ->
+               List.iter
+                 (fun (id, _) ->
+                    match forget_orphan id with
+                    | Ok () -> ()
+                    | Error msg ->
+                      Par_code_ui.render_error ui
+                        (Printf.sprintf "[resume] could not drop %s: %s" id msg))
+                 !orphans;
+               orphans := [];
+               Par_code_ui.render_notice ui "[resume] dropped"
+             | (latest_id, _) :: _ ->
+               let target =
+                 if rest = "" then Some latest_id
+                 else if List.mem_assoc rest !orphans then Some rest
+                 else None
+               in
+               (match target with
+                | None ->
+                  Par_code_ui.render_warning ui
+                    (Printf.sprintf "[resume] unknown run %s" rest)
+                | Some id ->
+                  Par_code_ui.render_notice ui
+                    (Printf.sprintf
+                       "[resume] continuing %s; finished tool batches will not run \
+                        again" id);
+                  let stream_cb, streamed = Par_code_repl_io.make_stream_cb ui in
+                  (match
+                     Runtime.recover_invoke rt ~invoke_id:id ~save:true
+                       ~on_chunk:(Some stream_cb) ()
+                   with
+                   | Error (err, _) ->
+                     Par_code_ui.render_error ui
+                       (Printf.sprintf "[resume] %s failed: %s" id
+                          (Par_code_setup.error_to_string err))
+                   | Ok result ->
+                     conv := Some result.Types.conversation;
+                     Par_code_ui.flush_markdown ui;
+                     Par_code_ui.render_success ui
+                       (Printf.sprintf "[resume] %s continued" id);
+                     if not !streamed then
+                       (match result.Types.response.Types.text with
+                        | Some t when String.trim t <> "" ->
+                          Par_code_ui.render_notice ui t
+                        | _ -> Par_code_ui.render_notice ui "(no text)");
+                     orphans := List.filter (fun (o, _) -> o <> id) !orphans)));
+            loop ()
           | "/distill" ->
             let rest =
               if String.length trimmed > 8 then
@@ -957,6 +1040,7 @@ let run_single_shot (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) 
      ~on_chunk:(Some stream_cb)
      ~enable_handoff:true
      ?system_prompt_appendix:memory_appendix
+     ~durable:true
      () with
    | Error (e, _) ->
      Par_code_ui.flush_markdown ui;

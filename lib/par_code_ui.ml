@@ -727,6 +727,7 @@ let render_help backend =
       item "/max" "Best-of-N: run N candidate answers, keep the best (on|off|2-5)";
       item "/skills" "List custom skills (reload: /skills reload)";
       item "/distill" "Turn a repeated workflow into a skill (--id/--user/--force)";
+      item "/resume" "Continue an interrupted run (/resume <id> | /resume discard)";
       item "/reset" "Reset conversation";
       item "/checkpoint" "Force a session checkpoint";
       item "/checkpoints" "List session checkpoints";

@@ -2891,3 +2891,15 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 **影响范围**：`lib/par_code_delegate.ml/.mli`、`test/dune`、`test/test_par_code_delegate.ml`（新）、`lib/AGENTS.md`；删除 `lib/par_code_parallel.*` 与 `test/test_par_code_parallel.ml`。max-mode 不动：它要 usage，而 step 结果只回 text/tool_calls。
 
 **回退方式**：恢复 `Par_code_parallel` 与旧调用点（历史在 git 里）。
+
+## [2026-11-14] v0.10.0 崩溃恢复：durable invoke + `/resume`
+
+**变更前**：REPL 的一轮与 `par ask` 都是非持久化 invoke；进程被杀，进行中的这一轮（连同已完成的工具调用）全部丢失，重启后没有任何痕迹。
+
+**变更后**：两处 invoke 都带 `~durable:true`，SDK 在首轮迭代后与每个完成的工具批次后写检查点，任何终态删除该行。`Runtime.create` 把残留行重建为孤儿，REPL 启动时用 `list_orphaned_invokes` 提示，`/resume` 调 `recover_invoke` 把会话接回，`/resume <id>` 指定，`/resume discard` 丢弃（`Runtime` 无删除入口，通过 setup 暴露的 persistence service 调 `delete_invoke_checkpoint_fn`）。
+
+**原因**：Compose 的卖点是"端到端长跑"，跑一半崩了不能续等于没做完；而 SDK 的 durable invoke 已经把这套机制做好了，属于"能用现成能力就不自己造"。
+
+**影响范围**：`lib/par_code_repl.ml`（两处 invoke、孤儿提示、`/resume` 分支）、`lib/par_code_setup.ml`（persistence ref）、`lib/par_code_ui.ml`（help 行）、`test/test_par_code_repl.ml`（`resume_hint` 用例）。
+
+**回退方式**：去掉两处 `~durable:true` 即回到旧行为；`/resume` 在无孤儿时不显示。

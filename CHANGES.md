@@ -47,6 +47,24 @@
   `Domain_name.t` for SNI itself. The UI's event renderer now ends in a catch-all
   instead of enumerating every observability event.
 
+### Added — crash recovery
+
+- **`/resume` continues an interrupted run.** REPL turns and `par ask` now call
+  `Runtime.invoke ~durable:true`: the SDK checkpoints after the first iteration
+  and after every completed tool batch, and deletes the row on every terminal
+  outcome, so a crash leaves exactly one recoverable row. `Runtime.create`
+  rehydrates it; the REPL warns at startup and `/resume` calls
+  `recover_invoke`.
+- **Semantics: at-least-once.** The iteration in flight when the process died
+  runs again; completed tool batches do not. A run suspended for an approval is
+  not in the orphan list and `recover_invoke` refuses it.
+- `/resume <id>` picks a specific interrupted run; `/resume discard` drops them.
+  `Runtime` exposes no delete, so par-code keeps the persistence service in a
+  ref and deletes through `delete_invoke_checkpoint_fn`.
+- **Verified with a real crash:** two reads done, `kill -9`, restart, `/resume`
+  finished the answer with **zero** repeated tool calls, and the checkpoint row
+  was gone afterwards. Cancelling a turn leaves no row at all.
+
 ### Not adopted — `Runtime.invoke_parallel`
 
 The SDK's parallel entry point is unusable for par-code's fan-out: it routes
