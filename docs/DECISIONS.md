@@ -2992,3 +2992,5 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 **影响范围**：PAR `core/workflow_engine.ml`（`run_agent_call` / `exec_context`）、`core/runtime.ml`（`invoke_parallel` 的 `base_ctx`）；par-code 侧走这两条路径的所有 bash 调用（`/flow`、`delegate_batch`）。
 
 **回退方式**：无需回退（仅记录）。上游修复后，用同样的对照实验复验：普通回合与流程回合应都弹审批。
+
+**上游 issue**：https://github.com/jcz2020/par/issues/33
