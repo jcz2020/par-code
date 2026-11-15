@@ -856,6 +856,17 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
               else ""
             in
             if rest = "reload" then begin
+              let sources =
+                match Par_code_config.load () with
+                | Some (c : Par_code_config.config) -> c.skill_sources
+                | None -> []
+              in
+              let _, fetch_errs = Par_code_skills.sync_remote sources in
+              List.iter
+                (fun (url, reason) ->
+                   Par_code_ui.render_warning ui
+                     (Printf.sprintf "[skills] %s: %s" url reason))
+                fetch_errs;
               let registered, rejected = Par_code_skills.reload ~rt () in
               Par_code_ui.render_notice ui
                 (Printf.sprintf "[skills] reloaded: %d custom command(s)"

@@ -157,9 +157,59 @@ let test_registry_empty_after_clear () =
   Alcotest.(check bool) "no manual match" true
     (Par_code_skills.find_manual "demo" = None)
 
+let test_local_shadows_remote () =
+  with_temp_base (fun base ->
+    let project = Filename.concat base "project" in
+    let user = Filename.concat base "user" in
+    let remote = Filename.concat base "remote" in
+    List.iter (fun d -> Unix.mkdir d 0o700) [ project; user; remote ];
+    make_skill project ~source:"skills" ~id:"shared" ~trigger:"manual" ~body:"project body";
+    make_skill user ~source:"skills" ~id:"shared" ~trigger:"manual" ~body:"user body";
+    let mk_remote id body =
+      let dir = Filename.concat remote id in
+      Unix.mkdir dir 0o700;
+      write_file (Filename.concat dir "skill.md")
+        (skill_md ~id ~trigger:"manual" ~body)
+    in
+    mk_remote "shared" "remote body";
+    mk_remote "only-remote" "remote body";
+    let entries, errs =
+      Par_code_skills.scan
+        ~project_dir:(Filename.concat project "skills")
+        ~user_dir:(Filename.concat user "skills")
+        ~remote_dir:remote ()
+    in
+    Alcotest.(check (list string)) "no parse errors" [] (List.map fst errs);
+    let source_of id =
+      List.find_map
+        (fun (e : Par_code_skills.entry) ->
+           if e.descriptor.id = id then Some (Par_code_skills.source_string e.source)
+           else None)
+        entries
+    in
+    Alcotest.(check (option string)) "project wins" (Some "project") (source_of "shared");
+    Alcotest.(check (option string)) "remote only" (Some "remote") (source_of "only-remote");
+    Alcotest.(check int) "three entries" 2 (List.length entries))
+
+(* No Eio network context is installed in the test process, so a URL must be
+   reported rather than crash; an empty source list is a no-op. *)
+let test_sync_remote_without_env () =
+  Alcotest.(check (pair (list string) (list (pair string string))))
+    "empty source list" ([], []) (Par_code_skills.sync_remote []);
+  let _, errs = Par_code_skills.sync_remote [ "http://127.0.0.1:9/skill.md" ] in
+  match errs with
+  | [ (url, reason) ] ->
+    Alcotest.(check string) "url echoed" "http://127.0.0.1:9/skill.md" url;
+    Alcotest.(check bool) "reports missing context" true
+      (String.length reason > 0
+       && (try
+             ignore (Str.search_forward (Str.regexp "network") reason 0);
+             true
+           with Not_found -> false))
+  | _ -> Alcotest.fail "expected exactly one fetch error"
+
 let () =
-  Alcotest.run "par_code_skills"
-    [ "discovery", [
+  Alcotest.run "par_code_skills"    [ "discovery", [
         Alcotest.test_case "project skill" `Quick test_scan_finds_project_skill;
         Alcotest.test_case "project shadows user" `Quick test_project_shadows_user;
         Alcotest.test_case "parse error" `Quick test_parse_error_reported;
@@ -169,5 +219,9 @@ let () =
         Alcotest.test_case "reserved commands" `Quick test_reserved_commands;
         Alcotest.test_case "frontmatter drift" `Quick test_frontmatter_diff;
         Alcotest.test_case "registry clear" `Quick test_registry_empty_after_clear;
+      ];
+      "remote", [
+        Alcotest.test_case "local shadows remote" `Quick test_local_shadows_remote;
+        Alcotest.test_case "no network context" `Quick test_sync_remote_without_env;
       ];
     ]

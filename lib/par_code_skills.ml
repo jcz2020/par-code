@@ -13,7 +13,7 @@
 
 open Par
 
-type source = Project | User
+type source = Project | User | Remote
 
 type entry = {
   descriptor : Types.skill_descriptor;
@@ -36,6 +36,7 @@ let builtin_skill_ids =
 let source_string = function
   | Project -> "project"
   | User -> "user"
+  | Remote -> "remote"
 
 let error_to_string (e : Types.error_category) =
   match e with
@@ -47,6 +48,128 @@ let error_to_string (e : Types.error_category) =
   | Types.Internal s -> s
   | Types.Embedding_unsupported -> "embeddings unsupported"
   | Types.Cancelled _ -> "cancelled"
+
+(* -------------------------------------------------------------------------- *)
+(* v0.11.0 W3: remote skill sources                                         *)
+(* -------------------------------------------------------------------------- *)
+
+(* Downloads land here and are then scanned like any other directory, so a
+   fetch failure degrades to the cached copy instead of losing the skill. *)
+let remote_cache_dir () =
+  Filename.concat (Par_code_config.config_dir ()) "skills-remote"
+
+let max_remote_bytes = 256 * 1024
+
+(* Eio's capability types carry a brand parameter that cannot live in a
+   module-level ref, and the same trick the SDK's MCP transport uses (store
+   [Obj.repr], cast back on use) keeps the slot monomorphic here. *)
+let remote_net : Obj.t option ref = ref None
+let remote_sw : Eio.Switch.t option ref = ref None
+
+let set_remote_env ~net ~sw =
+  remote_net := Some (Obj.repr net);
+  remote_sw := Some sw
+
+let tls_wrapper uri raw_flow =
+  let cfg = Lazy.force Par.Http_client.tls_config in
+  match Uri.host uri with
+  | None -> Tls_eio.client_of_flow cfg raw_flow
+  | Some host ->
+    (match Domain_name.of_string host with
+     | Ok d ->
+       (match Domain_name.host d with
+        | Ok h -> Tls_eio.client_of_flow cfg ~host:h raw_flow
+        | Error _ -> Tls_eio.client_of_flow cfg raw_flow)
+     | Error _ -> Tls_eio.client_of_flow cfg raw_flow)
+
+let http_get ~net ~sw url =
+  let uri = Uri.of_string url in
+  let client =
+    Cohttp_eio.Client.make ~https:(Some tls_wrapper) net
+  in
+  let headers =
+    Cohttp.Header.of_list
+      [ "user-agent", "par-code/" ^ Par_code_version.version ]
+  in
+  let resp, body =
+    Cohttp_eio.Client.call ~sw ~headers client `GET uri
+  in
+  let status = Cohttp.Code.code_of_status (Http.Response.status resp) in
+  let text =
+    Eio.Buf_read.parse_exn ~max_size:(max_remote_bytes + 1)
+      Eio.Buf_read.take_all body
+  in
+  (status, text)
+
+let fetch_url url : (string, string) result =
+  match (!remote_net, !remote_sw) with
+  | Some net, Some sw ->
+    (try
+       let status, body = http_get ~net:(Obj.obj net) ~sw url in
+       if status <> 200 then Error (Printf.sprintf "HTTP %d" status)
+       else if String.length body > max_remote_bytes then
+         Error (Printf.sprintf "skill exceeds %d bytes" max_remote_bytes)
+       else Ok body
+     with ex -> Error (Printf.sprintf "fetch failed: %s" (Printexc.to_string ex)))
+  | _ -> Error "no network context (remote skills load inside the REPL)"
+
+let valid_id id =
+  let len = String.length id in
+  if len = 0 || len > 64 then false
+  else
+    let ok c = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c = '-' in
+    String.for_all ok id && id.[0] <> '-' && id.[len - 1] <> '-'
+
+let write_atomic path content =
+  let rec mkdirs d =
+    if d <> "/" && d <> "." && not (Sys.file_exists d) then begin
+      mkdirs (Filename.dirname d);
+      try Unix.mkdir d 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+    end
+  in
+  mkdirs (Filename.dirname path);
+  let tmp = path ^ ".tmp" in
+  let oc = open_out_bin tmp in
+  output_string oc content;
+  close_out oc;
+  Sys.rename tmp path
+
+(* v0.11.0: remote skills are fetched as markdown, validated with the same
+   frontmatter parser as local ones, and written to the cache only if the id is
+   safe. A bad remote file therefore cannot escape the cache directory. *)
+let install_remote ~dir url : (string, string) result =
+  match fetch_url url with
+  | Error e -> Error e
+  | Ok body ->
+    let tmp = Filename.temp_file "par-skill" ".md" in
+    write_atomic tmp body;
+    Fun.protect
+      ~finally:(fun () -> try Sys.remove tmp with Sys_error _ -> ())
+      (fun () ->
+         match Skill_loader.parse_skill_file ~path:tmp with
+         | Error e -> Error ("parse: " ^ e)
+         | Ok (d : Types.skill_descriptor) ->
+           if not (valid_id d.id) then Error ("invalid id: " ^ d.id)
+           else if List.mem d.id reserved_commands then
+             Error ("id shadows a REPL command: " ^ d.id)
+           else if List.mem d.id builtin_skill_ids then
+             Error ("id shadows a builtin skill: " ^ d.id)
+           else begin
+             write_atomic (Filename.concat (Filename.concat dir d.id) "skill.md") body;
+             Ok d.id
+           end)
+
+let sync_remote (urls : string list) : (string list * (string * string) list) =
+  let dir = remote_cache_dir () in
+  let ok, errs =
+    List.fold_left
+      (fun (ok, errs) url ->
+         match install_remote ~dir url with
+         | Ok id -> (id :: ok, errs)
+         | Error e -> (ok, (url, e) :: errs))
+      ([], []) urls
+  in
+  (List.rev ok, List.rev errs)
 
 let scan_dir dir source : (entry list * (string * string) list) =
   let exists_dir p =
@@ -77,16 +200,28 @@ let scan_dir dir source : (entry list * (string * string) list) =
    same precedence). Parse errors are returned with the directory name so the
    startup/reload notice can point at the broken file. *)
 let scan ?(user_dir = Skill_loader.default_user_skills_dir ())
-    ?(project_dir = Skill_loader.default_project_skills_dir ()) () =
+    ?(project_dir = Skill_loader.default_project_skills_dir ())
+    ?(remote_dir = remote_cache_dir ()) () =
   let project, project_errs = scan_dir project_dir Project in
   let user, user_errs = scan_dir user_dir User in
+  let remote, remote_errs = scan_dir remote_dir Remote in
   let project_ids = List.map (fun (e : entry) -> e.descriptor.id) project in
   let user =
     List.filter
       (fun (e : entry) -> not (List.mem e.descriptor.id project_ids))
       user
   in
-  (project @ user, project_errs @ user_errs)
+  (* Remote skills have the lowest precedence: a local skill with the same id
+     always wins, so a stale download can never shadow a local edit. *)
+  let taken =
+    List.map (fun (e : entry) -> e.descriptor.id) (project @ user)
+  in
+  let remote =
+    List.filter
+      (fun (e : entry) -> not (List.mem e.descriptor.id taken))
+      remote
+  in
+  (project @ user @ remote, project_errs @ user_errs @ remote_errs)
 
 let already_registered (rt : Runtime.runtime) id =
   List.exists (fun (d : Types.skill_descriptor) -> d.id = id) (Runtime.list_skills rt)

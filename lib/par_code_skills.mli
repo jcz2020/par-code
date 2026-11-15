@@ -5,7 +5,7 @@
     custom slash commands through the REPL. The SDK does not read
     [body_path] at runtime, so [read_body] is the par-code-side bridge. *)
 
-type source = Project | User
+type source = Project | User | Remote
 
 type entry = {
   descriptor : Par.Types.skill_descriptor;
@@ -26,10 +26,23 @@ val source_string : source -> string
 val scan :
   ?user_dir:string ->
   ?project_dir:string ->
+  ?remote_dir:string ->
   unit ->
   (entry list * (string * string) list)
 (** Pure discovery: valid entries + (directory/id, parse error) pairs. Project
-    skills shadow user skills with the same id. *)
+    skills shadow user skills, and both shadow remote skills with the same id. *)
+
+val remote_cache_dir : unit -> string
+(** Where downloaded skills are cached ([~/.par/skills-remote]). *)
+
+val set_remote_env : net:'a Eio.Net.t -> sw:Eio.Switch.t -> unit
+(** Hand the REPL's Eio network context to the fetcher; the process runs one
+    runtime, so a module-level slot is enough. *)
+
+val sync_remote : string list -> (string list * (string * string) list)
+(** Fetch each URL, validate the frontmatter id, and write it into the cache
+    atomically. Returns (installed ids, (url, error) pairs). A failure leaves
+    the previously cached copy in place. *)
 
 val discover_and_register :
   rt:Par.Runtime.runtime ->

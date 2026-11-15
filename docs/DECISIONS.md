@@ -3020,3 +3020,11 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 - **reason**：实测证据 —— (1) 客户端发出的 `initialize` 参数是空对象 `{}`，缺 `protocolVersion`/`capabilities`/`clientInfo`，官方 Python SDK 直接回 400；(2) `mcp_transport_http.ml` 里 `content_type_is`（132 行）与 `parse_sse_response`（140 行）是死代码，`request_response` 永远按纯 JSON 解析，而标准服务器默认回 `text/event-stream`。
 - **scope**：stdio 服务器不受影响（已在 v0.11.0 验证可用）。HTTP 需等 `jcz2020/par#37` 修复后再复验；另有一条前置耦合是 `jcz2020/par#36`（`Http_timeout` 全局 clock 只在构造 provider 客户端时被设置，par-code 已在 create 前显式 `set_clock`）。
 - **rollback**：上游修复后，用同一个 `MCPServer("fake-http")` + `streamable-http` 服务器跑通 `/mcp` 与一次工具调用，再把文档里的"仅 stdio"限制删掉。
+## 2026-11-14 · 远程 skill 源：下载进缓存，本地永远优先
+
+- **tag**：remote-skills-cache-and-precedence
+- **before**：skill 只能来自 `./.par/skills/` 与 `~/.par/skills/`；路线上写的是"multi-source（远程 URL）"。
+- **after**：config 新增 `skill_sources`（skill.md 的原始 URL 列表）。启动与 `/skills reload` 时下载 → 用与本地相同的 frontmatter 解析器校验 id → 原子写入 `~/.par/skills-remote/<id>/skill.md`，再作为第三种来源 `remote` 参与扫描。优先级 project > user > remote，下载永远压不过本地同名 skill。
+- **reason**：把"能拉远程"和"能信远程"分开 —— 远程内容是不可信输入，所以只接受 markdown + frontmatter，id 必须匹配 `[a-z0-9-]` 且不撞内置命令/内置 skill，路径由 id 决定，下载无法写到缓存目录之外；单文件上限 256 KiB，超限/解析失败只报错不落盘，失败时保留旧缓存而不是删掉。
+- **scope**：只做"取一份 skill.md"这一种形态；index/manifest、签名校验、私有源鉴权都不在本切片。网络上下文由 setup 注入（`Eio` 的 brand 参数放不进模块级 ref，按 SDK 自己的做法用 `Obj.repr` 存、用时 `Obj.obj` 取回）。
+- **rollback**：把 `skill_sources` 清空即可；缓存目录可整个删除，不影响本地 skill。

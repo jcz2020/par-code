@@ -4,6 +4,20 @@
 
 > **Status**: In progress on `feat/v0.11.0-mcp`.
 
+### Remote skill sources
+
+- `skill_sources` in the config takes raw URLs to `skill.md` files. Startup and
+  `/skills reload` download them into `~/.par/skills-remote/<id>/` after
+  validating the frontmatter id with the same rules as `/distill` (safe id, not
+  a reserved command, not a builtin skill, at most 256 KiB).
+- Remote skills are listed as `[remote]` and always lose to a local skill with
+  the same id, so a stale download can never shadow an edit. A failed fetch
+  reports the URL and keeps the previously cached copy.
+
+**Verified**: a `skill.md` served by a local HTTP server was downloaded at
+startup, listed as `/remote-demo … [remote]`, and `/remote-demo obey` answered
+`pineapple` from the downloaded body.
+
 ### MCP servers (stdio)
 
 - `~/.par/config.json` gains `mcp_servers`, parsed straight into

@@ -745,6 +745,13 @@ This is the LAST thing you do. The user will be asked to confirm.
     List.iter (fun (desc : Types.skill_descriptor) ->
       ignore (Runtime.register_skill rt desc : (Types.skill_binding, _) result)
     ) Builtin_skills.builtin_skills;
+    Par_code_skills.set_remote_env ~net ~sw:switch;
+    (match Par_code_skills.sync_remote cfg.Par_code_config.skill_sources with
+     | _, [] -> ()
+     | _, errs ->
+       List.iter
+         (fun (url, e) -> Printf.eprintf "[skills] %s: %s\n" url e)
+         errs);
     let registered, rejected = Par_code_skills.discover_and_register ~rt () in
     if registered <> [] then
       Printf.eprintf "[skills] loaded %d custom command(s)\n"
