@@ -3097,3 +3097,13 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 - **scope**：只改 bash 审批的呈现；`allow` 规则与 `always` 模式的持久化语义不变。文件工具目前不询问，故不涉及。
 - **rollback**：恢复 setup 里旧的 `prompt_confirm` 一行式消息即可；`permission_lines` 可保留或删除。
 
+
+## 2026-11-17 · v0.14 技术选型：nottui，不自研、不翻译
+
+- **tag**：v0.14-tui-nottui
+- **before**：终端是行式的（linenoise 输入 + 直写 stdout），没有全屏、状态栏、弹窗布局；评估过自研屏幕层（约 600–1000 行）与翻译 bubbletea/ratatui。
+- **after**：采用 `notty-community 0.2.4` + `nottui 0.5` + `lwd 0.5`（OCaml 5.4 实测安装成功），只写 par-code 应用层（约 300–500 行）。计划冻结在 `docs/v0.14.0-ROADMAP.md`，分 S0–S4 五段，每段有验收标准与回滚点。
+- **reason**：原版 `notty` 要求 `ocaml < 4.14` 装不上，`lambda-term` 绑 Lwt 与 Eio 冲突 —— 但社区分叉 `notty-community` 支持 OCaml 5，且 nottui 已提供整帧绘制、按键解析、resize 事件和 `Term.fds`。自研等于重做这些基础设施并长期维护 terminfo/宽度/粘贴；翻译 bubbletea 则是 3000+ 行重写且要迁就 Elm 架构。opencode 的精细度来自 Bubble Tea + Lipgloss，nottui 在 OCaml 里承担同一角色。
+- **scope**：第一版不做语法高亮引擎（先用 ANSI 着色代码块/差异）、不做图片协议、不做 Windows；8 条手感清单是唯一验收口径。
+- **rollback**：配置 `ui = "tui" | "line"` 默认 line；v0.13.0 tag 为基线；每阶段独立 revert。
+
