@@ -3135,3 +3135,21 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 - **reason**：全屏只在 proot Ubuntu 的 tmux 里验过，手机 Termux 的真实终端、以及不同 TERM（tmux-256color → xterm/linux）下的行为没有证据；默认值一旦翻转，所有用户从第一屏起就踩未知风险。先把 TUI 作为可选项发出去，收一轮真实使用反馈再翻。
 - **scope**：只影响默认值，不影响功能；非 TTY 强制 line 的行为不变。翻默认需要新的决策记录。
 - **rollback**：改 `par_code_config.ml` 的 `ui` 默认值为 `"tui"` 即可（或 `par config set ui tui` 让单机提前用上）。
+
+## 2026-11-18 · 上游缺陷：bash 工具的整数 `timeout` 直接让处理器崩溃
+
+- **tag**：par-bash-int-timeout-crash
+- **before**：模型按 schema 的 `"type": "number"` 传 `{"argv":[...],"timeout":30}` 时，PAR 的 bash handler 在 `lib/core/runtime.ml:595`（以及 `lib/tools/builtin_tools.ml:1474`）用 `Yojson.Safe.Util.to_float_option` 读 `timeout`；JSON 只有一个 number 类型，Yojson 的实现只接受 `Float`/`Null`，遇到 `Int` 抛 `Type_error("Expected float or null, got int")`，整个工具调用变成 `Tool handler crashed: ...`，命令根本没执行。
+- **after**：par-code 侧不改 SDK（遵守项目规则），以本项目身份在 `jcz2020/par` 开 issue，等上游修好后跟版验证。
+- **reason**：这是 SDK 的 JSON 数字处理缺陷，不是模型用法错误；在 par-code 侧拦截或改写参数会把问题藏起来。
+- **scope**：只影响带整数 `timeout` 的 bash 调用；不带 timeout 时默认 30s，长命令（如 `dune runtest`）会超时。
+- **rollback**：无（未改代码）。
+
+## 2026-11-18 · 上游缺陷：bash 黑名单把命令替换当注入拦掉，但工具根本不走 shell
+
+- **tag**：par-bash-subst-false-positive
+- **before**：`Bash_blacklist` 的 `dollar-paren`（`\$\(.*\)`）与 `backtick-subst` 会拒绝任何含 `$(...)` 或反引号的 argv，例如 `ps -p $(pgrep x)`、`eval $(opam env)`；而 bash 工具是 `Exec { argv; ... }` 直接执行 argv（`runtime.ml`），不经过 shell，参数里的 `$(...)` 只是字面文本，永远不会被求值。
+- **after**：同样只报上游，在 `jcz2020/par` 开 issue，建议把注入类规则限定在真正经过 shell 的执行路径，或至少收窄到 argv0 为 `sh`/`bash` 的情况。
+- **reason**：这条规则在直接执行模型下是纯误杀，却让日常开发命令（进程查询、环境初始化）大批被拒，模型只能反复重试，bash 失败率因此很高。
+- **scope**：影响所有使用 Coder 策略的 bash 调用；par-code 侧缓解手段只有提示词（已在每轮 appendix 说明 argv 无 shell）。
+- **rollback**：无（未改代码）。
