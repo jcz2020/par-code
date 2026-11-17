@@ -142,6 +142,16 @@ val render_success : backend -> string -> unit
 (** Render [msg], flush, then read one line from /dev/tty (stdin fallback).
     Returns [Some trimmed_input] on success, [None] on EOF/error.
     The flush is load-bearing — without it the prompt stays block-buffered. *)
+val permission_lines :
+  command:string -> reason:string -> always_pattern:string -> string list
+(** The approval question, one line per row: command, reason, keys. Pure. *)
+
+val render_permission : backend -> string list -> unit
+
+val prompt_read : ?backend:backend -> unit -> string option
+(** Flush and read one line from the terminal (stdlib fallback when there is no
+    tty). Used by callers that render their own block before asking. *)
+
 val prompt_confirm : ?backend:backend -> ?style:style -> string -> string option
 
 (** Render a PAR SDK LLM response chunk.  Handles all 5 variants:

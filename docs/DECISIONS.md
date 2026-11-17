@@ -3087,3 +3087,13 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 - **scope**：流程仍是**同步执行**（REPL 输入是阻塞的 C 调用），跑起来会占住提示符，靠 `[flow] still running` 报活；merge 阶段只产出提交信息，**不自动提交**（沿用“未经用户要求不提交”的规矩）。
 - **rollback**：删除 `builtin_source` 与 REPL 的 spec 解析即可回到 v0.10.0 的三段式；文件形式的七阶段仍可用。
 
+
+## 2026-11-17 · v0.14 W1：审批提示改成带理由的三行块
+
+- **tag**：approval-prompt-block
+- **before**：`⚠ bash: <cmd> [y/a/N]` 一行挤完，看不出为什么问、`a` 到底授权了什么范围。
+- **after**：三行块——命令、原因（策略要求/在项目外/触及敏感路径）、每个键的含义，`a` 会显示将要写入的放行模式（`<首词> *`）。`permission_lines` 是纯函数（单测覆盖），`prompt_read` 抽出来让调用方先渲染再读入。
+- **reason**：审批是唯一的人机安全边界，含糊的提示会训练用户“无脑按 y”。把原因和授权范围写清楚，才谈得上安全。
+- **scope**：只改 bash 审批的呈现；`allow` 规则与 `always` 模式的持久化语义不变。文件工具目前不询问，故不涉及。
+- **rollback**：恢复 setup 里旧的 `prompt_confirm` 一行式消息即可；`permission_lines` 可保留或删除。
+

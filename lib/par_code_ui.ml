@@ -320,10 +320,7 @@ let render_success backend msg =
 (** Render + FLUSH + read one line from /dev/tty (stdin fallback).
     The flush is load-bearing: without it the prompt stays in stdout's
     block buffer while we block on input — the user never sees it. *)
-let prompt_confirm ?(backend=create_backend ()) ?style msg =
-  (match style with
-   | Some s -> render backend (text ~style:s msg)
-   | None -> render backend (text msg));
+let prompt_read ?(backend=create_backend ()) () =
   flush backend.out;
   let read_tty () =
     try
@@ -334,6 +331,30 @@ let prompt_confirm ?(backend=create_backend ()) ?style msg =
   match read_tty () with
   | line -> Some (String.lowercase_ascii (String.trim line))
   | exception _ -> None
+
+(* v0.14.0 W1: the approval question as a small block instead of one long line,
+   with the reason spelled out and the meaning of each key next to it. Pure, so
+   the wording is unit-tested. *)
+let permission_lines ~(command : string) ~(reason : string)
+    ~(always_pattern : string) : string list =
+  [ Printf.sprintf "⚠ bash wants to run: %s" command;
+    Printf.sprintf "   because: %s" reason;
+    Printf.sprintf "   [y] run once    [a] always (%s)    [Enter] deny"
+      always_pattern ]
+
+let render_permission backend lines =
+  match lines with
+  | [] -> ()
+  | first :: rest ->
+    render_line backend
+      (text first ~style:(style ~fg:Yellow ~bold:true ()));
+    List.iter (fun l -> render_line backend (text l)) rest
+
+let prompt_confirm ?(backend=create_backend ()) ?style msg =
+  (match style with
+   | Some s -> render backend (text ~style:s msg)
+   | None -> render backend (text msg));
+  prompt_read ~backend ()
 
 (* B. LLM chunk rendering *)
 

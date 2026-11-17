@@ -323,6 +323,22 @@ let tool_call_starts_on_a_fresh_line () =
 
 (* ── Test runner ─────────────────────────────────────────────────────── *)
 
+let test_permission_lines () =
+  let lines =
+    Par_code_ui.permission_lines ~command:"rm -rf /tmp/x"
+      ~reason:"outside project: /tmp/x" ~always_pattern:"rm *"
+  in
+  Alcotest.(check int) "three rows" 3 (List.length lines);
+  let joined = String.concat "\n" lines in
+  let has needle =
+    try ignore (Str.search_forward (Str.regexp_string needle) joined 0); true
+    with Not_found -> false
+  in
+  Alcotest.(check bool) "shows the command" true (has "rm -rf /tmp/x");
+  Alcotest.(check bool) "shows the reason" true (has "outside project");
+  Alcotest.(check bool) "shows the always pattern" true (has "rm *");
+  Alcotest.(check bool) "deny is the default" true (has "[Enter] deny")
+
 let () =
   Alcotest.run "par_code_ui"
     [ "composition", [
@@ -333,6 +349,9 @@ let () =
         Alcotest.test_case "associativity" `Quick associativity_hcat;
         Alcotest.test_case "vcat_empty" `Quick vcat_empty;
         Alcotest.test_case "hcat_empty" `Quick hcat_empty;
+      ];
+      "permission", [
+        Alcotest.test_case "prompt rows" `Quick test_permission_lines;
       ];
       "dimensions", [
         Alcotest.test_case "width_text" `Quick width_text;

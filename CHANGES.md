@@ -84,6 +84,21 @@ the tool: `→ echo_http ✓ (17.5ms)` returning `http-echo: http-ok`.
 - `examples/flows/compose-seven.json` is the same definition on disk, for
   reading and forking; the v0.10.0 `compose` flow stays as the read-only
   three-stage example.
+## v0.14.0 — Polished terminal (unreleased)
+
+> **Status**: In progress on `main`.
+
+### Approval prompt (W1)
+
+- The bash confirmation is a three-line block instead of one long line: the
+  command, *why* it is asking (policy, outside project, sensitive path) and what
+  each key does — `[y] run once  [a] always (<prefix> *)  [Enter] deny`.
+- `Par_code_ui.permission_lines` builds the text (pure, unit-tested) and
+  `render_permission` draws it; `prompt_read` reads the answer, so callers can
+  render their own block first.
+
+**Verified live**: `touch /tmp/ui-demo-file` rendered
+`⚠ bash wants to run: touch /tmp/ui-demo-file` / `because: the approval policy requires a human here` / `[y] run once  [a] always (touch *)  [Enter] deny`.
 ## v0.13.0 — Safe and reversible (released 2026-11-17)
 
 > **Status**: Released as tag `v0.13.0`. This tag also carries the v0.11.0

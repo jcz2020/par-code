@@ -718,10 +718,25 @@ This is the LAST thing you do. The user will be asked to confirm.
                if Par_code_approvals.matches patterns full_cmd then true
                else
                let ask_user ?(suffix="") () =
-                 let msg = Printf.sprintf "\n\xe2\x9a\xa0 bash: %s%s [y/a/N] " full_cmd suffix in
-                 let sty = Par_code_ui.style ~fg:Yellow ~bold:true () in
-                 match Par_code_ui.prompt_confirm ~backend:(Lazy.force ui) ~style:sty msg with
-                 | Some "y" -> true
+                 (* v0.14.0 W1: a small block instead of one long line, with the
+                    reason and the meaning of each key. *)
+                 let reason =
+                   let s = String.trim suffix in
+                   let s =
+                     if String.length s > 2 && String.sub s 0 2 = "\xe2\x80\x94"
+                     then String.trim (String.sub s 2 (String.length s - 2))
+                     else if String.length s > 0 && s.[0] = '(' then s
+                     else s
+                   in
+                   if s = "" then "the approval policy requires a human here" else s
+                 in
+                 let lines =
+                   Par_code_ui.permission_lines ~command:full_cmd ~reason
+                     ~always_pattern:(first_word ^ " *")
+                 in
+                 Par_code_ui.render_permission (Lazy.force ui) lines;
+                 match Par_code_ui.prompt_read ~backend:(Lazy.force ui) () with
+                 | Some "y" | Some "yes" -> true
                  | Some "a" ->
                    let pattern = first_word ^ " *" in
                    Par_code_approvals.add pattern;
