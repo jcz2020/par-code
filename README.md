@@ -6,35 +6,23 @@
 `par-code` is a terminal coding assistant (terminal-native, REPL-first) implemented in
 OCaml on top of the **PAR (Programmable Agent Runtime)** SDK. It inherits PAR's
 CLI conventions and drives the **core** PAR surface — ReAct loop, tool dispatch,
-type-safe bash, skills, streaming, persistence — to both ship a useful agent and
-prove out the PAR SDK in anger. (MCP client and Workflow engine are PAR SDK
-primitives par-code does not yet wire — see roadmap items v0.10.0 / v0.11.0.)
+type-safe bash, skills, streaming, persistence, MCP reload, workflows — to both
+ship a useful agent and prove out the PAR SDK in anger.
 
-**Status:** `v0.8.2` — P2 cleanup. The remaining interaction defects from the
-v0.8.0 live walkthrough are fixed: routine bash/edit sequences no longer trip
-the doom-loop action streak, streamed text no longer glues to tool lines,
-`/cost` reports real tool counts and visible tools, manual `/checkpoint` no
-longer runs memory extraction, the zero-row migration notice is gone, and
-table rows are single-spaced. The v0.8.1 hardening is included: context
-truncation that poisoned tool history, a ~130s memory-recall stall on an
-unconfigured embedding service, `null` tool-call arguments that broke every
-later turn, and a doom-loop that aborted on failed edits — plus duplicate plan
-files, fork ids, UTF-8 titles and `--db-uri`. The v0.8.0 feature set is unchanged:
-a build-mode turn can now run N
-read-only candidates along different strategy angles and keep the best one:
-`/max` (or `par --max N`), with a dedicated selector deciding whether the
-winner answers directly or still needs carrying out — execution stays
-single-writer. Off by default, skipped inside goal chains and in plan mode,
-and every candidate shows up in `/cost`. v0.7.5 brought PAR SDK 0.12-beta
-adoption: the SDK moves to the
-`v0.12.0-beta.20261023` release tag, and `apply_patch` arrives with it: a
-unified diff is validated hunk by hunk and applied atomically across several
-files, and the default prompt says when to reach for it instead of `edit`.
-Bash output is no longer truncated, so loop detection sees the real result,
-and every install path — CI, release, the bundle Dockerfile, the macOS
-build, the source installer — pins that tag, so one version always builds
-the same binary. v0.7.4's provider-error resilience and v0.7.3's autonomous
-goal chaining are unchanged.
+**Status:** `v0.14.0` — polished terminal. `ui = "tui"` runs the REPL inside a
+Notty frame: transcript, one-line status bar (`model · mode · N tok · git
+branch`), scrollback, bracketed paste, mouse wheel, resize handling, and both
+approvals and confirmations as in-frame modals; streamed answers render inside
+the frame and Ctrl-C follows Claude Code's two-press semantics. The line
+interface stays the default and is what a pipe or non-TTY run gets. v0.13.0's
+`safe and reversible` work is included: `~/.par/permissions.json` +
+`./.par/permissions.json` rules (`allow` / `ask` / `deny`, first match wins)
+and whole-workspace snapshots under `.par/snapshot.git` with `/undo` and
+`/snapshots`. So is the ecosystem slice from v0.11.0 (MCP over stdio and HTTP,
+`/mcp reload`, remote skill sources), v0.10.0's compose groundwork (batch
+delegation, durable turns with `/resume`, file-defined flows) and v0.10.1's
+built-in seven-stage `compose-seven` flow with `/flow run <id> <spec…>`.
+v0.9.0's custom skills and `/distill` are unchanged.
 Pre-built binaries with a one-line installer (`curl | bash`) for Linux
 x86_64/arm64 + macOS arm64, plus `par upgrade`
 self-update. No OCaml or opam needed for end users.
@@ -540,10 +528,10 @@ Version numbers stay minimal (no 1.0 until core parity is earned).
 | **v0.9.1** | Memory hygiene — `/dream` consolidates the memory index (merge/rewrite/prune, dry-run by default). *"It keeps its own notes short and accurate."* |
 | **v0.10.0** ✅ | Compose groundwork — batch delegation on `invoke_parallel`, durable turns with `/resume`, file-defined workflows (`/flow`), and a three-stage plan→edits→review compose example; the full seven-stage set is v0.10.1. *"Give a spec, it designs, codes, reviews, and tests end-to-end."* |
 | **v0.11.0** ✅ | Ecosystem connections — MCP over stdio and HTTP with in-place `/mcp reload`, remote skill sources (`skill_sources`). OAuth deferred. *"Connect any MCP server; pull skills from URLs."* |
-| **v0.10.1** | Seven-stage compose — built-in `compose-seven` flow (plan → execute → review → tdd → debug → verify → merge) and `/flow run <id> <spec>`. *"Give a spec, it designs, codes, reviews and tests end-to-end."* |
+| **v0.10.1** ✅ | Seven-stage compose — built-in `compose-seven` flow (plan → execute → review → tdd → debug → verify → merge) and `/flow run <id> <spec>`. Shipped inside v0.14.0. *"Give a spec, it designs, codes, reviews and tests end-to-end."* |
 | ~~v0.12.0~~ | ~~Code intelligence — LSP integration~~ **Dropped 2026-11-17**: an agent already gets authoritative diagnostics from the build and tests, and `find`/`grep` covers navigation; per-language servers are a maintenance burden for marginal gain (see `docs/DECISIONS.md`). |
 | **v0.13.0** ✅ | Safe & reversible — permission ruleset (allow/ask/deny) + whole-workspace snapshots with `/undo`. *"It asks before destructive ops; changes can be undone."* |
-| **v0.14.0** | Polished terminal app — full-screen TUI, status bar, modal approvals, scrollback and paste (i18n deferred to post-1.0). *"A real terminal application."* |
+| **v0.14.0** ✅ | Polished terminal app — full-screen TUI, status bar, modal approvals, scrollback and paste (i18n deferred to post-1.0). *"A real terminal application."* |
 | **v1.0.0** | **Core-parity milestone** — v0.2–v0.14 capabilities complete and stabilized. |
 
 Post-1.0 (extended, on demand): voice input/control, plugin system, codesearch,

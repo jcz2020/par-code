@@ -35,6 +35,44 @@ let modal_absent_falls_back () =
   in
   Alcotest.(check (option string)) "fallback is a clean None" None answer
 
+(* ── ANSI bridge: streamed markdown must reach the screen ────────── *)
+
+let contains hay needle =
+  let hn = String.length hay and nn = String.length needle in
+  let rec go i =
+    if i + nn > hn then false
+    else if String.sub hay i nn = needle then true
+    else go (i + 1)
+  in
+  go 0
+
+let ansi_styles_map_to_runs () =
+  let img = of_ansi "\027[1m\027[36mHeading\027[0m\nplain" in
+  match lines img with
+  | [ [ (t1, s1) ]; [ (t2, s2) ] ] ->
+    Alcotest.(check string) "heading text" "Heading" t1;
+    Alcotest.(check bool) "bold on" true s1.bold;
+    Alcotest.(check bool) "cyan fg" true (s1.fg = Some Cyan);
+    Alcotest.(check string) "plain text" "plain" t2;
+    Alcotest.(check bool) "bold off after reset" false s2.bold
+  | _ -> Alcotest.fail "unexpected run layout from of_ansi"
+
+let streamed_text_reaches_the_sink () =
+  let got = ref [] in
+  let b = create_screen_backend ~sink:(fun img -> got := !got @ [ img ]) in
+  render_llm_chunk b (Par.Types.Text_delta { text = "hello **world**\n" });
+  flush_markdown b;
+  let text =
+    List.concat_map
+      (fun img ->
+         lines img |> List.map (fun l -> l |> List.map fst |> String.concat ""))
+      !got
+    |> String.concat ""
+  in
+  Alcotest.(check bool) "streamed text reaches the sink" true (contains text "hello");
+  Alcotest.(check bool) "marks are stripped, words kept" true
+    (contains text "world" && not (contains text "**"))
+
 (* ── Composition laws ──────────────────────────────────────────────── *)
 
 let left_id_hcat () =
@@ -444,5 +482,10 @@ let () =
       "modal", [
         Alcotest.test_case "receives_question" `Quick modal_receives_the_question;
         Alcotest.test_case "absent_falls_back" `Quick modal_absent_falls_back;
+      ];
+      "ansi", [
+        Alcotest.test_case "styles_map_to_runs" `Quick ansi_styles_map_to_runs;
+        Alcotest.test_case "streamed_text_reaches_sink" `Quick
+          streamed_text_reaches_the_sink;
       ];
     ]

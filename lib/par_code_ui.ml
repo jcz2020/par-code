@@ -483,6 +483,124 @@ let strip_think_streaming buf chunk =
   Buffer.add_string buf held;
   to_render
 
+(* v0.14.0 S2 fix: streaming markdown hands back ANSI strings. With a sink
+   installed the screen owns the terminal, so those bytes have to become an
+   image; writing them to [out] stamped the answer onto the alt screen and the
+   next frame erased it. This converts the SGR subset the markdown renderer
+   emits (bold/dim/italic/underline/reverse, 8/256/RGB colours) into runs. *)
+let ansi_color_of_code = function
+  | 30 -> Some Black | 31 -> Some Red | 32 -> Some Green | 33 -> Some Yellow
+  | 34 -> Some Blue | 35 -> Some Magenta | 36 -> Some Cyan | 37 -> Some White
+  | 90 -> Some (Bright Black) | 91 -> Some (Bright Red)
+  | 92 -> Some (Bright Green) | 93 -> Some (Bright Yellow)
+  | 94 -> Some (Bright Blue) | 95 -> Some (Bright Magenta)
+  | 96 -> Some (Bright Cyan) | 97 -> Some (Bright White)
+  | _ -> None
+
+let of_ansi (s : string) : image =
+  let lines = ref [] in
+  let cur = ref [] in
+  let buf = Buffer.create 64 in
+  let sty = ref no_style in
+  let flush_run () =
+    if Buffer.length buf > 0 then begin
+      cur := R { sty = !sty; txt = Buffer.contents buf } :: !cur;
+      Buffer.clear buf
+    end
+  in
+  let end_line () =
+    flush_run ();
+    lines := List.rev !cur :: !lines;
+    cur := []
+  in
+  let apply params =
+    flush_run ();
+    let rec go = function
+      | [] -> ()
+      | 0 :: tl -> sty := no_style; go tl
+      | 1 :: tl -> sty := { !sty with bold = true }; go tl
+      | 2 :: tl -> sty := { !sty with dim = true }; go tl
+      | 3 :: tl -> sty := { !sty with italic = true }; go tl
+      | 4 :: tl -> sty := { !sty with underline = true }; go tl
+      | 7 :: tl -> sty := { !sty with reverse = true }; go tl
+      | 22 :: tl -> sty := { !sty with bold = false; dim = false }; go tl
+      | 23 :: tl -> sty := { !sty with italic = false }; go tl
+      | 24 :: tl -> sty := { !sty with underline = false }; go tl
+      | 27 :: tl -> sty := { !sty with reverse = false }; go tl
+      | 39 :: tl -> sty := { !sty with fg = None }; go tl
+      | 49 :: tl -> sty := { !sty with bg = None }; go tl
+      | 38 :: 5 :: n :: tl -> sty := { !sty with fg = Some (Palette n) }; go tl
+      | 48 :: 5 :: n :: tl -> sty := { !sty with bg = Some (Palette n) }; go tl
+      | 38 :: 2 :: r :: g :: b :: tl ->
+        sty := { !sty with fg = Some (Rgb (r, g, b)) }; go tl
+      | 48 :: 2 :: r :: g :: b :: tl ->
+        sty := { !sty with bg = Some (Rgb (r, g, b)) }; go tl
+      | c :: tl when c >= 30 && c <= 37 ->
+        (match ansi_color_of_code c with
+         | Some col -> sty := { !sty with fg = Some col }
+         | None -> ());
+        go tl
+      | c :: tl when c >= 40 && c <= 47 ->
+        (match ansi_color_of_code (c - 10) with
+         | Some col -> sty := { !sty with bg = Some col }
+         | None -> ());
+        go tl
+      | c :: tl when c >= 90 && c <= 97 ->
+        (match ansi_color_of_code c with
+         | Some col -> sty := { !sty with fg = Some col }
+         | None -> ());
+        go tl
+      | c :: tl when c >= 100 && c <= 107 ->
+        (match ansi_color_of_code (c - 60) with
+         | Some col -> sty := { !sty with bg = Some col }
+         | None -> ());
+        go tl
+      | _ :: tl -> go tl
+    in
+    go params
+  in
+  let n = String.length s in
+  let i = ref 0 in
+  while !i < n do
+    let c = s.[!i] in
+    if c = '\n' then begin end_line (); incr i end
+    else if c = '\r' then incr i
+    else if c = '\027' && !i + 1 < n && s.[!i + 1] = '[' then begin
+      let j = ref (!i + 2) in
+      while !j < n
+            && not (let ch = s.[!j] in
+                    (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')) do
+        incr j
+      done;
+      if !j >= n then i := n
+      else begin
+        if s.[!j] = 'm' then begin
+          let body = String.sub s (!i + 2) (!j - !i - 2) in
+          let params =
+            if body = "" then [0]
+            else
+              String.split_on_char ';' body
+              |> List.filter_map int_of_string_opt
+          in
+          apply params
+        end;
+        i := !j + 1
+      end
+    end
+    else begin Buffer.add_char buf c; incr i end
+  done;
+  if Buffer.length buf > 0 || !cur <> [] then end_line ();
+  mk (List.rev !lines)
+
+(* Route renderer text to the sink when one exists, so the screen owns every
+   byte that reaches the terminal. *)
+let emit_markdown backend s =
+  if s <> "" then begin
+    match backend.sink with
+    | Some f -> f (of_ansi s)
+    | None -> output_string backend.out s; flush backend.out
+  end
+
 let flush_markdown backend =
   (match backend.thinking_start with
    | Some _ -> backend.thinking_start <- None
@@ -509,14 +627,11 @@ let flush_markdown backend =
         Par_code_ui_markdown.push backend.markdown_state safe
       in
       backend.markdown_state <- new_state;
-      if output <> "" then output_string backend.out output
+      emit_markdown backend output
     end
   end;
   let final = Par_code_ui_markdown.flush backend.markdown_state in
-  if final <> "" then begin
-    output_string backend.out final;
-    flush backend.out
-  end;
+  emit_markdown backend final;
   backend.markdown_state <- Par_code_ui_markdown.initial
 
 (* A status/tool line must not be appended to a half-rendered markdown line.
@@ -529,10 +644,7 @@ let flush_pending_line backend =
       Par_code_ui_markdown.push backend.markdown_state "\n"
     in
     backend.markdown_state <- new_state;
-    if output <> "" then begin
-      output_string backend.out output;
-      flush backend.out
-    end
+    emit_markdown backend output
   end
 
 let render_event_line backend img =
@@ -566,10 +678,7 @@ let render_llm_chunk backend (chunk : Par.Types.llm_response_chunk) =
         Par_code_ui_markdown.push backend.markdown_state safe_text
       in
       backend.markdown_state <- new_state;
-      if output <> "" then begin
-        output_string backend.out output;
-        flush backend.out
-      end
+      emit_markdown backend output
     end
   | Tool_call_start { tool_call_id = _; name } ->
     close_thinking_window ();

@@ -3117,3 +3117,21 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 - **scope**：CLI 输出、状态栏、弹窗全部仍为英文；文档与决策记录保持中文。
 - **rollback**：随时可开展 i18n，不影响现有结构（文案集中在 ui 模块与少量 REPL 分支里）。
 
+
+## 2026-11-17 · v0.14 修复：流式回答改走屏幕通道（ANSI 桥）
+
+- **tag**：v0.14-stream-into-frame
+- **before**：流式 markdown 渲染器把 ANSI 字符串直接 `output_string` 到 stdout。全屏模式下终端归 Notty 帧所有，下一帧重绘就把回答盖掉 —— 真实回合结束时转写区是空的，而数据库里回复完整、token 也照常累计。
+- **after**：`Par_code_ui.emit_markdown` 在装有 sink 时把 ANSI 文本经 `Par_code_ui.of_ansi` 转成 image 交给屏幕，行模式仍写 stdout。`of_ansi` 覆盖 markdown 渲染器实际用到的 SGR 子集（bold/dim/italic/underline/reverse，8/256/RGB 前后景），其余转义丢弃。新增两个单测：样式映射、流式文本确到 sink。
+- **reason**：回答是编码 agent 的主输出，看不见等于功能不可用；此前 QA 该行的验收口径只写“不崩溃”，所以没暴露。
+- **scope**：只改输出通路；markdown 渲染器、行模式输出、弹窗与工具行渲染都不变。
+- **rollback**：把 `flush_markdown` / `flush_pending_line` / `render_llm_chunk` 改回直接 `output_string backend.out` 即可。
+
+## 2026-11-17 · v0.14 发版：全屏界面先不翻默认
+
+- **tag**：v0.14-default-ui-line
+- **before**：冻结的路线图写「S4 验收通过后才翻转默认」，8 条手感清单在本轮已全部实测通过（全屏稳定、状态栏、滚动、弹窗、中文对齐、不闪、粘贴、resize 与滚轮）。
+- **after**：v0.14.0 仍以 `ui = "line"` 为默认，`ui = "tui"` 显式开启。
+- **reason**：全屏只在 proot Ubuntu 的 tmux 里验过，手机 Termux 的真实终端、以及不同 TERM（tmux-256color → xterm/linux）下的行为没有证据；默认值一旦翻转，所有用户从第一屏起就踩未知风险。先把 TUI 作为可选项发出去，收一轮真实使用反馈再翻。
+- **scope**：只影响默认值，不影响功能；非 TTY 强制 line 的行为不变。翻默认需要新的决策记录。
+- **rollback**：改 `par_code_config.ml` 的 `ui` 默认值为 `"tui"` 即可（或 `par config set ui tui` 让单机提前用上）。
