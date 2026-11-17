@@ -540,7 +540,7 @@ Version numbers stay minimal (no 1.0 until core parity is earned).
 | **v0.9.1** | Memory hygiene — `/dream` consolidates the memory index (merge/rewrite/prune, dry-run by default). *"It keeps its own notes short and accurate."* |
 | **v0.10.0** ✅ | Compose groundwork — batch delegation on `invoke_parallel`, durable turns with `/resume`, file-defined workflows (`/flow`), and a three-stage plan→edits→review compose example; the full seven-stage set is v0.10.1. *"Give a spec, it designs, codes, reviews, and tests end-to-end."* |
 | **v0.11.0** | Ecosystem connections — MCP OAuth + hot-reload + multi-source skills (remote URLs, `.claude`/`.agents`/…). *"Connect any MCP server; pull skills from URLs."* |
-| **v0.12.0** | Code intelligence — LSP integration (diagnostics, go-to-def, references, call hierarchy) + lsp tool. *"It navigates code like an IDE."* |
+| ~~v0.12.0~~ | ~~Code intelligence — LSP integration~~ **Dropped 2026-11-17**: an agent already gets authoritative diagnostics from the build and tests, and `find`/`grep` covers navigation; per-language servers are a maintenance burden for marginal gain (see `docs/DECISIONS.md`). |
 | **v0.13.0** | Safe & reversible — permission ruleset (allow/ask/deny + persisted approvals) + filesystem snapshot/undo. *"It asks before destructive ops; changes can be undone."* |
 | **v0.14.0** | Polished terminal app — rich TUI (streaming render, inline permission prompts, i18n). *"A real terminal application."* |
 | **v1.0.0** | **Core-parity milestone** — v0.2–v0.14 capabilities complete and stabilized. |

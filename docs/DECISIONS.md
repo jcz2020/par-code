@@ -3047,3 +3047,13 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 - **scope**：只更新持有 MCP 工具的 agent（`explore` 与 max-mode 候选仍无 MCP 工具，保持只读）；工具名冲突仍由 SDK 报 `Invalid_input`。`Http_timeout.set_clock` 那行保留 —— 0.17 的 `Http_timeout` 虽标为 superseded，但设置它无副作用，等确认无用再删。
 - **rollback**：pin 退回 `v0.17.0-beta.20261117` 并恢复 `/mcp reload` 的“提示重启”分支。
 
+
+## 2026-11-17 · 砍掉 v0.12 的 LSP，资源转向 v0.13 安全可回滚
+
+- **tag**：drop-lsp-from-roadmap
+- **before**：路线图 v0.12 写着 code intelligence（LSP 诊断/跳转/引用 + lsp 工具），并已有一版 WIP 实现（分支 `feat/v0.12.0-lsp`，`66a5d34`）。
+- **after**：v0.12 从路线图撤下（标记 dropped），不再投入；分支从远端删除，本地保留作参考；下一个要做的方向改为 v0.13 的权限规则 + 文件快照/撤销，版本编号不变。
+- **reason**：收益与成本倒挂。① 诊断：agent 本来就会跑构建和测试，拿到的是权威错误，LSP 诊断反而可能与真实构建不一致；② 跳转/引用：`find`/`grep` + 读文件已覆盖绝大多数场景，剩下那点收益要用户按语言配服务器；③ 补全对 agent 无用（那是给人的）。成本却是长期的：每个语言一个服务器、版本不匹配就出怪问题 —— 本次实测连续踩到多行响应头、诊断 uri 位置、进程退出卡死三个坑，且必须装真服务器才能发现。主流 agent（Claude Code、Codex 一类）同样不走 LSP。
+- **scope**：不发布任何 LSP 能力；`lsp_servers` 配置与 `lsp` 工具随分支一起搁置，main 上不存在。以后若要重做，先解决退出路径（独立 switch 或带超时的读）。
+- **rollback**：本地分支 `feat/v0.12.0-lsp` 与 `docs/DECISIONS.md` 本条记录即可恢复；路线图把 v0.12 行改回即可重新排期。
+
