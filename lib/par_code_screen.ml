@@ -85,6 +85,7 @@ type t = {
   mutable hist_pos : int option;
   mutable submitted : string option;
   mutable editing : bool;          (* keys go to the input line *)
+  mutable last_ctrl_c : float option;
 }
 
 let create () : t =
@@ -101,7 +102,8 @@ let create () : t =
     history = [];
     hist_pos = None;
     submitted = None;
-    editing = false }
+    editing = false;
+    last_ctrl_c = None }
 
 let to_notty_lines (img : Par_code_ui.image) : Notty.image list =
   let open Notty in
@@ -330,6 +332,25 @@ let frame (t : t) : Notty.image =
   in
   I.vsnap ~align:`Top body_h body <-> input_line <-> status
 
+(** v0.14.0 S2: Ctrl-C follows Claude Code — with input it clears the line, with
+    an empty line a second press within two seconds exits. Ctrl-D exits from an
+    empty line, Esc clears the line. *)
+let ctrl_c (t : t) =
+  let now = Unix.gettimeofday () in
+  if t.input <> "" then begin
+    t.input <- "";
+    t.cursor <- 0;
+    t.last_ctrl_c <- Some now;
+    t.status <- "input cleared — Ctrl-C again to exit"
+  end else
+    match t.last_ctrl_c with
+    | Some at when now -. at < 2.0 ->
+      t.running <- false;
+      t.submitted <- None
+    | _ ->
+      t.last_ctrl_c <- Some now;
+      t.status <- "press Ctrl-C again to exit"
+
 let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
   let ctrl = List.mem `Ctrl mods in
   if t.editing then
@@ -337,6 +358,9 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
     | `Enter ->
       t.submitted <- Some t.input;
       t.editing <- false
+    | `Escape ->
+      t.input <- "";
+      t.cursor <- 0
     | `Backspace -> delete_back t
     | `Delete -> delete_forward t
     | `Arrow `Left -> move_left t
@@ -347,34 +371,38 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
     | `End -> t.cursor <- String.length t.input
     | `Tab -> complete t
     | `ASCII c when ctrl ->
+      (* notty delivers Ctrl-C as 'C' (0x43) with a Ctrl modifier, not 0x03. *)
+      let c = if c >= 'A' && c <= 'Z' then Char.lowercase_ascii c else c in
       (match c with
+       | 'c' | '\003' -> ctrl_c t
+       | 'd' | '\004' ->
+         if t.input = "" then begin
+           t.running <- false;
+           t.submitted <- None
+         end
        | 'a' -> t.cursor <- 0
        | 'e' -> t.cursor <- String.length t.input
        | 'u' -> kill_to_start t
        | 'k' -> kill_to_end t
        | 'w' -> kill_word t
-       | 'c' | '\003' ->
-         (* Ctrl-C cancels the line without submitting it. *)
-         t.input <- "";
-         t.cursor <- 0;
-         t.submitted <- Some ""
        | _ -> ())
     | `ASCII c ->
       (* Control keys arrive as bare ASCII codes (Tab = 0x09, Ctrl-C = 0x03),
          not as a modified key: normalize them here. *)
       (match c with
        | '\t' -> complete t
-       | '\003' ->
-         t.input <- "";
-         t.cursor <- 0;
-         t.submitted <- Some ""
+       | '\003' -> ctrl_c t
+       | '\004' ->
+         if t.input = "" then begin
+           t.running <- false;
+           t.submitted <- None
+         end
        | '\001' -> t.cursor <- 0
        | '\005' -> t.cursor <- String.length t.input
        | '\021' -> kill_to_start t
        | '\013' -> kill_to_end t
        | '\023' -> kill_word t
-       | _ when Char.code c < 0x20 ->
-         t.last_key <- Printf.sprintf "ctrl-0x%02X" (Char.code c)
+       | _ when Char.code c < 0x20 -> ()
        | _ -> put_back t (String.make 1 c))
     | `Uchar u ->
       let b = Buffer.create 4 in
