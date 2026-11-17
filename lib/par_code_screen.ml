@@ -92,6 +92,12 @@ type t = {
   mutable submitted : string option;
   mutable editing : bool;          (* keys go to the input line *)
   mutable last_ctrl_c : float option;
+  (* A terminal can deliver an escape sequence in several writes; when notty
+     has already turned the leading ESC into a key, the rest arrives as text
+     ([<65;83;39M for a mouse wheel). These two fields let the key handler
+     swallow that tail instead of typing it into the input line. *)
+  mutable escape_at : float option;
+  mutable csi_drop : bool;
   mutable suspended : bool;
   mutable modal : modal option;
   mutable modal_answer : string option;
@@ -113,6 +119,8 @@ let create () : t =
     scroll = 0;
     running = true;
     last_key = "";
+    escape_at = None;
+    csi_drop = false;
     input = "";
     cursor = 0;
     prompt = "> ";
@@ -161,7 +169,56 @@ let split_runs (runs : (string * Par_code_ui.style) list) :
   flush ();
   List.rev !lines
 
-let to_notty_lines (img : Par_code_ui.image) : Notty.image list =
+(* v0.14.1: notty clips a string at the frame edge, which cut answers
+   mid-sentence on narrow terminals (a phone is 40–60 columns). Wrap here, with
+   CJK/emoji widths from uucp. Wrapping happens when text enters the transcript,
+   so a resize does not re-flow what is already on screen. *)
+let display_width (u : Uchar.t) =
+  match Uucp.Break.tty_width_hint u with w when w > 0 -> w | _ -> 1
+
+let wrap_runs ~(cols : int) (runs : (string * Par_code_ui.style) list) :
+    (string * Par_code_ui.style) list list =
+  let cols = max 8 cols in
+  let out = ref [] in
+  let cur = ref [] in
+  let used = ref 0 in
+  let flush_line () =
+    out := List.rev !cur :: !out;
+    cur := [];
+    used := 0
+  in
+  List.iter
+    (fun (txt, sty) ->
+       let piece = Buffer.create (String.length txt) in
+       let flush_piece () =
+         if Buffer.length piece > 0 then begin
+           cur := (Buffer.contents piece, sty) :: !cur;
+           Buffer.clear piece
+         end
+       in
+       let break_if_needed w =
+         if !used > 0 && !used + w > cols then begin
+           flush_piece ();
+           flush_line ()
+         end
+       in
+       let folder () _i = function
+         | `Uchar u ->
+           break_if_needed (display_width u);
+           Uutf.Buffer.add_utf_8 piece u;
+           used := !used + display_width u
+         | `Malformed s ->
+           break_if_needed 1;
+           Buffer.add_string piece s;
+           incr used
+       in
+       ignore (Uutf.String.fold_utf_8 folder () txt);
+       flush_piece ())
+    runs;
+  if !cur <> [] || !out = [] then flush_line ();
+  List.rev !out
+
+let to_notty_lines ~(cols : int) (img : Par_code_ui.image) : Notty.image list =
   let open Notty in
   List.concat_map
     (fun runs ->
@@ -174,18 +231,24 @@ let to_notty_lines (img : Par_code_ui.image) : Notty.image list =
                 (List.map
                    (fun (txt, sty) -> I.string (attr_of_style sty) txt)
                    runs))
-         (split_runs runs))
+         (List.concat_map (wrap_runs ~cols) (split_runs runs)))
     (Par_code_ui.lines img)
 
-let to_notty (img : Par_code_ui.image) : Notty.image =
+let wrap_text ~cols (s : string) : string list =
+  wrap_runs ~cols [ (s, Par_code_ui.no_style) ]
+  |> List.map (fun runs -> String.concat "" (List.map fst runs))
+
+let to_notty ~cols (img : Par_code_ui.image) : Notty.image =
   let open Notty in
-  match to_notty_lines img with [] -> I.empty | ls -> I.vcat ls
+  match to_notty_lines ~cols img with [] -> I.empty | ls -> I.vcat ls
+
+let width (t : t) = fst (Notty_unix.Term.size t.term)
 
 (* The transcript stores one entry per *line*, not per image: a multi-line
    image used to count as a single entry, so pagination and scrolling were off
    by however many lines it had. *)
 let append (t : t) (img : Par_code_ui.image) =
-  t.transcript <- t.transcript @ to_notty_lines img
+  t.transcript <- t.transcript @ to_notty_lines ~cols:(width t - 2) img
 
 (* v0.14.0 S1b: a frame is not a scroll buffer — one huge tool output must not
    push everything else out. Cap the lines taken from a single image and mark
@@ -193,7 +256,7 @@ let append (t : t) (img : Par_code_ui.image) =
 let max_lines_per_image = 60
 
 let append_truncated (t : t) (img : Par_code_ui.image) =
-  let lines = to_notty_lines img in
+  let lines = to_notty_lines ~cols:(width t - 2) img in
   let n = List.length lines in
   let kept =
     if n <= max_lines_per_image then lines
@@ -202,7 +265,7 @@ let append_truncated (t : t) (img : Par_code_ui.image) =
         if k <= 0 then [] else match l with [] -> [] | h :: tl -> h :: take (k - 1) tl
       in
       take max_lines_per_image lines
-      @ [ to_notty
+      @ [ to_notty ~cols:(width t - 2)
             (Par_code_ui.textf "… (%d more lines)" (n - max_lines_per_image)) ]
     end
   in
@@ -357,7 +420,7 @@ let history_move (t : t) (delta : int) =
 let visible_lines (t : t) ~(height : int) : Notty.image list =
   let all =
     if t.partial = "" then t.transcript
-    else t.transcript @ [ to_notty (Par_code_ui.text t.partial) ]
+    else t.transcript @ [ to_notty ~cols:(width t - 2) (Par_code_ui.text t.partial) ]
   in
   let n = List.length all in
   let start = max 0 (n - height - t.scroll) in
@@ -372,14 +435,17 @@ let frame (t : t) : Notty.image =
   let w, h = Notty_unix.Term.size t.term in
   let input_h = 1 in
   let status_h = 1 in
-  let body_h = max 1 (h - input_h - status_h) in
-  let body = I.vcat (visible_lines t ~height:body_h) in
+  let body_h = max 1 (h - input_h - status_h - 1) in
+  let body =
+    I.vcat (visible_lines t ~height:body_h)
+    |> fun img -> I.vsnap ~align:`Top body_h (I.pad ~l:1 ~r:1 img)
+  in
   let input_line =
     let before = String.sub t.input 0 t.cursor in
     let after = String.sub t.input t.cursor (String.length t.input - t.cursor) in
     I.hsnap ~align:`Left w
       (I.hcat
-         [ I.string A.(st bold) (sanitize_text (t.prompt ^ before))
+         [ I.string A.(st bold) (sanitize_text (" " ^ t.prompt ^ before))
            ; I.string A.(st reverse) (if after = "" then " " else sanitize_text (String.sub after 0 1))
            ; I.string A.empty
                (if String.length after > 1 then String.sub after 1 (String.length after - 1)
@@ -389,11 +455,13 @@ let frame (t : t) : Notty.image =
     let hint =
       if t.last_key = "" then "" else Printf.sprintf "  [%s]" t.last_key
     in
-    let scroll_hint = if t.scroll = 0 then "" else Printf.sprintf " ↑%d" t.scroll in
+    let scroll_hint = if t.scroll = 0 then "" else Printf.sprintf "  ↑%d" t.scroll in
     I.hsnap ~align:`Left w
-      (I.hcat
-         [ I.string A.(st reverse) " par "
-           ; I.string A.empty (sanitize_text (" " ^ t.status ^ scroll_hint ^ hint)) ])
+      (I.string A.(fg lightblack)
+         (sanitize_text (" " ^ t.status ^ scroll_hint ^ hint)))
+  in
+  let rule =
+    I.string A.(fg lightblack) (String.concat "" (List.init w (fun _ -> "─")))
   in
   let body =
     match t.modal with
@@ -416,16 +484,29 @@ let frame (t : t) : Notty.image =
         String.concat "   " (List.map (fun (k, label) -> k ^ ": " ^ label) m.options)
       in
       let content =
+        let leading_spaces s =
+          let n = ref 0 in
+          while !n < String.length s && s.[!n] = ' ' do incr n done;
+          !n
+        in
+        let wrapped s =
+          let lead = leading_spaces s in
+          let body = String.sub s lead (String.length s - lead) in
+          let indent = " " ^ String.make lead ' ' in
+          wrap_text ~cols:(max 8 (inner_w - 1 - lead)) body
+          |> List.map (fun l -> indent ^ l)
+        in
+        let rows_of s = List.map row (wrapped s) in
         I.vcat
           (border "┌" "┐"
-           :: [ row (" " ^ m.title) ]
+           :: rows_of m.title
            @ [ border "├" "┤" ]
-           @ List.map (fun l -> row (" " ^ l)) m.body
-           @ [ row (" " ^ legend); border "└" "┘" ])
+           @ List.concat_map rows_of m.body
+           @ rows_of legend @ [ border "└" "┘" ])
       in
       I.vsnap ~align:`Middle body_h (I.hsnap ~align:`Middle w content)
   in
-  I.vsnap ~align:`Top body_h body <-> input_line <-> status
+  I.vsnap ~align:`Top body_h body <-> rule <-> input_line <-> status
 
 (** v0.14.0 S2: Ctrl-C follows Claude Code — with input it clears the line, with
     an empty line a second press within two seconds exits. Ctrl-D exits from an
@@ -468,14 +549,41 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
        t.modal <- None
      | _ -> ignore ctrl)
   | None ->
+  let ascii = match k with `ASCII c -> Some c | _ -> None in
+  if t.csi_drop then begin
+    (* Dropping the tail of a split escape sequence (a mouse report arrives as
+       ESC + "[<65;83;39M" when the terminal writes it in pieces). *)
+    (match ascii with
+     | Some c when (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c = '~' ->
+       t.csi_drop <- false
+     | _ -> ())
+  end else begin
+    (* ESC followed by "[" or "O" belongs to an escape sequence; ESC followed
+       by anything else was a real Escape press. *)
+    (match t.escape_at, ascii with
+     | Some _, Some ('[' | 'O') ->
+       t.escape_at <- None;
+       t.csi_drop <- true
+     | Some _, _ ->
+       t.escape_at <- None;
+       if t.editing then begin
+         t.input <- "";
+         t.cursor <- 0
+       end
+     | None, _ -> ());
+  if not t.csi_drop then
   if t.editing then
     match k with
     | `Enter ->
       t.submitted <- Some t.input;
+      t.input <- "";
+      t.cursor <- 0;
       t.editing <- false
     | `Escape ->
-      t.input <- "";
-      t.cursor <- 0
+      (* Hold the decision until the next key: a lone ESC is a key press, but
+         the same byte starts every CSI sequence, and a terminal may write the
+         rest of the sequence a moment later. *)
+      t.escape_at <- Some (Unix.gettimeofday ())
     | `Backspace -> delete_back t
     | `Delete -> delete_forward t
     | `Arrow `Left -> move_left t
@@ -557,6 +665,7 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
          | `ASCII c -> String.make 1 c
          | `Uchar u -> Printf.sprintf "U+%04X" (Uchar.to_int u)
          | _ -> "special")
+  end
 
 let render (t : t) = Notty_unix.Term.image t.term (frame t)
 
@@ -566,8 +675,17 @@ let render (t : t) = Notty_unix.Term.image t.term (frame t)
    a spin. *)
 let pump (t : t) ~(tick : t -> unit) =
   let read_fd, _ = Notty_unix.Term.fds t.term in
-  if t.running && not (Notty_unix.Term.pending t.term) then
-    ignore (Unix.select [ read_fd ] [] [] 0.05);
+  let ready =
+    if t.running && not (Notty_unix.Term.pending t.term) then
+      let r, _, _ = Unix.select [ read_fd ] [] [] 0.05 in
+      r <> []
+    else true
+  in
+  (* A terminal can deliver an escape sequence in several writes (Termux ships
+     the ESC of a mouse report apart from the rest). Settling for a few
+     milliseconds lets notty parse the whole sequence instead of reporting the
+     bare ESC and typing the tail into the input line. *)
+  if ready && t.running then ignore (Unix.select [] [] [] 0.008);
   while t.running && (Notty_unix.Term.pending t.term ||
                       (let r, _, _ = Unix.select [ read_fd ] [] [] 0.0 in r <> [])) do
     match Notty_unix.Term.event t.term with
