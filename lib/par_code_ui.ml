@@ -730,6 +730,8 @@ let render_help backend =
       item "/resume" "Continue an interrupted run (/resume <id> | /resume discard)";
       item "/flow" "Run a file-defined workflow (/flow run|status|cancel|resume)";
       item "/mcp" "List the MCP tools the configured servers expose";
+      item "/undo" "Restore the workspace to an earlier snapshot (/undo [n])";
+      item "/snapshots" "List recent workspace snapshots";
       item "/reset" "Reset conversation";
       item "/checkpoint" "Force a session checkpoint";
       item "/checkpoints" "List session checkpoints";

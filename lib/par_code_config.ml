@@ -53,6 +53,8 @@ type config = {
   mcp_servers : Par.Mcp_types.server_config list;
   (* v0.11.0: raw URLs to skill.md files, downloaded into the skill cache. *)
   skill_sources : string list;
+  (* v0.13.0: whole-workspace snapshots before each user turn. *)
+  snapshot_enabled : bool;
 }
 
 let default_system_prompt = {|
@@ -160,6 +162,7 @@ let default = {
   max_candidates = 3;
   mcp_servers = [];
   skill_sources = [];
+  snapshot_enabled = true;
 }
 
 let config_dir () =
@@ -217,6 +220,7 @@ let to_json (cfg : config) : Yojson.Safe.t =
     ("max_candidates", `Int cfg.max_candidates);
     ( "mcp_servers"
     , `List (List.map Par.Mcp_types.server_config_to_yojson cfg.mcp_servers) );
+    ("snapshot_enabled", `Bool cfg.snapshot_enabled);
     ("skill_sources", `List (List.map (fun s -> `String s) cfg.skill_sources));
   ]
 
@@ -305,6 +309,7 @@ let of_json (json : Yojson.Safe.t) : (config, string) result =
                 | Error _ -> None)
              items
          | _ -> []);
+      snapshot_enabled = get_b "snapshot_enabled" default.snapshot_enabled;
       skill_sources =
         (match json |> member "skill_sources" with
          | `List items -> List.filter_map Yojson.Safe.Util.to_string_option items
@@ -421,6 +426,7 @@ let merge
     max_candidates = cfg.max_candidates;
     mcp_servers = cfg.mcp_servers;
     skill_sources = cfg.skill_sources;
+    snapshot_enabled = cfg.snapshot_enabled;
   }
 
 let require_config () =

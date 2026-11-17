@@ -3067,3 +3067,13 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 - **scope**：只做静态规则，不做“本次会话临时允许”之外的持久化授权；快照/撤销（W2）尚未开始。规则文件缺失或格式错误时按“无规则”处理，不阻断启动。
 - **rollback**：删掉两个 `permissions.json` 即回到纯启发式审批；代码侧删除 `par_code_permissions.ml` 与 setup 里的两处注册即可。
 
+
+## 2026-11-17 · v0.13 W2：整仓快照与 /undo（影子 git 仓库）
+
+- **tag**：workspace-snapshots-shadow-git
+- **before**：只有会话级的 checkpoint（对话摘要），文件本身没有回退能力；bash 删掉或改写文件后无法恢复。
+- **after**：每轮用户输入前，把整个工作区提交进 `.par/snapshot.git`（裸仓库 + 显式 work-tree，不碰项目自己的 `.git`）。`/undo [n]` 恢复到更早的快照，`/snapshots` 列出最近 10 条；恢复前先把“当前状态”也存一条，所以撤销本身可以再撤销。被忽略的路径（`.par/`、`_build/`、`node_modules/` 等）不参与。`snapshot_enabled` 可关闭。
+- **reason**：按文件备份覆盖不了 shell 命令的副作用（删文件、批量改名、构建脚本改写），而整仓快照天然覆盖；选 git 是因为它已经处理了内容寻址、忽略规则与恢复语义，不用自己写一套存储。
+- **scope**：只看工作区，不含被 `.gitignore` 排除的路径与 `.par/` 自身；大仓库的首轮快照会慢一些（受 git 自身性能约束）；不替代用户的版本控制，快照仓库只在本机 `.par/` 下。
+- **rollback**：删掉 `.par/snapshot.git` 并设 `snapshot_enabled: false`；代码侧移除 `par_code_snapshot.ml` 与 REPL 的两处调用即可。
+

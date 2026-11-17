@@ -89,6 +89,17 @@ the tool: `→ echo_http ✓ (17.5ms)` returning `http-echo: http-ok`.
 
 **Verified**: with a rule denying `touch /tmp/permission-blocked`, the turn
 showed `→ bash ✗ (0.0ms)` for that command and the file was never created.
+
+### Workspace snapshots and /undo (W2)
+
+- Every user turn is committed into a shadow git repository at
+  `.par/snapshot.git` before the agent runs, so a shell command that rewrites
+  or deletes files is covered too — not just the file tools.
+- `/undo [n]` puts the workspace back to an earlier snapshot and `/snapshots`
+  lists them. The state being replaced is snapshotted first, so an undo can be
+  undone; the shadow repo never touches the project's own `.git`, and ignored
+  paths (`.par/`, `_build/`, `node_modules/`, …) are left alone.
+- `snapshot_enabled` (default true) turns it off.
 ## v0.10.0 — Parallel delegation (released 2026-11-14)
 
 > **Status**: Released as tag `v0.10.0` (PR #5, `62e8fb6`). The tag also carries

@@ -242,6 +242,23 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
            "[max mode] skipped during the goal chain \xe2\x80\x94 cost would scale with N"
        end);
       conv := Option.map Par_code_payload.sanitize !conv;
+      (* v0.13.0 W2: remember the workspace before a user turn touches it. The
+         snapshot covers shell commands too, which per-file backups cannot. *)
+      let snapshots_on =
+        match Par_code_config.load () with
+        | Some (c : Par_code_config.config) -> c.snapshot_enabled
+        | None -> true
+      in
+      (if (not chained) && snapshots_on then
+         let reason =
+           if String.length message > 80 then String.sub message 0 80 ^ "…"
+           else message
+         in
+         match Par_code_snapshot.capture ~root:(Sys.getcwd ()) ~reason with
+         | Ok sha when sha <> "" ->
+           Par_code_ui.render_notice ui
+             (Printf.sprintf "[snapshot] %s" (String.sub sha 0 8))
+         | _ -> ());
       let max_turn_active () =
         !max_mode_on
         && (not chained)
@@ -733,6 +750,33 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
             loop ()
          | "/quit" | "/exit" ->
              exit_normally ()
+          | "/undo" ->
+            let rest =
+              if String.length trimmed > 5 then
+                String.trim (String.sub trimmed 5 (String.length trimmed - 5))
+              else ""
+            in
+            let index = Option.value ~default:0 (Option.map (fun n -> Stdlib.max 0 n) (int_of_string_opt rest)) in
+            (match Par_code_snapshot.undo ~root:(Sys.getcwd ()) ~index with
+             | Ok msg -> Par_code_ui.render_success ui msg
+             | Error e -> Par_code_ui.render_error ui ("[undo] " ^ e));
+            loop ()
+          | "/snapshots" ->
+            let entries =
+              Par_code_snapshot.list_entries ~root:(Sys.getcwd ()) ~limit:10 ()
+            in
+            if entries = [] then
+              Par_code_ui.render_notice ui "No snapshots yet."
+            else begin
+              Par_code_ui.render_notice ui "Snapshots (newest first):";
+              List.iteri
+                (fun i (e : Par_code_snapshot.entry) ->
+                   Par_code_ui.render_notice ui
+                     (Printf.sprintf "  %2d  %s  %s" i
+                        (String.sub e.sha 0 8) e.reason))
+                entries
+            end;
+            loop ()
           | "/cost" ->
             let metrics =
               let agents =
