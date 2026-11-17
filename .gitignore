@@ -19,6 +19,7 @@ _opam/
 .dolt/
 .session/
 .omo/audit-ws/
+.omo/review/
 *.db
 
 # par-code runtime artifacts (plans, session mode, local state)

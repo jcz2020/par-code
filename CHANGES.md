@@ -70,9 +70,9 @@ therefore needs no restart.
 was edited on disk, `/mcp reload` reported
 `reloaded: 1 server(s), 1 tool(s); agents updated: par`, and the next turn called
 the tool: `→ echo_http ✓ (17.5ms)` returning `http-echo: http-ok`.
-## v0.10.1 — Seven-stage compose (unreleased)
+## v0.10.1 — Seven-stage compose (shipped inside v0.14.0, 2026-11-17)
 
-> **Status**: In progress on `main`.
+> **Status**: Shipped together with v0.14.0; see the note in that section.
 
 - `compose-seven` ships **inside the binary** (a built-in flow, no file needed):
   plan → execute → review → tdd → debug → verify → merge, five stages that may
@@ -84,9 +84,11 @@ the tool: `→ echo_http ✓ (17.5ms)` returning `http-echo: http-ok`.
 - `examples/flows/compose-seven.json` is the same definition on disk, for
   reading and forking; the v0.10.0 `compose` flow stays as the read-only
   three-stage example.
-## v0.14.0 — Polished terminal (unreleased)
+## v0.14.0 — Polished terminal (released 2026-11-17)
 
-> **Status**: In progress on `main`.
+> **Status**: Released as tag `v0.14.0`. This tag also carries v0.10.1 (the
+> built-in seven-stage `compose-seven` flow). The full-screen interface is
+> opt-in (`ui = "tui"`); `ui = "line"` stays the default for this release.
 
 ### Input line: completion and hints (W2)
 
@@ -117,6 +119,16 @@ output is not truncated inside the frame — that is S1b.
 - Mouse wheel scrolls three lines, PgUp/PgDn work while editing, bracketed paste
   lands cleanly, and the layout survives resizes.
 - `ui = "line"` remains the default; non-TTY runs always use it.
+### Streaming answers inside the frame (fix, 2026-11-17)
+
+- A real turn in `ui = "tui"` finished with an empty transcript: the streamed
+  markdown renderer wrote straight to stdout, so the next frame painted over the
+  answer. Markdown output now goes through `Par_code_ui.of_ansi` into the screen
+  sink, which keeps bold/dim/italic/underline/reverse and 8/256/RGB colours.
+- **Verified live**: two real turns (one line, then four Chinese lines plus a
+  bullet list) render inside the frame with the thinking timer and the status
+  bar; `ui = "line"` output is unchanged.
+
 ### Approval prompt (W1)
 
 - The bash confirmation is a three-line block instead of one long line: the
