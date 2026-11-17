@@ -343,20 +343,37 @@ let render_notice backend msg =
 let render_success backend msg =
   render_line backend (textf "✓ %s" msg ~style:(style ~fg:Green ()))
 
+(* v0.14.0 S2: when the full-screen UI is active, a modal that reads /dev/tty
+   must first give the terminal back. The REPL installs these hooks; in line
+   mode they stay empty and nothing changes. *)
+let suspend_hooks : (unit -> unit) option ref = ref None
+let resume_hooks : (unit -> unit) option ref = ref None
+
+let set_suspend_hooks ~suspend ~resume =
+  suspend_hooks := suspend;
+  resume_hooks := resume
+
+let with_terminal_released f =
+  (match !suspend_hooks with Some s -> s () | None -> ());
+  Fun.protect
+    ~finally:(fun () -> match !resume_hooks with Some r -> r () | None -> ())
+    f
+
 (** Render + FLUSH + read one line from /dev/tty (stdin fallback).
     The flush is load-bearing: without it the prompt stays in stdout's
     block buffer while we block on input — the user never sees it. *)
 let prompt_read ?(backend=create_backend ()) () =
-  flush backend.out;
-  let read_tty () =
-    try
-      let tty = open_in "/dev/tty" in
-      Fun.protect ~finally:(fun () -> close_in tty) (fun () -> input_line tty)
-    with Sys_error _ -> input_line stdin
-  in
-  match read_tty () with
-  | line -> Some (String.lowercase_ascii (String.trim line))
-  | exception _ -> None
+  with_terminal_released (fun () ->
+      flush backend.out;
+      let read_tty () =
+        try
+          let tty = open_in "/dev/tty" in
+          Fun.protect ~finally:(fun () -> close_in tty) (fun () -> input_line tty)
+        with Sys_error _ -> input_line stdin
+      in
+      match read_tty () with
+      | line -> Some (String.lowercase_ascii (String.trim line))
+      | exception _ -> None)
 
 (* v0.14.0 W1: the approval question as a small block instead of one long line,
    with the reason spelled out and the meaning of each key next to it. Pure, so

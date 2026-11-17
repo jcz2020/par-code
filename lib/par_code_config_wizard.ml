@@ -216,6 +216,7 @@ let run_wizard ?(ui=Par_code_ui.create_backend ()) () =
     mcp_servers = Par_code_config.default.mcp_servers;
     skill_sources = Par_code_config.default.skill_sources;
     snapshot_enabled = Par_code_config.default.snapshot_enabled;
+    ui = Par_code_config.default.ui;
   } in
   Par_code_config.save cfg;
   render_notice ui (Printf.sprintf "\nSaved config to %s" (Par_code_config.config_path ()))

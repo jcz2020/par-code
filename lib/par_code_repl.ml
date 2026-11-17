@@ -38,7 +38,33 @@ let forget_orphan (id : string) : (unit, string) result =
 
 let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goal
     ?max () =
-  let ui = Par_code_ui.create_backend () in
+  (* v0.14.0 S2: select the interface once. "tui" needs a real terminal; a
+     pipe or CI run falls back to the line interface regardless of config. *)
+  let want_tui =
+    match Par_code_config.load () with
+    | Some (c : Par_code_config.config) -> c.ui = "tui"
+    | None -> false
+  in
+  let is_tty = try Unix.isatty Unix.stdout with Unix.Unix_error _ -> false in
+  let screen =
+    if want_tui && is_tty then begin
+      let s = Par_code_screen.create () in
+      Par_code_ui.set_suspend_hooks
+        ~suspend:(Some (fun () -> Par_code_screen.suspend s))
+        ~resume:(Some (fun () -> Par_code_screen.resume s));
+      Some s
+    end else None
+  in
+  let ui =
+    match screen with
+    | None -> Par_code_ui.create_backend ()
+    | Some s ->
+      Par_code_ui.create_screen_backend ~sink:(fun img ->
+          Par_code_screen.append_truncated s img;
+          (* Repaint from the streaming callback: the turn blocks in [invoke],
+             so nobody else would. *)
+          Par_code_screen.render s)
+  in
   (* v0.5.5 P0 #2: tag every save with the current project scope so that
      `par session list` / `par -r` / `par --continue <prefix>` filter
      correctly. PAR SDK 0.8.3 surfaced ?scope through Runtime.save_conversation. *)
@@ -696,7 +722,12 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
        buffer — flush first so rendered output (slash commands via render,
        which doesn't flush) appears before the next prompt overwrites the view. *)
     flush stdout;
-    match LNoise.linenoise (Par_code_ui.prompt_string !Par_code_mode.current) with
+    let line =
+      match screen with
+      | Some s -> Par_code_screen.read_line s ~prompt:(Par_code_ui.prompt_string !Par_code_mode.current)
+      | None -> LNoise.linenoise (Par_code_ui.prompt_string !Par_code_mode.current)
+    in
+    match line with
     | exception Sys.Break ->
       exit_normally ()
     | None ->

@@ -157,6 +157,11 @@ val permission_lines :
 
 val render_permission : backend -> string list -> unit
 
+val set_suspend_hooks :
+  suspend:(unit -> unit) option -> resume:(unit -> unit) option -> unit
+(** Install terminal suspend/resume hooks so a /dev/tty modal can run while the
+    full-screen UI owns the terminal. Line mode leaves both as [None]. *)
+
 val prompt_read : ?backend:backend -> unit -> string option
 (** Flush and read one line from the terminal (stdlib fallback when there is no
     tty). Used by callers that render their own block before asking. *)

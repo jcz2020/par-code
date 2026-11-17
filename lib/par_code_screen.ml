@@ -70,7 +70,7 @@ let attr_of_style (s : Par_code_ui.style) : Notty.A.t =
 (* ------------------------------------------------------------------ *)
 
 type t = {
-  term : Notty_unix.Term.t;
+  mutable term : Notty_unix.Term.t;
   mutable transcript : Notty.image list;  (* oldest first *)
   mutable partial : string;               (* line being streamed *)
   mutable status : string;
@@ -86,6 +86,7 @@ type t = {
   mutable submitted : string option;
   mutable editing : bool;          (* keys go to the input line *)
   mutable last_ctrl_c : float option;
+  mutable suspended : bool;
 }
 
 let create () : t =
@@ -103,7 +104,8 @@ let create () : t =
     hist_pos = None;
     submitted = None;
     editing = false;
-    last_ctrl_c = None }
+    last_ctrl_c = None;
+    suspended = false }
 
 let to_notty_lines (img : Par_code_ui.image) : Notty.image list =
   let open Notty in
@@ -498,3 +500,19 @@ let stop (t : t) = t.running <- false
 let close (t : t) =
   t.running <- false;
   Notty_unix.Term.release t.term
+
+(* v0.14.0 S2: a modal that reads /dev/tty (approval, /distill) cannot work
+   while the alt-screen owns the terminal. Release it, let the modal run, then
+   recreate and repaint. The transcript lives in memory, so nothing is lost. *)
+let suspend (t : t) =
+  if not t.suspended then begin
+    (try Notty_unix.Term.release t.term with _ -> ());
+    t.suspended <- true
+  end
+
+let resume (t : t) =
+  if t.suspended then begin
+    t.term <- Notty_unix.Term.create ();
+    t.suspended <- false;
+    render t
+  end

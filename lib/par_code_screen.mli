@@ -48,6 +48,12 @@ val render : t -> unit
 
 val stop : t -> unit
 
+val suspend : t -> unit
+(** Release the terminal so a /dev/tty modal can run. *)
+
+val resume : t -> unit
+(** Recreate the terminal and repaint after {!suspend}. *)
+
 val close : t -> unit
 (** Release the terminal (alt-screen off, cursor restored). [run] does this
     itself; call it explicitly when the caller drives [read_line] directly. *)
