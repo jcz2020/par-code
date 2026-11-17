@@ -1,0 +1,3 @@
+(executable
+ (name s0)
+ (libraries notty-community.unix))
