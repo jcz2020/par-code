@@ -3,6 +3,38 @@
 
 open Par_code_ui
 
+(* ── In-frame modal wiring ─────────────────────────────────────────── *)
+
+let modal_receives_the_question () =
+  let seen = ref None in
+  set_modal_hook
+    (Some
+       (fun ~title ~body ~options ->
+          seen := Some (title, body, options);
+          Some "a"));
+  let answer =
+    prompt_permission ~command:"touch /tmp/x" ~reason:"policy says ask"
+      ~always_pattern:"touch *" ()
+  in
+  set_modal_hook None;
+  Alcotest.(check (option string)) "answer comes from the modal" (Some "a") answer;
+  match !seen with
+  | None -> Alcotest.fail "modal was never asked"
+  | Some (title, body, options) ->
+    Alcotest.(check string) "title" "bash approval" title;
+    Alcotest.(check int) "body has rows" 3 (List.length body);
+    Alcotest.(check int) "options" 3 (List.length options);
+    Alcotest.(check (list string)) "keys" [ "y"; "a"; "n" ]
+      (List.map fst options)
+
+let modal_absent_falls_back () =
+  set_modal_hook None;
+  (* No tty in the test harness: the fallback returns None rather than raising. *)
+  let answer =
+    prompt_permission ~command:"touch /tmp/x" ~reason:"r" ~always_pattern:"p" ()
+  in
+  Alcotest.(check (option string)) "fallback is a clean None" None answer
+
 (* ── Composition laws ──────────────────────────────────────────────── *)
 
 let left_id_hcat () =
@@ -408,5 +440,9 @@ let () =
       "render_edges", [
         Alcotest.test_case "table_single_spaced" `Quick render_table_is_single_spaced;
         Alcotest.test_case "tool_boundary_newline" `Quick tool_call_starts_on_a_fresh_line;
+      ];
+      "modal", [
+        Alcotest.test_case "receives_question" `Quick modal_receives_the_question;
+        Alcotest.test_case "absent_falls_back" `Quick modal_absent_falls_back;
       ];
     ]

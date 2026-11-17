@@ -117,11 +117,56 @@ let create () : t =
     modal = None;
     modal_answer = None }
 
+(* Notty rejects control characters inside [I.string] (it raises on "\n"),
+   and model output is full of them. Split runs on newlines into separate lines
+   and drop the rest, so a multi-line run can never take the frame down. *)
+let sanitize_text (s : string) : string =
+  let b = Buffer.create (String.length s) in
+  String.iter
+    (fun c ->
+       match c with
+       | '\t' -> Buffer.add_string b "    "
+       | '\r' -> ()
+       | c when Char.code c < 0x20 || Char.code c = 0x7f -> ()
+       | c -> Buffer.add_char b c)
+    s;
+  Buffer.contents b
+
+let split_runs (runs : (string * Par_code_ui.style) list) :
+    (string * Par_code_ui.style) list list =
+  let lines = ref [] in
+  let current = ref [] in
+  let flush () =
+    lines := List.rev !current :: !lines;
+    current := []
+  in
+  List.iter
+    (fun (text, sty) ->
+       let parts = String.split_on_char '\n' text in
+       List.iteri
+         (fun i part ->
+            if i > 0 then flush ();
+            let part = sanitize_text part in
+            if part <> "" then current := (part, sty) :: !current)
+         parts)
+    runs;
+  flush ();
+  List.rev !lines
+
 let to_notty_lines (img : Par_code_ui.image) : Notty.image list =
   let open Notty in
-  List.map
-    (fun (runs : (string * Par_code_ui.style) list) ->
-       I.hcat (List.map (fun (txt, sty) -> I.string (attr_of_style sty) txt) runs))
+  List.concat_map
+    (fun runs ->
+       List.map
+         (fun (runs : (string * Par_code_ui.style) list) ->
+            match runs with
+            | [] -> I.empty
+            | _ ->
+              I.hcat
+                (List.map
+                   (fun (txt, sty) -> I.string (attr_of_style sty) txt)
+                   runs))
+         (split_runs runs))
     (Par_code_ui.lines img)
 
 let to_notty (img : Par_code_ui.image) : Notty.image =
@@ -326,8 +371,8 @@ let frame (t : t) : Notty.image =
     let after = String.sub t.input t.cursor (String.length t.input - t.cursor) in
     I.hsnap ~align:`Left w
       (I.hcat
-         [ I.string A.(st bold) (t.prompt ^ before)
-           ; I.string A.(st reverse) (if after = "" then " " else String.sub after 0 1)
+         [ I.string A.(st bold) (sanitize_text (t.prompt ^ before))
+           ; I.string A.(st reverse) (if after = "" then " " else sanitize_text (String.sub after 0 1))
            ; I.string A.empty
                (if String.length after > 1 then String.sub after 1 (String.length after - 1)
                 else "") ])
@@ -340,7 +385,7 @@ let frame (t : t) : Notty.image =
     I.hsnap ~align:`Left w
       (I.hcat
          [ I.string A.(st reverse) " par "
-           ; I.string A.empty (" " ^ t.status ^ scroll_hint ^ hint) ])
+           ; I.string A.empty (sanitize_text (" " ^ t.status ^ scroll_hint ^ hint)) ])
   in
   let body =
     match t.modal with
@@ -356,7 +401,7 @@ let frame (t : t) : Notty.image =
       let row s =
         I.hcat
           [ I.string A.empty "│"
-            ; I.hsnap ~align:`Left inner_w (I.string A.(st bold) s)
+            ; I.hsnap ~align:`Left inner_w (I.string A.(st bold) (sanitize_text s))
             ; I.string A.empty "│" ]
       in
       let legend =
