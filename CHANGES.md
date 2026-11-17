@@ -88,6 +88,13 @@ the tool: `→ echo_http ✓ (17.5ms)` returning `http-echo: http-ok`.
 
 > **Status**: In progress on `main`.
 
+### Input line: completion and hints (W2)
+
+- Tab completes slash commands (including `/skill-id`) and flow ids after
+  `/flow run `; the grey hint under the line explains the command as soon as it
+  is typed.
+- `Par_code_ui.commands` is now the single list that feeds the help screen, the
+  completion list and the hints, so they cannot drift.
 ### Approval prompt (W1)
 
 - The bash confirmation is a three-line block instead of one long line: the

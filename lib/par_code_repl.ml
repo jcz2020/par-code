@@ -1326,6 +1326,41 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
             loop ()
       end
   in
+  (* v0.14.0 W2: Tab completes slash commands and skill ids, and the grey hint
+     under the line explains the command before it is run. Registered once, after
+     the skills are known. *)
+  (let starts_with ~prefix s =
+     String.length s >= String.length prefix
+     && String.sub s 0 (String.length prefix) = prefix
+   in
+   let all_commands () =
+     List.map fst Par_code_ui.commands
+     @ List.map
+         (fun (e : Par_code_skills.entry) -> "/" ^ e.descriptor.id)
+         (Par_code_skills.list_custom ())
+   in
+   LNoise.set_completion_callback (fun line completions ->
+       let trimmed = String.trim line in
+       let candidates =
+         if trimmed = "" || trimmed.[0] <> '/' then []
+         else
+           match String.split_on_char ' ' trimmed with
+           | [ partial ] ->
+             List.filter (fun c -> starts_with ~prefix:partial c) (all_commands ())
+           | [ "/flow"; "run"; partial ] ->
+             List.filter
+               (fun id -> starts_with ~prefix:partial id)
+               (Par_code_flow.available ())
+           | _ -> []
+       in
+       (* A single exact match completes; several leave the prefix alone so the
+          terminal can list them. *)
+       List.iter (fun c -> LNoise.add_completion completions c) candidates);
+   LNoise.set_hints_callback (fun line ->
+       let cmd = String.trim line in
+       match Par_code_ui.command_description cmd with
+       | Some desc -> Some (desc, LNoise.White, false)
+       | None -> None));
   (match goal with
    | Some g when g <> "" ->
      Par_code_goal.set_goal ~objective:g ~max_steps:goal_max_steps ();

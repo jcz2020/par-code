@@ -733,31 +733,38 @@ let prompt_string mode =
   in
   prefix ^ "par> "
 
+(* v0.14.0 W2: one list feeds the help screen, Tab completion and the grey
+   hint under the prompt, so they cannot drift apart. *)
+let commands : (string * string) list =
+  [ ("/help", "Show this help");
+    ("/session", "Show session info");
+    ("/health", "Show runtime health");
+    ("/cost", "Show session token usage");
+    ("/plan", "Switch to plan mode (read-only; produces a plan file)");
+    ("/build", "Switch to build mode (full tool access; saves current plan)");
+    ("/goal", "Set a goal for the agent (judge verifies completion)");
+    ("/max", "Best-of-N: run N candidate answers, keep the best (on|off|2-5)");
+    ("/skills", "List custom skills (reload: /skills reload)");
+    ("/distill", "Turn a repeated workflow into a skill (--id/--user/--force)");
+    ("/resume", "Continue an interrupted run (/resume <id> | /resume discard)");
+    ("/flow", "Run a file-defined workflow (/flow run|status|cancel|resume)");
+    ("/mcp", "List the MCP servers and the tools they expose");
+    ("/undo", "Restore the workspace to an earlier snapshot (/undo [n])");
+    ("/snapshots", "List recent workspace snapshots");
+    ("/reset", "Reset conversation");
+    ("/checkpoint", "Force a session checkpoint");
+    ("/checkpoints", "List session checkpoints");
+    ("/quit", "Exit") ]
+
+let command_description cmd =
+  match List.assoc_opt cmd commands with Some d -> Some d | None -> None
+
 let render_help backend =
-  let item cmd desc = textf "  %-12s %s" cmd desc in
+  let item cmd desc = textf "  %-14s %s" cmd desc in
   let image =
-    vcat [
-      text "Commands:" ~style:(style ~bold:true ());
-      item "/help" "Show this help";
-      item "/session" "Show session info";
-      item "/health" "Show runtime health";
-      item "/cost" "Show session token usage";
-      item "/plan" "Switch to plan mode (read-only; produces a plan file)";
-      item "/build" "Switch to build mode (full tool access; saves current plan)";
-      item "/goal" "Set a goal for the agent (judge verifies completion)";
-      item "/max" "Best-of-N: run N candidate answers, keep the best (on|off|2-5)";
-      item "/skills" "List custom skills (reload: /skills reload)";
-      item "/distill" "Turn a repeated workflow into a skill (--id/--user/--force)";
-      item "/resume" "Continue an interrupted run (/resume <id> | /resume discard)";
-      item "/flow" "Run a file-defined workflow (/flow run|status|cancel|resume)";
-      item "/mcp" "List the MCP tools the configured servers expose";
-      item "/undo" "Restore the workspace to an earlier snapshot (/undo [n])";
-      item "/snapshots" "List recent workspace snapshots";
-      item "/reset" "Reset conversation";
-      item "/checkpoint" "Force a session checkpoint";
-      item "/checkpoints" "List session checkpoints";
-      item "/quit" "Exit";
-    ]
+    vcat
+      ((text "Commands:" ~style:(style ~bold:true ()))
+       :: List.map (fun (cmd, desc) -> item cmd desc) commands)
   in
   render_line backend image
 

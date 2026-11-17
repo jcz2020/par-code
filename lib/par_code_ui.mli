@@ -190,6 +190,12 @@ val render_prompt : backend -> Par_code_mode.mode -> unit
 (* Plain-text prompt string for [LNoise.linenoise] (no ANSI — linenoise
    sizes the cursor with strlen). See [prompt_string] impl in par_code_ui.ml. *)
 val prompt_string : Par_code_mode.mode -> string
+val commands : (string * string) list
+(** Slash commands and their one-line descriptions: the single source for help,
+    Tab completion and the hint under the prompt. *)
+
+val command_description : string -> string option
+
 val render_help : backend -> unit
 
 (** Simple fixed-width column table renderer. *)
