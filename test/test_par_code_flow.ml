@@ -40,12 +40,52 @@ let test_missing_file () =
        let rec go i = i + n <= h && (String.sub msg i n = needle || go (i + 1)) in
        go 0)
 
+let test_builtin_seven_stage () =
+  (* The built-in must exist without any file on disk: /flow run has to work for
+     a user who installed the binary outside this repository. *)
+  match Par_code_flow.builtin "compose-seven" with
+  | Error e -> Alcotest.failf "builtin: %s" e
+  | Ok (def : Par.Types.workflow_def) ->
+    Alcotest.(check string) "id" "compose-seven" def.id;
+    let steps =
+      match def.steps with
+      | Par.Types.Sequential steps -> steps
+      | _ -> Alcotest.fail "expected Sequential"
+    in
+    Alcotest.(check int) "seven stages" 7 (List.length steps);
+    (* plan, execute, review, tdd, debug, verify, merge: the writer stages are
+       what make this a compose flow rather than a read-only one. *)
+    let writers =
+      List.filter
+        (function
+          | Par.Types.Agent_call { agent_id = "par"; _ } -> true
+          | _ -> false)
+        steps
+    in
+    Alcotest.(check int) "five writer stages" 5 (List.length writers)
+
+let test_with_variable () =
+  match Par_code_flow.builtin "compose-seven" with
+  | Error e -> Alcotest.failf "builtin: %s" e
+  | Ok def ->
+    let def = Par_code_flow.with_variable def "spec" "add a flag" in
+    let spec =
+      List.assoc_opt "spec" def.Par.Types.variables
+    in
+    Alcotest.(check (option string)) "spec replaced"
+      (Some "\"add a flag\"")
+      (Option.map Yojson.Safe.to_string spec)
+
 let () =
   Alcotest.run "par_code_flow"
     [ ( "parse"
       , [ Alcotest.test_case "sample" `Quick test_sample_parses
         ; Alcotest.test_case "bad json" `Quick test_bad_json
         ; Alcotest.test_case "missing field" `Quick test_missing_field
+        ] )
+    ; ( "builtin"
+      , [ Alcotest.test_case "seven stages" `Quick test_builtin_seven_stage
+        ; Alcotest.test_case "spec override" `Quick test_with_variable
         ] )
     ; ("disk", [ Alcotest.test_case "missing file" `Quick test_missing_file ])
     ]

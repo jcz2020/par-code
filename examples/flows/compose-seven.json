@@ -1,0 +1,77 @@
+{
+  "id": "compose-seven",
+  "name": "Seven-stage compose: plan, execute, review, tdd, debug, verify, merge",
+  "version": 1,
+  "steps": [
+    "Sequential",
+    [
+      [
+        "Agent_call",
+        {
+          "agent_id": "explore",
+          "prompt_template": "Write a concrete implementation plan for the request below: which files to touch, the change in each, and the tests that will prove it works. You are read-only. Reply with the plan only, no preamble.\n\nRequest:\n{{spec}}",
+          "response_schema": null
+        }
+      ],
+      [
+        "Agent_call",
+        {
+          "agent_id": "par",
+          "prompt_template": "Implement this plan now: edit the files. Do not run the test suite yet. When you are done, reply with a terse list of files changed and what changed in each.\n\nPlan:\n{{result_0.text}}",
+          "response_schema": null
+        }
+      ],
+      [
+        "Agent_call",
+        {
+          "agent_id": "explore",
+          "prompt_template": "Review the implementation below against the request and the plan. List concrete defects only (missing cases, broken call sites, wrong behaviour); write 'no problems found' when there are none.\n\nRequest:\n{{spec}}\n\nPlan:\n{{result_0.text}}\n\nImplementation report:\n{{result_1.text}}",
+          "response_schema": null
+        }
+      ],
+      [
+        "Agent_call",
+        {
+          "agent_id": "par",
+          "prompt_template": "Write or update the tests this change needs. They must fail without the change and pass with it. Reply with the test files touched and one line per assertion.\n\nRequest:\n{{spec}}\n\nReview findings:\n{{result_2.text}}",
+          "response_schema": null
+        }
+      ],
+      [
+        "Agent_call",
+        {
+          "agent_id": "par",
+          "prompt_template": "Run the tests you just wrote. Fix the code (not the tests) until they pass; if a test itself is wrong, say why and correct it. Report the command you ran, the failure, and the fix.\n\nTests added:\n{{result_3.text}}",
+          "response_schema": null
+        }
+      ],
+      [
+        "Agent_call",
+        {
+          "agent_id": "par",
+          "prompt_template": "Run the project's full test command now. Do not change code in this step. Report the exact command, its exit status, and a one-paragraph summary of the result.",
+          "response_schema": null
+        }
+      ],
+      [
+        "Agent_call",
+        {
+          "agent_id": "par",
+          "prompt_template": "Summarise this change for a reviewer: what changed and why, how it was verified, any risk left, and a proposed commit message. Do not commit anything.\n\nRequest:\n{{spec}}\n\nVerification:\n{{result_5.text}}",
+          "response_schema": null
+        }
+      ]
+    ]
+  ],
+  "variables": [
+    [
+      "spec",
+      "Describe the change to make (pass it after the flow id, or edit variables.spec in the definition)"
+    ]
+  ],
+  "failure_policy": [
+    "Continue_on_failure"
+  ],
+  "parallel_limit": 1,
+  "timeout": 2400
+}

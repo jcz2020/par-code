@@ -1126,11 +1126,20 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                   List.iter
                     (fun id -> Par_code_ui.render_notice ui ("  " ^ id))
                     ids)
-             | [ "run"; id ] ->
+             | "run" :: id :: spec_words ->
+               (* Extra words after the id become the flow's `spec` variable, so a
+                  shipped compose flow can be pointed at this request. *)
                (match Par_code_flow.load id with
                 | Error msg ->
                   Par_code_ui.render_error ui ("[flow] " ^ msg)
                 | Ok def ->
+                  let def =
+                    match spec_words with
+                    | [] -> def
+                    | words ->
+                      Par_code_flow.with_variable def "spec"
+                        (String.concat " " words)
+                  in
                   let unsafe =
                     List.filter
                       (fun a -> List.mem a Par_code_flow.interactive_agents)

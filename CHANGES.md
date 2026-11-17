@@ -70,6 +70,20 @@ therefore needs no restart.
 was edited on disk, `/mcp reload` reported
 `reloaded: 1 server(s), 1 tool(s); agents updated: par`, and the next turn called
 the tool: `→ echo_http ✓ (17.5ms)` returning `http-echo: http-ok`.
+## v0.10.1 — Seven-stage compose (unreleased)
+
+> **Status**: In progress on `main`.
+
+- `compose-seven` ships **inside the binary** (a built-in flow, no file needed):
+  plan → execute → review → tdd → debug → verify → merge, five stages that may
+  edit files and two read-only ones. A file at `.par/flows/compose-seven.json`
+  still wins, so it can be tuned per project.
+- `/flow run <id> <spec...>`: words after the id replace the definition's
+  `spec` variable, so a shipped flow can be pointed at the request without
+  editing JSON.
+- `examples/flows/compose-seven.json` is the same definition on disk, for
+  reading and forking; the v0.10.0 `compose` flow stays as the read-only
+  three-stage example.
 ## v0.13.0 — Safe and reversible (released 2026-11-17)
 
 > **Status**: Released as tag `v0.13.0`. This tag also carries the v0.11.0

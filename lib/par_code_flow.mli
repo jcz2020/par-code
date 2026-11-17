@@ -23,6 +23,15 @@ val load : string -> (Par.Types.workflow_def, string) result
     [examples/flows/<id>.json] so an example runs out of the box. A missing
     definition is an error naming both directories, not an empty one. *)
 
+val builtin : string -> (Par.Types.workflow_def, string) result
+(** A flow that ships inside the binary (currently [compose-seven]). Loading a
+    file with the same id still wins. *)
+
+val with_variable :
+  Par.Types.workflow_def -> string -> string -> Par.Types.workflow_def
+(** Replace one variable of a loaded definition. Used by [/flow run <id> <spec>]
+    so a shipped flow can be pointed at the user's request. *)
+
 val available : unit -> string list
 (** Ids on disk — project first, then the shipped examples — sorted and
     de-duplicated. An absent directory contributes nothing. *)

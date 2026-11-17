@@ -3077,3 +3077,13 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 - **scope**：只看工作区，不含被 `.gitignore` 排除的路径与 `.par/` 自身；大仓库的首轮快照会慢一些（受 git 自身性能约束）；不替代用户的版本控制，快照仓库只在本机 `.par/` 下。
 - **rollback**：删掉 `.par/snapshot.git` 并设 `snapshot_enabled: false`；代码侧移除 `par_code_snapshot.ml` 与 REPL 的两处调用即可。
 
+
+## 2026-11-17 · v0.10.1：七阶段 compose 内置进二进制 + spec 由命令行给
+
+- **tag**：builtin-compose-seven
+- **before**：v0.10.0 只发了三段式（plan → 提议改动 → 评审，全只读），七阶段（execute/review/tdd/debug/verify/merge）一直是承诺未兑现；示例流程也只存在于仓库的 `examples/flows/`，装到别处的二进制用不了。
+- **after**：`compose-seven` 作为**内置流程**编译进二进制（`Par_code_flow.builtin_source`），无文件也能 `/flow run compose-seven`；文件同 id 仍然优先，方便按项目改写。`/flow run <id> <spec…>` 把 id 之后的词覆盖到 `spec` 变量，用户不必编辑 JSON。七个阶段里 5 个用 `par`（可写），plan/review 用只读 `explore`。
+- **reason**：示例目录随二进制分发不了，内置才谈得上“开箱可用”；而写死 spec 的流程没法用，所以把 spec 提升成命令参数。
+- **scope**：流程仍是**同步执行**（REPL 输入是阻塞的 C 调用），跑起来会占住提示符，靠 `[flow] still running` 报活；merge 阶段只产出提交信息，**不自动提交**（沿用“未经用户要求不提交”的规矩）。
+- **rollback**：删除 `builtin_source` 与 REPL 的 spec 解析即可回到 v0.10.0 的三段式；文件形式的七阶段仍可用。
+
