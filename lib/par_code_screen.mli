@@ -70,3 +70,7 @@ val close : t -> unit
 val install_cleanup : t -> unit
 (** Release the terminal on SIGTERM/SIGHUP before exiting. [at_exit] does not run
     for those signals, so without this the shell is left in raw mode. *)
+
+val wrap_text : cols:int -> string -> string list
+(** Wrap one string to [cols] display columns (CJK/emoji count two) and return
+    the resulting lines. *)
