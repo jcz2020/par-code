@@ -1,8 +1,8 @@
 # CHANGES
 
-## v0.11.0 — Ecosystem (unreleased)
+## v0.11.0 — Ecosystem (shipped inside v0.13.0, 2026-11-17)
 
-> **Status**: In progress on `feat/v0.11.0-mcp`.
+> **Status**: Shipped together with v0.13.0; see the note in that section.
 
 ### Remote skill sources
 
@@ -70,9 +70,11 @@ therefore needs no restart.
 was edited on disk, `/mcp reload` reported
 `reloaded: 1 server(s), 1 tool(s); agents updated: par`, and the next turn called
 the tool: `→ echo_http ✓ (17.5ms)` returning `http-echo: http-ok`.
-## v0.13.0 — Safe and reversible (unreleased)
+## v0.13.0 — Safe and reversible (released 2026-11-17)
 
-> **Status**: In progress on `main`.
+> **Status**: Released as tag `v0.13.0`. This tag also carries the v0.11.0
+> ecosystem work (MCP, hot reload, remote skills); v0.12.0 was dropped rather
+> than skipped by accident — see `docs/DECISIONS.md`.
 
 ### Permission rules (W1)
 
