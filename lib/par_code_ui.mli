@@ -116,6 +116,11 @@ val create_backend_out : out_channel -> backend
     ({https://no-color.org}), and [TERM=dumb]. *)
 val create_backend : unit -> backend
 
+val create_screen_backend : sink:(image -> unit) -> backend
+(** A backend whose rendered images go to [sink] instead of stdout. The screen
+    passes its own append function, so every [render_*] call site lands inside
+    the frame without changing. *)
+
 (** Render image to terminal (no trailing newline). *)
 val render : backend -> image -> unit
 

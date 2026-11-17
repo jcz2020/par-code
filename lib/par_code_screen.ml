@@ -88,17 +88,43 @@ let create () : t =
     running = true;
     last_key = "" }
 
+let to_notty_lines (img : Par_code_ui.image) : Notty.image list =
+  let open Notty in
+  List.map
+    (fun (runs : (string * Par_code_ui.style) list) ->
+       I.hcat (List.map (fun (txt, sty) -> I.string (attr_of_style sty) txt) runs))
+    (Par_code_ui.lines img)
+
 let to_notty (img : Par_code_ui.image) : Notty.image =
   let open Notty in
-  let line (runs : (string * Par_code_ui.style) list) : image =
-    I.hcat (List.map (fun (txt, sty) -> I.string (attr_of_style sty) txt) runs)
-  in
-  match Par_code_ui.lines img with
-  | [] -> I.empty
-  | ls -> I.vcat (List.map line ls)
+  match to_notty_lines img with [] -> I.empty | ls -> I.vcat ls
 
+(* The transcript stores one entry per *line*, not per image: a multi-line
+   image used to count as a single entry, so pagination and scrolling were off
+   by however many lines it had. *)
 let append (t : t) (img : Par_code_ui.image) =
-  t.transcript <- t.transcript @ [ to_notty img ]
+  t.transcript <- t.transcript @ to_notty_lines img
+
+(* v0.14.0 S1b: a frame is not a scroll buffer — one huge tool output must not
+   push everything else out. Cap the lines taken from a single image and mark
+   the cut. *)
+let max_lines_per_image = 60
+
+let append_truncated (t : t) (img : Par_code_ui.image) =
+  let lines = to_notty_lines img in
+  let n = List.length lines in
+  let kept =
+    if n <= max_lines_per_image then lines
+    else begin
+      let rec take k l =
+        if k <= 0 then [] else match l with [] -> [] | h :: tl -> h :: take (k - 1) tl
+      in
+      take max_lines_per_image lines
+      @ [ to_notty
+            (Par_code_ui.textf "… (%d more lines)" (n - max_lines_per_image)) ]
+    end
+  in
+  t.transcript <- t.transcript @ kept
 
 let append_text (t : t) (s : string) =
   append t (Par_code_ui.text s)
@@ -112,6 +138,8 @@ let end_line (t : t) =
   end
 
 let set_status (t : t) (s : string) = t.status <- s
+
+let line_count (t : t) = List.length t.transcript
 
 (* ------------------------------------------------------------------ *)
 (* Frame                                                               *)

@@ -25,6 +25,10 @@ type backend = {
   mutable markdown_state : Par_code_ui_markdown.state;
   think_buf : Buffer.t;
   mutable thinking_start : float option;
+  (* v0.14.0 S1b: when set, rendered images go here instead of [out]. The
+     screen owns the terminal, so the existing render_* call sites can stay
+     untouched while their output lands inside the frame. *)
+  sink : (image -> unit) option;
 }
 
 let no_style = {
@@ -262,7 +266,17 @@ let create_backend_out oc =
   { out = oc; color = None; size = None;
     markdown_state = Par_code_ui_markdown.initial;
     think_buf = Buffer.create 256;
-    thinking_start = None }
+    thinking_start = None;
+    sink = None }
+
+(* v0.14.0 S1b: a backend whose output lands in the screen instead of a file.
+   Everything that takes [~backend] works unchanged. *)
+let create_screen_backend ~sink =
+  { out = stdout; color = Some true; size = None;
+    markdown_state = Par_code_ui_markdown.initial;
+    think_buf = Buffer.create 256;
+    thinking_start = None;
+    sink = Some sink }
 
 let create_backend () = create_backend_out stdout
 
@@ -277,12 +291,17 @@ let size_of b =
   | None -> let s = detect_size () in b.size <- Some s; s
 
 let render b img =
-  output_string b.out (flatten ~color:(color_of b) img)
+  match b.sink with
+  | Some f -> f img
+  | None -> output_string b.out (flatten ~color:(color_of b) img)
 
 let render_line b img =
   render b img;
-  output_char b.out '\n';
-  flush b.out
+  (match b.sink with
+   | Some _ -> ()
+   | None ->
+     output_char b.out '\n';
+     flush b.out)
 
 let read_line _b ~prompt =
   (* linenoise owns prompt display + input editing (raw mode, UTF-8/wide-char-
