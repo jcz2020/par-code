@@ -3107,3 +3107,13 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 - **scope**：第一版不做语法高亮引擎（先用 ANSI 着色代码块/差异）、不做图片协议、不做 Windows；8 条手感清单是唯一验收口径。
 - **rollback**：配置 `ui = "tui" | "line"` 默认 line；v0.13.0 tag 为基线；每阶段独立 revert。
 
+
+## 2026-11-17 · v0.14 收尾范围：i18n 推迟，界面先做能用的
+
+- **tag**：v0.14-scope-i18n-deferred
+- **before**：路线图 v0.14 写的是「rich TUI（streaming render、inline permission prompts、i18n）」。
+- **after**：全屏、状态栏、模态审批、滚动、粘贴都已落地；**i18n 不在 v0.14 交付**，推迟到 v1.0 之后，等界面文案稳定再抽字符串表。
+- **reason**：现在的用户界面文案是英文、用户是中文读者 —— 但 i18n 要求把所有面向用户的字符串抽出、维护两份、并给测试加语言维度，工作量与「让终端好用」不是一回事。先把界面形态定下来，避免翻译两遍。
+- **scope**：CLI 输出、状态栏、弹窗全部仍为英文；文档与决策记录保持中文。
+- **rollback**：随时可开展 i18n，不影响现有结构（文案集中在 ui 模块与少量 REPL 分支里）。
+

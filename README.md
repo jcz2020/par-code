@@ -543,7 +543,7 @@ Version numbers stay minimal (no 1.0 until core parity is earned).
 | **v0.10.1** | Seven-stage compose — built-in `compose-seven` flow (plan → execute → review → tdd → debug → verify → merge) and `/flow run <id> <spec>`. *"Give a spec, it designs, codes, reviews and tests end-to-end."* |
 | ~~v0.12.0~~ | ~~Code intelligence — LSP integration~~ **Dropped 2026-11-17**: an agent already gets authoritative diagnostics from the build and tests, and `find`/`grep` covers navigation; per-language servers are a maintenance burden for marginal gain (see `docs/DECISIONS.md`). |
 | **v0.13.0** ✅ | Safe & reversible — permission ruleset (allow/ask/deny) + whole-workspace snapshots with `/undo`. *"It asks before destructive ops; changes can be undone."* |
-| **v0.14.0** | Polished terminal app — rich TUI (streaming render, inline permission prompts, i18n). *"A real terminal application."* |
+| **v0.14.0** | Polished terminal app — full-screen TUI, status bar, modal approvals, scrollback and paste (i18n deferred to post-1.0). *"A real terminal application."* |
 | **v1.0.0** | **Core-parity milestone** — v0.2–v0.14 capabilities complete and stabilized. |
 
 Post-1.0 (extended, on demand): voice input/control, plugin system, codesearch,

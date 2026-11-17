@@ -107,6 +107,16 @@ the tool: `→ echo_http ✓ (17.5ms)` returning `http-echo: http-ok`.
 
 **Not done yet**: the `render_*` call sites still write to stdout, and long
 output is not truncated inside the frame — that is S1b.
+### Full-screen interface (v0.14)
+
+- `ui = "tui"` runs the REPL inside a Notty frame: transcript, one-line status
+  bar (`model · mode · N tok · git branch`), input line with history, Tab
+  completion and Ctrl-C semantics copied from Claude Code.
+- Approvals and confirmations are in-frame modals; the /dev/tty path stays as
+  the fallback for line mode.
+- Mouse wheel scrolls three lines, PgUp/PgDn work while editing, bracketed paste
+  lands cleanly, and the layout survives resizes.
+- `ui = "line"` remains the default; non-TTY runs always use it.
 ### Approval prompt (W1)
 
 - The bash confirmation is a three-line block instead of one long line: the
