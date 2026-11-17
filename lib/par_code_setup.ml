@@ -647,6 +647,8 @@ This is the LAST thing you do. The user will be asked to confirm.
                       header; without it the next section's header is read as hunk content.";
     ];
     Runtime.register_tool_call_hook rt
+      (Par_code_permissions.hook (Par_code_permissions.load ()));
+    Runtime.register_tool_call_hook rt
       (Bash_confirm.make_hook ?confirm_fn:(Some (fun cmd ->
            let extract_first_word s =
              let s = String.trim s in
@@ -682,6 +684,19 @@ This is the LAST thing you do. The user will be asked to confirm.
              with _ -> [cmd]
            in
            let full_cmd = String.concat " " argv in
+           (* v0.13.0 W1: explicit rules win over the heuristic below.
+              allow -> run without asking; deny -> refuse; ask -> fall through
+              to the normal approval path. *)
+           match
+             Par_code_permissions.decide
+               ~rules:(Par_code_permissions.load ())
+               { Hook.tool_name = "bash"; tool_call_id = "";
+                 input = (try Yojson.Safe.from_string cmd with _ -> `Null);
+                 has_ui = true }
+           with
+           | Some Par_code_permissions.Allow -> true
+           | Some Par_code_permissions.Deny -> false
+           | _ ->
            let is_safe = List.mem first_word safe_commands
              || List.exists (fun p -> String.length full_cmd >= String.length p
                  && String.sub full_cmd 0 (String.length p) = p) safe_prefixes

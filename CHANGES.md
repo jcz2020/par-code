@@ -70,6 +70,25 @@ therefore needs no restart.
 was edited on disk, `/mcp reload` reported
 `reloaded: 1 server(s), 1 tool(s); agents updated: par`, and the next turn called
 the tool: `→ echo_http ✓ (17.5ms)` returning `http-echo: http-ok`.
+## v0.13.0 — Safe and reversible (unreleased)
+
+> **Status**: In progress on `main`.
+
+### Permission rules (W1)
+
+- `~/.par/permissions.json` and `./.par/permissions.json` take a `rules` list:
+  `{"tool": "bash", "match": "git push", "action": "deny"}`. The first
+  matching rule wins; `tool` may be `*`, `match` is a case-insensitive
+  substring of the argument that matters (the command for `bash`, the path for
+  file tools) and may be omitted to match every call.
+- Actions: `allow` runs the call without asking, `deny` blocks it, `ask` (and no
+  match at all) falls through to the existing approval flow. User rules are read
+  before project rules, so an operator's deny beats a repository's allow.
+- `deny` is enforced for every tool through the tool-call hook; `allow`/`ask`
+  for `bash` are applied inside the approval decision.
+
+**Verified**: with a rule denying `touch /tmp/permission-blocked`, the turn
+showed `→ bash ✗ (0.0ms)` for that command and the file was never created.
 ## v0.10.0 — Parallel delegation (released 2026-11-14)
 
 > **Status**: Released as tag `v0.10.0` (PR #5, `62e8fb6`). The tag also carries

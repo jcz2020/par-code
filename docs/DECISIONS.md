@@ -3057,3 +3057,13 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 - **scope**：不发布任何 LSP 能力；`lsp_servers` 配置与 `lsp` 工具随分支一起搁置，main 上不存在。以后若要重做，先解决退出路径（独立 switch 或带超时的读）。
 - **rollback**：本地分支 `feat/v0.12.0-lsp` 与 `docs/DECISIONS.md` 本条记录即可恢复；路线图把 v0.12 行改回即可重新排期。
 
+
+## 2026-11-17 · v0.13 W1：用户自定义权限规则（allow / ask / deny）
+
+- **tag**：permission-rules-first-match
+- **before**：只有 bash 有一套写死的安全命令白名单 + 启发式审批，用户无法表达“这类命令一律禁止/一律放行”；其它工具没有任何拦截点。
+- **after**：`~/.par/permissions.json` 与 `./.par/permissions.json` 的 `rules` 列表按顺序匹配，**第一条命中的规则生效**；`tool` 支持 `*`，`match` 是“关键参数”的大小写不敏感子串（bash 取命令、文件工具取路径），省略则匹配所有调用。`deny` 通过 tool_call_hook 对所有工具生效；bash 的 `allow`（免询问）与 `ask`（照旧询问）在审批决策里处理。用户级规则先于项目级读入，所以运维的 deny 压过仓库的 allow。
+- **reason**：把“能做什么”从程序里写死的启发式，变成用户可读、可版本化、可审计的配置；也让危险模式（`rm -rf`、`git push`）能提前一刀切，而不是靠每次人工点确认。
+- **scope**：只做静态规则，不做“本次会话临时允许”之外的持久化授权；快照/撤销（W2）尚未开始。规则文件缺失或格式错误时按“无规则”处理，不阻断启动。
+- **rollback**：删掉两个 `permissions.json` 即回到纯启发式审批；代码侧删除 `par_code_permissions.ml` 与 setup 里的两处注册即可。
+
