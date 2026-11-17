@@ -751,7 +751,13 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
        buffer — flush first so rendered output (slash commands via render,
        which doesn't flush) appears before the next prompt overwrites the view. *)
     flush stdout;
-    let line =
+    (* linenoise raises Sys.Break itself when the user presses Ctrl+C at the
+       prompt (its C stub re-raises the registered [sys_break] exception), so
+       the exception comes from the read, not from the SIGINT handler. It has
+       to be caught HERE: [match line with exception ...] cannot see an
+       exception raised while [line] was being evaluated, and the escape ended
+       in Cmdliner's "internal error, uncaught exception: Stdlib.Sys.Break". *)
+    let read_input () =
       match screen with
       | Some s ->
         refresh_status s ~tokens:!cost.Par_code_repl_io.total_tokens;
@@ -759,9 +765,10 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
           ~prompt:(Par_code_ui.prompt_string !Par_code_mode.current)
       | None -> LNoise.linenoise (Par_code_ui.prompt_string !Par_code_mode.current)
     in
+    let line =
+      try read_input () with Sys.Break -> exit_normally ()
+    in
     match line with
-    | exception Sys.Break ->
-      exit_normally ()
     | None ->
       exit_normally ()
     | Some line ->
