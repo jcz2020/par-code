@@ -98,7 +98,7 @@ type t = {
 }
 
 let create () : t =
-  { term = Notty_unix.Term.create ();
+  { term = Notty_unix.Term.create ~mouse:true ~bpaste:true ();
     transcript = [];
     partial = "";
     status = "";
@@ -432,6 +432,8 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
     | `Home -> t.cursor <- 0
     | `End -> t.cursor <- String.length t.input
     | `Tab -> complete t
+    | `Page `Up -> t.scroll <- t.scroll + page
+    | `Page `Down -> t.scroll <- max 0 (t.scroll - page)
     | `ASCII c when ctrl ->
       (* notty delivers Ctrl-C as 'C' (0x43) with a Ctrl modifier, not 0x03. *)
       let c = if c >= 'A' && c <= 'Z' then Char.lowercase_ascii c else c in
@@ -519,6 +521,10 @@ let pump (t : t) ~(tick : t -> unit) =
     | `Key (k, mods) ->
       let _, h = Notty_unix.Term.size t.term in
       handle_key t ~page:(max 1 (h / 2)) (k, mods)
+    | `Mouse (`Press (`Scroll `Up), _, _) -> t.scroll <- t.scroll + 3
+    | `Mouse (`Press (`Scroll `Down), _, _) ->
+      t.scroll <- max 0 (t.scroll - 3)
+    | `Paste _ -> ()
     | _ -> ()
   done;
   if t.running then begin
@@ -593,7 +599,7 @@ let suspend (t : t) =
 
 let resume (t : t) =
   if t.suspended then begin
-    t.term <- Notty_unix.Term.create ();
+    t.term <- Notty_unix.Term.create ~mouse:true ~bpaste:true ();
     t.suspended <- false;
     render t
   end

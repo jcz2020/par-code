@@ -46,6 +46,31 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
     | None -> false
   in
   let is_tty = try Unix.isatty Unix.stdout with Unix.Unix_error _ -> false in
+  let git_branch =
+    try
+      let ic = Unix.open_process_in "git rev-parse --abbrev-ref HEAD 2>/dev/null" in
+      let line = try input_line ic with End_of_file -> "" in
+      ignore (Unix.close_process_in ic);
+      String.trim line
+    with _ -> ""
+  in
+  let model_name =
+    match Par_code_config.load () with Some c -> c.Par_code_config.model | None -> ""
+  in
+  let refresh_status (s : Par_code_screen.t) ~tokens =
+    let mode =
+      match !Par_code_mode.current with
+      | Par_code_mode.Build -> "build"
+      | Par_code_mode.Plan -> "plan"
+    in
+    let parts =
+      [ model_name; mode;
+        Printf.sprintf "%d tok" tokens;
+        git_branch ]
+      |> List.filter (fun x -> x <> "")
+    in
+    Par_code_screen.set_status s (String.concat " · " parts)
+  in
   let screen =
     if want_tui && is_tty then begin
       let s = Par_code_screen.create () in
@@ -727,7 +752,10 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
     flush stdout;
     let line =
       match screen with
-      | Some s -> Par_code_screen.read_line s ~prompt:(Par_code_ui.prompt_string !Par_code_mode.current)
+      | Some s ->
+        refresh_status s ~tokens:!cost.Par_code_repl_io.total_tokens;
+        Par_code_screen.read_line s
+          ~prompt:(Par_code_ui.prompt_string !Par_code_mode.current)
       | None -> LNoise.linenoise (Par_code_ui.prompt_string !Par_code_mode.current)
     in
     match line with
