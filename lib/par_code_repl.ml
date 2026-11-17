@@ -74,6 +74,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
   let screen =
     if want_tui && is_tty then begin
       let s = Par_code_screen.create () in
+      Par_code_screen.install_cleanup s;
       Par_code_ui.set_suspend_hooks
         ~suspend:(Some (fun () -> Par_code_screen.suspend s))
         ~resume:(Some (fun () -> Par_code_screen.resume s));

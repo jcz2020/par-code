@@ -95,10 +95,18 @@ type t = {
   mutable suspended : bool;
   mutable modal : modal option;
   mutable modal_answer : string option;
+  (* Terminal attributes as they were before notty took the tty. A signal
+     handler cannot safely call into notty (it can deadlock on a lock the
+     interrupted code holds), so the cleanup path restores from here. *)
+  saved_tty : Unix.terminal_io option;
 }
 
 let create () : t =
+  let saved_tty =
+    try Some (Unix.tcgetattr Unix.stdin) with Unix.Unix_error _ -> None
+  in
   { term = Notty_unix.Term.create ~mouse:true ~bpaste:true ();
+    saved_tty;
     transcript = [];
     partial = "";
     status = "";
@@ -629,6 +637,34 @@ let ask (t : t) ~(title : string) ~(body : string list)
         end
   in
   loop ()
+
+(* Kill signals do not run [at_exit], so a SIGTERM used to leave the shell in
+   raw mode with the alt screen still owned. The handler touches nothing but
+   syscalls: write the restore sequence, put the tty attributes back, then die
+   from SIGKILL (calling [exit] here would run at_exit under an interrupted
+   lock, which hangs). *)
+let restore_tty (t : t) : unit =
+  let seq =
+    "\027[?1049l\027[?25h\027[?1000l\027[?1002l\027[?1006l\027[?2004l\027[0m"
+  in
+  (try ignore (Unix.write_substring Unix.stdout seq 0 (String.length seq))
+   with Unix.Unix_error _ -> ());
+  (match t.saved_tty with
+   | Some io ->
+     (try Unix.tcsetattr Unix.stdin Unix.TCSANOW io with Unix.Unix_error _ -> ())
+   | None -> ())
+
+let install_cleanup (t : t) : unit =
+  List.iter
+    (fun (sig_ : int) ->
+       try
+         Sys.set_signal sig_
+           (Sys.Signal_handle
+              (fun _ ->
+                 restore_tty t;
+                 (try Unix.kill (Unix.getpid ()) Sys.sigkill with _ -> ())))
+       with Invalid_argument _ -> ())
+    [ Sys.sigterm; Sys.sighup ]
 
 let close (t : t) =
   t.running <- false;

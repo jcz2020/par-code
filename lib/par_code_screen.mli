@@ -66,3 +66,7 @@ val ask :
 val close : t -> unit
 (** Release the terminal (alt-screen off, cursor restored). [run] does this
     itself; call it explicitly when the caller drives [read_line] directly. *)
+
+val install_cleanup : t -> unit
+(** Release the terminal on SIGTERM/SIGHUP before exiting. [at_exit] does not run
+    for those signals, so without this the shell is left in raw mode. *)
