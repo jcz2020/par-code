@@ -41,6 +41,10 @@ type backend
     screen): one list per line, each entry a run of text with its style. *)
 val lines : image -> (string * style) list list
 
+(** Parse ANSI-styled text (the streaming markdown renderer's output) back
+    into an image. Escapes outside the SGR subset are dropped. *)
+val of_ansi : string -> image
+
 (** {1 Styles} *)
 
 (** No style — default terminal rendering. *)
