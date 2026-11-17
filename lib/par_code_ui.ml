@@ -348,10 +348,17 @@ let render_success backend msg =
    mode they stay empty and nothing changes. *)
 let suspend_hooks : (unit -> unit) option ref = ref None
 let resume_hooks : (unit -> unit) option ref = ref None
+let modal_hooks :
+  (title:string -> body:string list -> options:(string * string) list -> string option)
+    option
+  ref =
+  ref None
 
 let set_suspend_hooks ~suspend ~resume =
   suspend_hooks := suspend;
   resume_hooks := resume
+
+let set_modal_hook f = modal_hooks := f
 
 let with_terminal_released f =
   (match !suspend_hooks with Some s -> s () | None -> ());
@@ -393,11 +400,31 @@ let render_permission backend lines =
       (text first ~style:(style ~fg:Yellow ~bold:true ()));
     List.iter (fun l -> render_line backend (text l)) rest
 
+(* v0.14.0 S3: a question goes to the in-frame modal when the TUI installed
+   one; otherwise it falls back to rendered lines plus the /dev/tty read. *)
+let prompt_permission ?(backend=create_backend ()) ~(command : string)
+    ~(reason : string) ~(always_pattern : string) () : string option =
+  let lines = permission_lines ~command ~reason ~always_pattern in
+  match !modal_hooks with
+  | Some ask ->
+    ask ~title:"bash approval" ~body:lines
+      ~options:
+        [ ("y", "run once"); ("a", "always " ^ always_pattern);
+          ("n", "deny") ]
+  | None ->
+    render_permission backend lines;
+    prompt_read ~backend ()
+
 let prompt_confirm ?(backend=create_backend ()) ?style msg =
-  (match style with
-   | Some s -> render backend (text ~style:s msg)
-   | None -> render backend (text msg));
-  prompt_read ~backend ()
+  match !modal_hooks with
+  | Some ask ->
+    ask ~title:"confirm" ~body:[ String.trim msg ]
+      ~options:[ ("y", "yes"); ("n", "no") ]
+  | None ->
+    (match style with
+     | Some s -> render backend (text ~style:s msg)
+     | None -> render backend (text msg));
+    prompt_read ~backend ()
 
 (* B. LLM chunk rendering *)
 

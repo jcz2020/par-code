@@ -157,6 +157,24 @@ val permission_lines :
 
 val render_permission : backend -> string list -> unit
 
+val set_modal_hook :
+  (title:string -> body:string list -> options:(string * string) list ->
+   string option)
+  option ->
+  unit
+(** Install the in-frame modal. When set, [prompt_permission] asks through it
+    instead of reading /dev/tty. *)
+
+val prompt_permission :
+  ?backend:backend ->
+  command:string ->
+  reason:string ->
+  always_pattern:string ->
+  unit ->
+  string option
+(** Ask whether a bash command may run. Returns the key the user chose
+    (["y"], ["a"], ["n"]) or [None]. *)
+
 val set_suspend_hooks :
   suspend:(unit -> unit) option -> resume:(unit -> unit) option -> unit
 (** Install terminal suspend/resume hooks so a /dev/tty modal can run while the

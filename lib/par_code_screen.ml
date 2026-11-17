@@ -69,6 +69,12 @@ let attr_of_style (s : Par_code_ui.style) : Notty.A.t =
 (* Screen state                                                        *)
 (* ------------------------------------------------------------------ *)
 
+type modal = {
+  title : string;
+  body : string list;
+  options : (string * string) list;  (* key, label *)
+}
+
 type t = {
   mutable term : Notty_unix.Term.t;
   mutable transcript : Notty.image list;  (* oldest first *)
@@ -87,6 +93,8 @@ type t = {
   mutable editing : bool;          (* keys go to the input line *)
   mutable last_ctrl_c : float option;
   mutable suspended : bool;
+  mutable modal : modal option;
+  mutable modal_answer : string option;
 }
 
 let create () : t =
@@ -105,7 +113,9 @@ let create () : t =
     submitted = None;
     editing = false;
     last_ctrl_c = None;
-    suspended = false }
+    suspended = false;
+    modal = None;
+    modal_answer = None }
 
 let to_notty_lines (img : Par_code_ui.image) : Notty.image list =
   let open Notty in
@@ -332,6 +342,36 @@ let frame (t : t) : Notty.image =
          [ I.string A.(st reverse) " par "
            ; I.string A.empty (" " ^ t.status ^ scroll_hint ^ hint) ])
   in
+  let body =
+    match t.modal with
+    | None -> body
+    | Some m ->
+      (* Box drawn over the body area: title, content, key legend. *)
+      let inner_w = min (max 32 (w - 12)) 84 in
+      let border l r =
+        I.string A.empty (l ^ String.concat "" (List.init inner_w (fun _ -> "─")) ^ r)
+      in
+      (* Pad by display width, not bytes: "⚠" is one column but three bytes, and
+         manual padding made the right border ragged. *)
+      let row s =
+        I.hcat
+          [ I.string A.empty "│"
+            ; I.hsnap ~align:`Left inner_w (I.string A.(st bold) s)
+            ; I.string A.empty "│" ]
+      in
+      let legend =
+        String.concat "   " (List.map (fun (k, label) -> k ^ ": " ^ label) m.options)
+      in
+      let content =
+        I.vcat
+          (border "┌" "┐"
+           :: [ row (" " ^ m.title) ]
+           @ [ border "├" "┤" ]
+           @ List.map (fun l -> row (" " ^ l)) m.body
+           @ [ row (" " ^ legend); border "└" "┘" ])
+      in
+      I.vsnap ~align:`Middle body_h (I.hsnap ~align:`Middle w content)
+  in
   I.vsnap ~align:`Top body_h body <-> input_line <-> status
 
 (** v0.14.0 S2: Ctrl-C follows Claude Code — with input it clears the line, with
@@ -355,6 +395,26 @@ let ctrl_c (t : t) =
 
 let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
   let ctrl = List.mem `Ctrl mods in
+  match t.modal with
+  | Some modal ->
+    (* A modal owns the keyboard: only its keys, Esc, and Ctrl-C matter. *)
+    let key =
+      match k with
+      | `Escape -> Some ""
+      | `ASCII c ->
+        let c = if c >= 'A' && c <= 'Z' then Char.lowercase_ascii c else c in
+        Some (String.make 1 c)
+      | _ -> None
+    in
+    (match key with
+     | Some "" ->
+       t.modal_answer <- None;
+       t.modal <- None
+     | Some k when List.mem_assoc k modal.options ->
+       t.modal_answer <- Some k;
+       t.modal <- None
+     | _ -> ignore ctrl)
+  | None ->
   if t.editing then
     match k with
     | `Enter ->
@@ -496,6 +556,27 @@ let read_line (t : t) ~(prompt : string) : string option =
   loop ()
 
 let stop (t : t) = t.running <- false
+
+(* In-frame modal. Returns the chosen key, or None on Esc. *)
+let ask (t : t) ~(title : string) ~(body : string list)
+    ~(options : (string * string) list) : string option =
+  t.modal <- Some { title; body; options };
+  t.modal_answer <- None;
+  let rec loop () =
+    if not t.running then None
+    else
+      match t.modal_answer with
+      | Some k ->
+        t.modal_answer <- None;
+        Some k
+      | None ->
+        if t.modal = None then None
+        else begin
+          pump t ~tick:(fun _ -> ());
+          loop ()
+        end
+  in
+  loop ()
 
 let close (t : t) =
   t.running <- false;

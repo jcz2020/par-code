@@ -52,6 +52,9 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
       Par_code_ui.set_suspend_hooks
         ~suspend:(Some (fun () -> Par_code_screen.suspend s))
         ~resume:(Some (fun () -> Par_code_screen.resume s));
+      Par_code_ui.set_modal_hook
+        (Some (fun ~title ~body ~options ->
+             Par_code_screen.ask s ~title ~body ~options));
       Some s
     end else None
   in

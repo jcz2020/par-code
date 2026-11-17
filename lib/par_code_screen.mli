@@ -54,6 +54,15 @@ val suspend : t -> unit
 val resume : t -> unit
 (** Recreate the terminal and repaint after {!suspend}. *)
 
+val ask :
+  t ->
+  title:string ->
+  body:string list ->
+  options:(string * string) list ->
+  string option
+(** In-frame modal: returns the key the user pressed (a member of [options]),
+    or [None] when Esc dismisses it. Blocks until answered. *)
+
 val close : t -> unit
 (** Release the terminal (alt-screen off, cursor restored). [run] does this
     itself; call it explicitly when the caller drives [read_line] directly. *)
