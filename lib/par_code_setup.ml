@@ -9,8 +9,19 @@
 
 open Par
 
-let ui = lazy (Par_code_ui.create_backend ())
-let ui_render_error msg = Par_code_ui.render_error (Lazy.force ui) msg
+(* PAR's bash tool runs an argv array directly, with no shell, and its policy
+   rejects command substitution before the command runs. The model does not
+   know that from the tool schema, so it keeps writing `bash -lc "$(...)"` and
+   burning turns on calls that can only be refused; every turn carries this
+   short contract as a system-prompt appendix. *)
+let bash_tool_contract =
+  "## Bash tool\n\n\
+   The `bash` tool runs an argv array directly, with no shell. Do not wrap \
+   commands in `sh -c` or `bash -lc`, and do not use `$(...)`, backticks, \
+   `eval`, pipes or redirection: the tool's policy rejects those calls before \
+   anything runs. One command per call; use read/write/edit/grep for file work."
+
+let ui = lazy (Par_code_ui.create_backend ())let ui_render_error msg = Par_code_ui.render_error (Lazy.force ui) msg
 let ui_render_warning msg = Par_code_ui.render_warning (Lazy.force ui) msg
 let ui_render_notice msg = Par_code_ui.render_notice (Lazy.force ui) msg
 let ui_render msg = Par_code_ui.render (Lazy.force ui) msg

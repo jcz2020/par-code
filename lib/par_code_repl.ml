@@ -394,12 +394,18 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                 | Some m, Some p, Some g -> Some (m ^ p ^ g)
               in
                let turn_appendix =
-                 match combined_appendix, skill_appendix with
-                 | None, None -> None
-                 | Some a, None -> Some a
-                 | None, Some s -> Some ("## Skill Instructions\n\n" ^ s)
-                 | Some a, Some s ->
-                   Some (a ^ "\n\n## Skill Instructions\n\n" ^ s)
+                 let rest =
+                   match combined_appendix, skill_appendix with
+                   | None, None -> None
+                   | Some a, None -> Some a
+                   | None, Some s -> Some ("## Skill Instructions\n\n" ^ s)
+                   | Some a, Some s ->
+                     Some (a ^ "\n\n## Skill Instructions\n\n" ^ s)
+                 in
+                 Some
+                   (match rest with
+                    | None -> Par_code_setup.bash_tool_contract
+                    | Some r -> Par_code_setup.bash_tool_contract ^ "\n\n" ^ r)
                in
                let mode_before_invoke = !Par_code_mode.current in
                invoke_start_time := Unix.gettimeofday ();
@@ -616,7 +622,11 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                   if not !streamed_text then begin
                     (match resp.Types.text with
                      | Some text when text <> "" ->
-                       Par_code_ui.render ui (Par_code_ui.text text)
+                       (* Not streamed, but the answer is still markdown: run it
+                          through the same renderer so `**bold**`, headings and
+                          tables come out styled instead of raw. *)
+                       Par_code_ui.render_llm_chunk ui (Par.Types.Text_delta { text });
+                       Par_code_ui.flush_markdown ui
                      | Some _ | None ->
                        let reason = match resp.Types.finish_reason with
                          | Types.Content_filter -> " (content filter)"
@@ -1451,7 +1461,11 @@ let run_single_shot (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) 
      ~on_tool_event:(make_tool_event_callback ui ~rt ())
      ~on_chunk:(Some stream_cb)
      ~enable_handoff:true
-     ?system_prompt_appendix:memory_appendix
+     ?system_prompt_appendix:
+       (Some
+          (match memory_appendix with
+           | Some m -> Par_code_setup.bash_tool_contract ^ "\n\n" ^ m
+           | None -> Par_code_setup.bash_tool_contract))
      ~durable:true
      () with
    | Error (e, _) ->
@@ -1463,7 +1477,8 @@ let run_single_shot (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) 
        if not !streamed_text then begin
          (match resp.Types.text with
           | Some text when text <> "" ->
-            Par_code_ui.render ui (Par_code_ui.text text)
+            Par_code_ui.render_llm_chunk ui (Par.Types.Text_delta { text });
+            Par_code_ui.flush_markdown ui
           | Some _ | None ->
             let reason = match resp.Types.finish_reason with
               | Types.Content_filter -> " (content filter)"
