@@ -31,7 +31,23 @@ val line_count : t -> int
 (** Lines currently in the transcript (for tests and the status bar). *)
 
 val run : t -> tick:(t -> unit) -> unit
-(** Frame loop: drain keys, call [tick], render. Keys: q quits, j/k and
-    Up/Down scroll one line, PgUp/PgDn a page, g returns to the bottom. *)
+(** Frame loop: drain keys, call [tick], render. In browsing mode q quits and
+    j/k, Up/Down, PgUp/PgDn scroll. *)
+
+val read_line : t -> prompt:string -> string option
+(** Read one line through the frame (cursor, history, Tab completion). [None]
+    means the screen was closed. An empty string means the line was cancelled
+    (Ctrl-C). *)
+
+val pump : t -> tick:(t -> unit) -> unit
+(** One UI pass; useful from streaming callbacks that need to repaint while an
+    agent turn is blocked in [invoke]. *)
+
+val render : t -> unit
+
 
 val stop : t -> unit
+
+val close : t -> unit
+(** Release the terminal (alt-screen off, cursor restored). [run] does this
+    itself; call it explicitly when the caller drives [read_line] directly. *)

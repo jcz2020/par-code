@@ -77,6 +77,14 @@ type t = {
   mutable scroll : int;                   (* lines up from the bottom *)
   mutable running : bool;
   mutable last_key : string;
+  (* v0.14.0 S2: the input line. *)
+  mutable input : string;
+  mutable cursor : int;                   (* byte offset into [input] *)
+  mutable prompt : string;
+  mutable history : string list;          (* newest first *)
+  mutable hist_pos : int option;
+  mutable submitted : string option;
+  mutable editing : bool;          (* keys go to the input line *)
 }
 
 let create () : t =
@@ -86,7 +94,14 @@ let create () : t =
     status = "";
     scroll = 0;
     running = true;
-    last_key = "" }
+    last_key = "";
+    input = "";
+    cursor = 0;
+    prompt = "> ";
+    history = [];
+    hist_pos = None;
+    submitted = None;
+    editing = false }
 
 let to_notty_lines (img : Par_code_ui.image) : Notty.image list =
   let open Notty in
@@ -142,6 +157,133 @@ let set_status (t : t) (s : string) = t.status <- s
 let line_count (t : t) = List.length t.transcript
 
 (* ------------------------------------------------------------------ *)
+(* Input line                                                          *)
+(* ------------------------------------------------------------------ *)
+
+let set_prompt (t : t) (p : string) = t.prompt <- p
+
+let put_back (t : t) (s : string) =
+  t.input <- String.sub t.input 0 t.cursor ^ s
+             ^ String.sub t.input t.cursor (String.length t.input - t.cursor);
+  t.cursor <- t.cursor + String.length s
+
+let delete_back (t : t) =
+  if t.cursor > 0 then begin
+    (* step back one UTF-8 codepoint, not one byte *)
+    let i = ref (t.cursor - 1) in
+    while !i > 0 && Char.code t.input.[!i] land 0xC0 = 0x80 do decr i done;
+    t.input <- String.sub t.input 0 !i
+               ^ String.sub t.input t.cursor (String.length t.input - t.cursor);
+    t.cursor <- !i
+  end
+
+let delete_forward (t : t) =
+  if t.cursor < String.length t.input then begin
+    let j = ref (t.cursor + 1) in
+    while !j < String.length t.input && Char.code t.input.[!j] land 0xC0 = 0x80 do
+      incr j
+    done;
+    t.input <- String.sub t.input 0 t.cursor
+               ^ String.sub t.input !j (String.length t.input - !j)
+  end
+
+let move_left (t : t) =
+  if t.cursor > 0 then begin
+    let i = ref (t.cursor - 1) in
+    while !i > 0 && Char.code t.input.[!i] land 0xC0 = 0x80 do decr i done;
+    t.cursor <- !i
+  end
+
+let move_right (t : t) =
+  if t.cursor < String.length t.input then begin
+    let j = ref (t.cursor + 1) in
+    while !j < String.length t.input && Char.code t.input.[!j] land 0xC0 = 0x80 do
+      incr j
+    done;
+    t.cursor <- !j
+  end
+
+let kill_to_start (t : t) =
+  t.input <- String.sub t.input t.cursor (String.length t.input - t.cursor);
+  t.cursor <- 0
+
+let kill_to_end (t : t) = t.input <- String.sub t.input 0 t.cursor
+
+let kill_word (t : t) =
+  let i = ref t.cursor in
+  while !i > 0 && t.input.[!i - 1] = ' ' do decr i done;
+  while !i > 0 && t.input.[!i - 1] <> ' ' do decr i done;
+  t.input <- String.sub t.input 0 !i
+             ^ String.sub t.input t.cursor (String.length t.input - t.cursor);
+  t.cursor <- !i
+
+(* Completion candidates: slash commands, skill ids, and flow ids after
+   "/flow run ". Shared with the REPL so the list cannot drift. *)
+let all_commands () =
+  List.map fst Par_code_ui.commands
+  @ List.map
+      (fun (e : Par_code_skills.entry) -> "/" ^ e.descriptor.id)
+      (Par_code_skills.list_custom ())
+
+let complete (t : t) =
+  let text = t.input in
+  let starts_with ~prefix s =
+    String.length s >= String.length prefix
+    && String.sub s 0 (String.length prefix) = prefix
+  in
+  let candidates =
+    match String.split_on_char ' ' text with
+    | [ partial ] when partial <> "" && partial.[0] = '/' ->
+      List.filter (starts_with ~prefix:partial) (all_commands ())
+    | [ "/flow"; "run"; partial ] ->
+      List.filter (starts_with ~prefix:partial) (Par_code_flow.available ())
+    | _ -> []
+  in
+  (* Several candidates: complete to their longest common prefix, the same
+     behaviour a shell gives, instead of dumping a list over the frame. *)
+  let common_prefix xs =
+    match xs with
+    | [] -> ""
+    | first :: rest ->
+      let rec lcp a b i =
+        if i >= String.length a || i >= String.length b || a.[i] <> b.[i]
+        then String.sub a 0 i
+        else lcp a b (i + 1)
+      in
+      List.fold_left (fun acc s -> lcp acc s 0) first rest
+  in
+  match candidates with
+  | [ one ] ->
+    t.input <- one;
+    t.cursor <- String.length one
+  | [] -> ()
+  | many ->
+    let prefix = common_prefix many in
+    if String.length prefix > String.length t.input then begin
+      t.input <- prefix;
+      t.cursor <- String.length prefix
+    end
+
+let history_push (t : t) (line : string) =
+  if String.trim line <> "" then begin
+    t.history <- line :: List.filter (fun h -> h <> line) t.history;
+    t.history <- List.filteri (fun i _ -> i < 200) t.history
+  end;
+  t.hist_pos <- None
+
+let history_move (t : t) (delta : int) =
+  let n = List.length t.history in
+  if n > 0 then begin
+    let pos =
+      match t.hist_pos with Some p -> p | None -> if delta > 0 then -1 else 0
+    in
+    let pos = max 0 (min (n - 1) (pos + delta)) in
+    t.hist_pos <- Some pos;
+    t.input <- List.nth t.history pos;
+    t.cursor <- String.length t.input
+  end
+
+(* ------------------------------------------------------------------ *)
 (* Frame                                                               *)
 (* ------------------------------------------------------------------ *)
 
@@ -161,70 +303,170 @@ let frame (t : t) : Notty.image =
   let open Notty in
   let open Notty.I in
   let w, h = Notty_unix.Term.size t.term in
+  let input_h = 1 in
   let status_h = 1 in
-  let body_h = max 1 (h - status_h) in
+  let body_h = max 1 (h - input_h - status_h) in
   let body = I.vcat (visible_lines t ~height:body_h) in
-  let scroll_hint =
-    if t.scroll = 0 then "" else Printf.sprintf " ↑%d " t.scroll
+  let input_line =
+    let before = String.sub t.input 0 t.cursor in
+    let after = String.sub t.input t.cursor (String.length t.input - t.cursor) in
+    I.hsnap ~align:`Left w
+      (I.hcat
+         [ I.string A.(st bold) (t.prompt ^ before)
+           ; I.string A.(st reverse) (if after = "" then " " else String.sub after 0 1)
+           ; I.string A.empty
+               (if String.length after > 1 then String.sub after 1 (String.length after - 1)
+                else "") ])
   in
   let status =
     let hint =
       if t.last_key = "" then "" else Printf.sprintf "  [%s]" t.last_key
     in
+    let scroll_hint = if t.scroll = 0 then "" else Printf.sprintf " ↑%d" t.scroll in
     I.hsnap ~align:`Left w
       (I.hcat
          [ I.string A.(st reverse) " par "
            ; I.string A.empty (" " ^ t.status ^ scroll_hint ^ hint) ])
   in
-  I.vsnap ~align:`Top body_h body <-> status
+  I.vsnap ~align:`Top body_h body <-> input_line <-> status
 
-let handle_key (t : t) ~(page : int) (k : Notty.Unescape.key) =
-  match k with
-  | (`ASCII ('q' | 'Q'), _) -> t.running <- false
-  | (`ASCII 'j', _) -> t.scroll <- max 0 (t.scroll - 1)
-  | (`ASCII 'k', _) -> t.scroll <- t.scroll + 1
-  | (`ASCII 'g', _) -> t.scroll <- 0
-  | `Arrow `Up, _ -> t.scroll <- t.scroll + 1
-  | `Arrow `Down, _ -> t.scroll <- max 0 (t.scroll - 1)
-  | `Page `Up, _ -> t.scroll <- t.scroll + page
-  | `Page `Down, _ -> t.scroll <- max 0 (t.scroll - page)
-  | (k, _) ->
-    t.last_key <-
-      (match k with
-       | `ASCII c -> String.make 1 c
-       | `Uchar u -> Printf.sprintf "U+%04X" (Uchar.to_int u)
-       | _ -> "special")
+let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
+  let ctrl = List.mem `Ctrl mods in
+  if t.editing then
+    match k with
+    | `Enter ->
+      t.submitted <- Some t.input;
+      t.editing <- false
+    | `Backspace -> delete_back t
+    | `Delete -> delete_forward t
+    | `Arrow `Left -> move_left t
+    | `Arrow `Right -> move_right t
+    | `Arrow `Up -> history_move t 1
+    | `Arrow `Down -> history_move t (-1)
+    | `Home -> t.cursor <- 0
+    | `End -> t.cursor <- String.length t.input
+    | `Tab -> complete t
+    | `ASCII c when ctrl ->
+      (match c with
+       | 'a' -> t.cursor <- 0
+       | 'e' -> t.cursor <- String.length t.input
+       | 'u' -> kill_to_start t
+       | 'k' -> kill_to_end t
+       | 'w' -> kill_word t
+       | 'c' | '\003' ->
+         (* Ctrl-C cancels the line without submitting it. *)
+         t.input <- "";
+         t.cursor <- 0;
+         t.submitted <- Some ""
+       | _ -> ())
+    | `ASCII c ->
+      (* Control keys arrive as bare ASCII codes (Tab = 0x09, Ctrl-C = 0x03),
+         not as a modified key: normalize them here. *)
+      (match c with
+       | '\t' -> complete t
+       | '\003' ->
+         t.input <- "";
+         t.cursor <- 0;
+         t.submitted <- Some ""
+       | '\001' -> t.cursor <- 0
+       | '\005' -> t.cursor <- String.length t.input
+       | '\021' -> kill_to_start t
+       | '\013' -> kill_to_end t
+       | '\023' -> kill_word t
+       | _ when Char.code c < 0x20 ->
+         t.last_key <- Printf.sprintf "ctrl-0x%02X" (Char.code c)
+       | _ -> put_back t (String.make 1 c))
+    | `Uchar u ->
+      let b = Buffer.create 4 in
+      let s = Uchar.to_int u in
+      let add c = Buffer.add_char b (Char.chr c) in
+      if s < 0x80 then add s
+      else if s < 0x800 then begin
+        add (0xC0 lor (s lsr 6));
+        add (0x80 lor (s land 0x3F))
+      end else if s < 0x10000 then begin
+        add (0xE0 lor (s lsr 12));
+        add (0x80 lor ((s lsr 6) land 0x3F));
+        add (0x80 lor (s land 0x3F))
+      end else begin
+        add (0xF0 lor (s lsr 18));
+        add (0x80 lor ((s lsr 12) land 0x3F));
+        add (0x80 lor ((s lsr 6) land 0x3F));
+        add (0x80 lor (s land 0x3F))
+      end;
+      put_back t (Buffer.contents b)
+    | _ -> ()
+  else
+    match k with
+    | `ASCII ('q' | 'Q') -> t.running <- false
+    | `ASCII 'j' -> t.scroll <- max 0 (t.scroll - 1)
+    | `ASCII 'k' -> t.scroll <- t.scroll + 1
+    | `ASCII 'g' -> t.scroll <- 0
+    | `Arrow `Up -> t.scroll <- t.scroll + 1
+    | `Arrow `Down -> t.scroll <- max 0 (t.scroll - 1)
+    | `Page `Up -> t.scroll <- t.scroll + page
+    | `Page `Down -> t.scroll <- max 0 (t.scroll - page)
+    | _ ->
+      t.last_key <-
+        (match k with
+         | `ASCII c -> String.make 1 c
+         | `Uchar u -> Printf.sprintf "U+%04X" (Uchar.to_int u)
+         | _ -> "special")
 
 let render (t : t) = Notty_unix.Term.image t.term (frame t)
 
-(* ------------------------------------------------------------------ *)
-(* Loop                                                                *)
-(* ------------------------------------------------------------------ *)
+(* One pass of the UI loop: drain input, let [tick] update state, render. *)
+let pump (t : t) ~(tick : t -> unit) =
+  let read_fd, _ = Notty_unix.Term.fds t.term in
+  let input_ready () =
+    let r, _, _ = Unix.select [ read_fd ] [] [] 0.0 in
+    r <> []
+  in
+  while t.running && (Notty_unix.Term.pending t.term || input_ready ()) do
+    match Notty_unix.Term.event t.term with
+    | `End -> t.running <- false
+    | `Resize _ -> ()
+    | `Key (k, mods) ->
+      let _, h = Notty_unix.Term.size t.term in
+      handle_key t ~page:(max 1 (h / 2)) (k, mods)
+    | _ -> ()
+  done;
+  if t.running then begin
+    tick t;
+    render t;
+    Unix.sleepf 0.05
+  end
 
 let run (t : t) ~(tick : t -> unit) : unit =
   Fun.protect
     ~finally:(fun () -> Notty_unix.Term.release t.term)
-    (fun () ->
-       let read_fd, _ = Notty_unix.Term.fds t.term in
-       let input_ready () =
-         let r, _, _ = Unix.select [ read_fd ] [] [] 0.0 in
-         r <> []
-       in
-       while t.running do
-         while t.running && (Notty_unix.Term.pending t.term || input_ready ()) do
-           match Notty_unix.Term.event t.term with
-           | `End -> t.running <- false
-           | `Resize _ -> ()
-           | `Key (k, mods) ->
-             let _, h = Notty_unix.Term.size t.term in
-             handle_key t ~page:(max 1 (h / 2)) (k, mods)
-           | _ -> ()
-         done;
-         if t.running then begin
-           tick t;
-           render t;
-           Unix.sleepf 0.05
-         end
-       done)
+    (fun () -> while t.running do pump t ~tick done)
+
+(* Read one line through the frame. Returns [None] when the screen is closing. *)
+let read_line (t : t) ~(prompt : string) : string option =
+  set_prompt t prompt;
+  t.input <- "";
+  t.cursor <- 0;
+  t.submitted <- None;
+  t.scroll <- 0;
+  t.editing <- true;
+  let rec loop () =
+    if not t.running then None
+    else
+      match t.submitted with
+      | Some line ->
+        t.editing <- false;
+        t.submitted <- None;
+        history_push t line;
+        Some line
+      | None ->
+        pump t ~tick:(fun _ -> ());
+        loop ()
+  in
+  loop ()
 
 let stop (t : t) = t.running <- false
+
+let close (t : t) =
+  t.running <- false;
+  Notty_unix.Term.release t.term
