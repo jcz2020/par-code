@@ -657,7 +657,7 @@ let update_field ~field ~value =
          Printf.eprintf "Invalid bash_approval '%s'. Use 'ask', 'auto_project', or 'always'.\n" other;
          exit 1)
     | "max_mode" -> { cfg with max_mode = parse_bool value }
-    | "max_candidates" ->
+    | "snapshot_enabled" -> { cfg with snapshot_enabled = parse_bool value }    | "max_candidates" ->
       (match int_of_string_opt (String.trim value) with
        | Some n when n >= 2 && n <= 5 -> { cfg with max_candidates = n }
        | Some _ ->
@@ -665,6 +665,12 @@ let update_field ~field ~value =
          exit 1
        | None ->
          Printf.eprintf "Invalid value for max_candidates: expected int, got '%s'\n" value;
+         exit 1)
+    | "ui" ->
+      (match String.lowercase_ascii (String.trim value) with
+       | "tui" | "line" as v -> { cfg with ui = v }
+       | other ->
+         Printf.eprintf "Invalid ui '%s'. Use 'line' or 'tui'.\n" other;
          exit 1)
     (* ── Excluded ── *)
     | "system_prompt" ->
@@ -687,8 +693,8 @@ let update_field ~field ~value =
           "judge_enabled"; "judge_model"; "judge_provider";
           "max_iterations"; "max_tokens"; "model";
           "parallel_tool_execution"; "persistence"; "planner_max_iterations";
-          "provider";
-          "system_prompt"; "temperature"; "top_p" ];
+          "provider"; "snapshot_enabled";
+          "system_prompt"; "temperature"; "top_p"; "ui" ];
       exit 1
   in
   save updated;
@@ -736,5 +742,7 @@ let show ?(ui=Par_code_ui.create_backend ()) (cfg : config) =
     line "bash_approval:" cfg.bash_approval;
     line "max_mode:" (string_of_bool cfg.max_mode);
     line "max_candidates:" (string_of_int cfg.max_candidates);
+    line "ui:" cfg.ui;
+    line "snapshot_enabled:" (string_of_bool cfg.snapshot_enabled);
   ] in
   render_line ui image
