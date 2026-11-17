@@ -3028,3 +3028,12 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 - **reason**：把"能拉远程"和"能信远程"分开 —— 远程内容是不可信输入，所以只接受 markdown + frontmatter，id 必须匹配 `[a-z0-9-]` 且不撞内置命令/内置 skill，路径由 id 决定，下载无法写到缓存目录之外；单文件上限 256 KiB，超限/解析失败只报错不落盘，失败时保留旧缓存而不是删掉。
 - **scope**：只做"取一份 skill.md"这一种形态；index/manifest、签名校验、私有源鉴权都不在本切片。网络上下文由 setup 注入（`Eio` 的 brand 参数放不进模块级 ref，按 SDK 自己的做法用 `Obj.repr` 存、用时 `Obj.obj` 取回）。
 - **rollback**：把 `skill_sources` 清空即可；缓存目录可整个删除，不影响本地 skill。
+## 2026-11-17 · SDK 0.17：热重载与 skill 原位替换，HTTP 仍缺 jsonrpc 字段
+
+- **tag**：sdk-0.17-reload-and-skill-replace
+- **before**：SDK 0.16.2 下改 `mcp_servers` 或 skill frontmatter 都要重启；HTTP MCP 传输不可用（#35/#37）。
+- **after**：pin 升到 `v0.17.0-beta.20261117`。`/mcp reload` 走 `Runtime.reload_mcp_servers`（按 server_name 声明式对账，同名改 URL/command 立即生效）；`/skills reload` 检测到 frontmatter 漂移时走 `Runtime.replace_skill`，不再提示“重启后生效”。
+- **reason**：上游 0.16.3 修好了 HTTP 传输的报文/SSE/chunked，0.17.0 补了 reload 与 replace 两个 API。实测 `/mcp reload` 输出 `reloaded: 1 server(s), 1 tool(s)`，`/skills reload` 输出 `frontmatter changed (description); binding replaced`。
+- **scope**：**新增/移除服务器仍要重启** —— reload 只返回 descriptor，SDK 没有公开 MCP `tool_binding` 的取法，`update_agent_tools` 装不进去（`jcz2020/par#39`，`/mcp reload` 会把这条提示打出来）。**HTTP MCP 对严格服务器仍不可用** —— SDK 的 JSON-RPC 请求体缺 `"jsonrpc":"2.0"`，官方 Python server 直接 400；我用 curl 复现了“缺字段 400 / 有字段 200”，并从 `mcp_types.ml:337` 的 `request_to_yojson` 确认只发 id/method/params（`jcz2020/par#38`）。
+- **rollback**：pin 退回 `v0.16.2-beta.20261114` 并回滚两处调用即可；`/mcp reload` 与 `/skills reload` 的旧行为（提示重启）仍在注释里可恢复。
+

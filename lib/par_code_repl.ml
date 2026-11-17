@@ -952,7 +952,44 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                      orphans := List.filter (fun (o, _) -> o <> id) !orphans)));
             loop ()
           | "/mcp" ->
-            let running = Runtime.mcp_servers rt in
+            let rest =
+              if String.length trimmed > 4 then
+                String.trim (String.sub trimmed 4 (String.length trimmed - 4))
+              else ""
+            in
+            if rest = "reload" then begin
+              let servers =
+                match Par_code_config.load () with
+                | Some (c : Par_code_config.config) -> c.mcp_servers
+                | None -> []
+              in
+              let names_of tools =
+                List.map (fun (d : Par.Types.tool_descriptor) -> d.name) tools
+              in
+              let before = names_of (Runtime.mcp_tool_descriptors rt) in
+              (match Runtime.reload_mcp_servers rt ~servers with
+               | Error e ->
+                 Par_code_ui.render_error ui
+                   (Printf.sprintf "[mcp] reload failed: %s"
+                      (Par_code_setup.error_to_string e))
+               | Ok descriptors ->
+                 let after = names_of descriptors in
+                 let added = List.filter (fun n -> not (List.mem n before)) after in
+                 let removed = List.filter (fun n -> not (List.mem n after)) before in
+                 let servers_now = ref 0 in
+                 Par.Types.htbl_iter (Runtime.mcp_servers rt) (fun _ _ -> incr servers_now);
+                 Par_code_ui.render_notice ui
+                   (Printf.sprintf "[mcp] reloaded: %d server(s), %d tool(s)"
+                      !servers_now (List.length after));
+                 if added <> [] || removed <> [] then
+                   Par_code_ui.render_warning ui
+                     (Printf.sprintf
+                        "[mcp] the tool set changed (added: [%s], removed: [%s]); \
+                         the agent's tool list is fixed at startup, so restart \
+                         par to expose them (jcz2020/par#39)"
+                        (String.concat ", " added) (String.concat ", " removed)))
+            end else begin
+              let running = Runtime.mcp_servers rt in
             let rows = ref [] in
             Par.Types.htbl_iter running (fun id srv -> rows := (id, srv) :: !rows);
             let tools = Runtime.mcp_tool_descriptors rt in
@@ -984,8 +1021,10 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
               Par_code_ui.render_notice ui
                 "Config changes need a restart: the SDK binds MCP tools at \
                  startup."
+            end
             end;
             loop ()
+
           | "/flow" ->
             let rest =
               if String.length trimmed > 5 then

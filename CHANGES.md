@@ -45,6 +45,28 @@ startup, listed as `/remote-demo … [remote]`, and `/remote-demo obey` answered
 `MCP tools (1): echo`, and a real provider turn called the tool end to end
 (`→ echo ✓ (0.0ms)` → `The echo tool returned "mcp-ok"`).
 
+### MCP reload and in-place skill replacement (SDK 0.17)
+
+- PAR pin moves to `v0.17.0-beta.20261117`; 0.16.3 restored the HTTP transport
+  (headers, chunked bodies, `text/event-stream`) and 0.17.0 added
+  `Runtime.reload_mcp_servers`, `Runtime.replace_skill`,
+  `Runtime.unregister_skill`.
+- `/mcp reload` re-reads `mcp_servers` and reconciles: an unchanged server keeps
+  its instance, a changed or new one is spawned, a removed one is stopped. A
+  changed URL/command for an existing name therefore applies without a restart.
+- `/skills reload` now calls `Runtime.replace_skill` when a skill's frontmatter
+  drifted, so a rewritten prompt override, tool filter or trigger takes effect
+  instead of waiting for a restart.
+
+**Known limit**: adding or removing a *server* still needs a restart — the SDK
+returns descriptors from a reload but exposes no accessor for the matching
+`tool_binding`s, so `update_agent_tools` cannot install them (`jcz2020/par#39`).
+The reload reports this explicitly.
+
+**Open upstream defect**: HTTP MCP against spec-compliant servers still fails —
+the SDK's JSON-RPC requests omit the `"jsonrpc":"2.0"` member, and a strict
+server answers `400` (`jcz2020/par#38`, reproduced with the official Python
+`mcp` server: same body without the member -> 400, with it -> 200).
 ## v0.10.0 — Parallel delegation (released 2026-11-14)
 
 > **Status**: Released as tag `v0.10.0` (PR #5, `62e8fb6`). The tag also carries

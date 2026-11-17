@@ -155,7 +155,8 @@ let test_write_and_read () =
       (try Unix.mkdir user 0o700 with
        | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
       let entries, errs =
-        Par_code_skills.scan ~project_dir:base ~user_dir:user ()
+        Par_code_skills.scan ~project_dir:base ~user_dir:user
+          ~remote_dir:(Filename.concat (Filename.dirname base) "no-remote") ()
       in
       Alcotest.(check int) "one entry" 1 (List.length entries);
       Alcotest.(check int) "no parse errors" 0 (List.length errs);

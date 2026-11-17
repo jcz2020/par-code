@@ -275,24 +275,30 @@ let discover_and_register ~(rt : Runtime.runtime)
            registered := e :: !registered
          | Error err ->
            if already_registered rt id then begin
-             (* /skills reload: keep the fresh descriptor for body/description
-                reads; the runtime binding's frontmatter changes need a restart
-                because the SDK exposes no unregister/replace via Runtime.
-                Only report a problem when the frontmatter actually drifted —
-                an unchanged skill must reload silently. *)
+             (* /skills reload: PAR 0.17 can replace a binding in place, so a
+                rewritten frontmatter (prompt override, tool filter, trigger)
+                takes effect now instead of after a restart. The fresh entry is
+                kept either way so listing and body reads stay live. *)
              Hashtbl.replace custom id e;
              registered := e :: !registered;
              (match registered_descriptor rt id with
               | Some old_d ->
                 let changed = frontmatter_diff old_d e.descriptor in
                 if changed <> [] then
-                  rejected :=
-                    (id,
-                     Printf.sprintf
-                       "frontmatter changed (%s); the runtime binding keeps the old \
-                        values until restart"
-                       (String.concat ", " changed))
-                    :: !rejected
+                  (match Runtime.replace_skill rt e.descriptor with
+                   | Ok _ ->
+                     rejected :=
+                       (id,
+                        Printf.sprintf "frontmatter changed (%s); binding replaced"
+                          (String.concat ", " changed))
+                       :: !rejected
+                   | Error e2 ->
+                     rejected :=
+                       (id,
+                        Printf.sprintf "frontmatter changed (%s) but replace failed: %s"
+                          (String.concat ", " changed)
+                          (error_to_string e2))
+                       :: !rejected)
               | None -> ())
            end else
              rejected := (id, error_to_string err) :: !rejected)

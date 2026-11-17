@@ -35,7 +35,8 @@ let make_skill base ~source ~id ~trigger ~body =
 let scan ~base =
   Par_code_skills.scan
     ~project_dir:(Filename.concat base "project")
-    ~user_dir:(Filename.concat base "user") ()
+    ~user_dir:(Filename.concat base "user")
+    ~remote_dir:(Filename.concat base "no-remote") ()
 
 let test_scan_finds_project_skill () =
   with_temp_base (fun base ->
