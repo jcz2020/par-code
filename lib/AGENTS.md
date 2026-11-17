@@ -1,6 +1,6 @@
 # lib/ — the `par_code` library
 
-**Score 15** — 56 files (31 `.ml`, 24 `.mli`, `dune`), 10.0k LOC. Earned its file: the entire product core; every other directory consumes it.
+**Score 15** — 62 files (35 `.ml`, 27 `.mli`, `dune`), ~11k LOC. Earned its file: the entire product core; every other directory consumes it.
 
 Flat directory — no subdirs; the module set IS the architecture. All modules are top-level `Par_code_*` (`(wrapped false)` in `dune`).
 
@@ -13,6 +13,7 @@ Flat directory — no subdirs; the module set IS the architecture. All modules a
 | Skill distillation: /distill proposal + atomic write | `par_code_distill.ml` (v0.9.0 W2) |
 | REPL loop, slash commands, goal-chain driver | `par_code_repl.ml` (880) + `par_code_repl_io.ml` (333) |
 | Rendering: image algebra, ANSI backend, `render_*` | `par_code_ui.ml` (776) + `par_code_ui_markdown.ml` (320) |
+| Full-screen terminal UI (v0.14): frame, status bar, modal, scrollback | `par_code_screen.ml` (651) |
 | Config (38 fields) + wizard | `par_code_config.ml` (699) + `par_code_config_wizard.ml` (218) |
 | Memory: Sqlite_memory proxy, FTS5/vec0, export | `par_code_memory.ml` (609) + `par_code_memory_tools.ml` (282) |
 | Plan mode: six-section gate, synthesizer fallback | `par_code_plan_tools.ml` (574) |
@@ -29,7 +30,11 @@ Flat directory — no subdirs; the module set IS the architecture. All modules a
 - v0.9.0 W2: `/distill` calls the tools-free `skill-distiller` agent for one JSON proposal; `par_code_distill` validates id/reserved/builtin/existing/description/body, shows it, writes via temp-file parse + rename, backs up to `.par/backups/skills/` on `--force`, then reloads; Build mode only. `--id <id>` pins the target id (overriding the model's pick) and is what makes `--force` reachable; the model call runs on `Runtime.invoke` with a REPL cancellation token (`?on_invoke` scopes it to the call), so Ctrl+C cancels instead of exiting.
 - v0.11.0 远程 skill：`skill_sources` 里的 URL 在启动与 `/skills reload` 下载到 `~/.par/skills-remote/<id>/skill.md`，再作为 `Remote` 来源扫描；优先级 project > user > remote，远程永远不覆盖本地同名 id。远程内容按不可信输入处理：只收 markdown，id 必须匹配 `[a-z0-9-]` 且不撞保留命令/内置 skill，单文件 256 KiB 上限，失败保留旧缓存。Eio 的 brand 参数放不进模块级 ref，按 SDK 的做法用 `Obj.repr` 存、`Obj.obj` 取。
 - v0.9.0 W1 reload（**0.17.1 起完整**）：`/skills reload` 在 frontmatter 漂移时调 `Runtime.replace_skill`，绑定即时生效；`frontmatter_diff` 用来区分“没变”与“变了”。MCP 侧 `/mcp reload` 走 `Runtime.reload_mcp_servers` + `Runtime.mcp_tool_bindings` + `update_agent_tools`：改 URL/命令、**新增/移除服务器都不必重启**，但只更新“本来就有 MCP 工具”的 agent（`explore` 保持只读）加主 agent `par`。HTTP MCP 现在符合规范（0.17.1 补了 `"jsonrpc":"2.0"`），已对官方 Python `mcp` 服务器验证通过。
-- v0.13.0 W2 整仓快照：每轮用户输入前把工作区提交进 `.par/snapshot.git`（`git init --bare` + 显式 `--git-dir/--work-tree` 参数；**不要把 GIT_DIR 放环境里**，也别在 `init` 上用这两个参数）。`restore` 用 `read-tree` + `checkout-index -a -f` + `clean -fdq`，**不移动 HEAD**（否则历史被截断、撤销不可逆）；`undo` 先 capture 当前状态再取 `index+1`，因此“撤销的撤销”成立。忽略 `.par/`、`_build/`、`node_modules/` 等。
+- v0.14 TUI（`ui = "tui"`）：
+  - `Par_code_screen` 用 notty 画整帧（转写区 + 状态栏 + 输入行），`pump` 用 `Unix.select` 带 50ms 超时——按键即时唤醒，空闲时每 50ms 一次唤醒而不是自旋。
+  - **任何进入帧的字符串都要过 `sanitize_text`**：notty 的 `I.string` 遇到控制字符直接 raise（模型输出必带 `\n`，曾把界面打崩）；行要按 `\n` 拆开，宽度按显示列算（`I.hsnap`）。
+  - 审批/确认优先走 `Par_code_ui.set_modal_hook`（帧内模态）；未装 hook 时回退 /dev/tty，并由 `set_suspend_hooks` 先释放终端。
+  - `ui` 默认仍是 `"line"`；非 TTY 一律走行模式。
 - v0.13.0 W1 权限规则：`~/.par/permissions.json` + `./.par/permissions.json` 的 `rules`，按顺序**第一条命中生效**；`tool` 可为 `*`，`match` 是 bash 命令 / 文件工具路径的大小写不敏感子串。`deny` 走 tool_call_hook 对所有工具生效，`allow`/`ask` 对 bash 在审批决策里生效。用户级规则先读，项目级后读（运维 deny 压过仓库 allow）。Yojson 的 `member` 对非对象会抛，取字段一律防御式（工具入参可能是 null）。
 - v0.10.0 并发：`delegate_batch` 直接走 SDK 的 `Runtime.invoke_parallel`（`~parallel_limit:4 ~failure_policy:Continue_on_failure`），成功/失败两个列表各自保序，用 `merge_batch_results` 按 `spec.input` 双指针归并回输入序；**不要比较 spec 结构**——含 approval handler（函数字段），`(=)` 会抛。并行子任务必须只读（`delegate_batch` 只收 `explore`）。max-mode 仍走自己的 `Eio.Fiber.all`：它需要 usage，而 `invoke_parallel` 的 step 结果只回 text/tool_calls。
 - v0.10.0 工作流：流程定义放 `.par/flows/<id>.json`（内容就是 `workflow_def` 的 yojson），`/flow run` 用 **同步** `submit_workflow`（REPL 输入是 linenoise，`submit_workflow_async` 的 fiber 在提示符等待时不会被调度），并起一个后台 fiber 每 5 秒打 `[flow] still running (Ns)`；定义里出现 `planner`/`par`/`general` 这类可能停下的 agent 时先警告 —— **但审批提示仍会送到终端，用户看得到也能回答**，不要把它当成挂死。格式由 `[@@deriving yojson]` 决定：step 是 `["Agent_call", {...}]`，空构造子如 `["Continue_on_failure"]`，`variables` 是 `[[name, value]]`。

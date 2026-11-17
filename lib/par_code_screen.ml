@@ -552,14 +552,16 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
 
 let render (t : t) = Notty_unix.Term.image t.term (frame t)
 
-(* One pass of the UI loop: drain input, let [tick] update state, render. *)
+(* One pass of the UI loop: drain input, let [tick] update state, render.
+   Waiting goes through [Unix.select] with a real timeout: a keystroke wakes the
+   loop immediately, and an idle prompt costs one wakeup every 50ms instead of
+   a spin. *)
 let pump (t : t) ~(tick : t -> unit) =
   let read_fd, _ = Notty_unix.Term.fds t.term in
-  let input_ready () =
-    let r, _, _ = Unix.select [ read_fd ] [] [] 0.0 in
-    r <> []
-  in
-  while t.running && (Notty_unix.Term.pending t.term || input_ready ()) do
+  if t.running && not (Notty_unix.Term.pending t.term) then
+    ignore (Unix.select [ read_fd ] [] [] 0.05);
+  while t.running && (Notty_unix.Term.pending t.term ||
+                      (let r, _, _ = Unix.select [ read_fd ] [] [] 0.0 in r <> [])) do
     match Notty_unix.Term.event t.term with
     | `End -> t.running <- false
     | `Resize _ -> ()
@@ -574,8 +576,7 @@ let pump (t : t) ~(tick : t -> unit) =
   done;
   if t.running then begin
     tick t;
-    render t;
-    Unix.sleepf 0.05
+    render t
   end
 
 let run (t : t) ~(tick : t -> unit) : unit =
