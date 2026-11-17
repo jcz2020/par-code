@@ -3037,3 +3037,13 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 - **scope**：**新增/移除服务器仍要重启** —— reload 只返回 descriptor，SDK 没有公开 MCP `tool_binding` 的取法，`update_agent_tools` 装不进去（`jcz2020/par#39`，`/mcp reload` 会把这条提示打出来）。**HTTP MCP 对严格服务器仍不可用** —— SDK 的 JSON-RPC 请求体缺 `"jsonrpc":"2.0"`，官方 Python server 直接 400；我用 curl 复现了“缺字段 400 / 有字段 200”，并从 `mcp_types.ml:337` 的 `request_to_yojson` 确认只发 id/method/params（`jcz2020/par#38`）。
 - **rollback**：pin 退回 `v0.16.2-beta.20261114` 并回滚两处调用即可；`/mcp reload` 与 `/skills reload` 的旧行为（提示重启）仍在注释里可恢复。
 
+
+## 2026-11-17 · SDK 0.17.1：#38/#39 闭环，MCP 热重载完整
+
+- **tag**：sdk-0.17.1-mcp-reload-complete
+- **before**：0.17.0 时 `/mcp reload` 只能改同名服务器的 URL/命令，新增服务器仍要重启（缺 binding 访问器），HTTP MCP 对严格服务器 400（缺 `jsonrpc` 字段）。
+- **after**：pin 升到 `v0.17.1-beta.20261117`。`/mcp reload` 现在把 `Runtime.mcp_tool_bindings` 过滤出新增工具，用 `update_agent_tools ~add ~remove` 装到“本来持有 MCP 工具”的 agent 与主 agent `par` 上。
+- **reason**：上游 0.17.1 补了 `jsonrpc` 成员（解析器也变严格）并公开 `mcp_tool_bindings`。真机验证：会话启动时 `mcp_servers` 为空，改配置后 `/mcp reload` 输出 `reloaded: 1 server(s), 1 tool(s); agents updated: par`，下一轮模型直接调用成功，终端有 `→ echo_http ✓ (17.5ms)` 工具行、返回值 `http-echo: http-ok`。
+- **scope**：只更新持有 MCP 工具的 agent（`explore` 与 max-mode 候选仍无 MCP 工具，保持只读）；工具名冲突仍由 SDK 报 `Invalid_input`。`Http_timeout.set_clock` 那行保留 —— 0.17 的 `Http_timeout` 虽标为 superseded，但设置它无副作用，等确认无用再删。
+- **rollback**：pin 退回 `v0.17.0-beta.20261117` 并恢复 `/mcp reload` 的“提示重启”分支。
+

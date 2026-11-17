@@ -58,15 +58,18 @@ startup, listed as `/remote-demo … [remote]`, and `/remote-demo obey` answered
   drifted, so a rewritten prompt override, tool filter or trigger takes effect
   instead of waiting for a restart.
 
-**Known limit**: adding or removing a *server* still needs a restart — the SDK
-returns descriptors from a reload but exposes no accessor for the matching
-`tool_binding`s, so `update_agent_tools` cannot install them (`jcz2020/par#39`).
-The reload reports this explicitly.
+Both upstream blockers closed in `v0.17.1-beta.20261117`: every JSON-RPC
+message now carries `"jsonrpc":"2.0"` (`jcz2020/par#38`) and
+`Runtime.mcp_tool_bindings` exposes the descriptors paired with their handlers
+(`jcz2020/par#39`), which `/mcp reload` feeds to `update_agent_tools` on the
+agents that already hold an MCP tool (plus the main agent). Adding a server
+therefore needs no restart.
 
-**Open upstream defect**: HTTP MCP against spec-compliant servers still fails —
-the SDK's JSON-RPC requests omit the `"jsonrpc":"2.0"` member, and a strict
-server answers `400` (`jcz2020/par#38`, reproduced with the official Python
-`mcp` server: same body without the member -> 400, with it -> 200).
+**Verified against the official Python MCP server** (`mcp` 2.3.0,
+`transport="streamable-http"`): a session started with no servers, `mcp_servers`
+was edited on disk, `/mcp reload` reported
+`reloaded: 1 server(s), 1 tool(s); agents updated: par`, and the next turn called
+the tool: `→ echo_http ✓ (17.5ms)` returning `http-echo: http-ok`.
 ## v0.10.0 — Parallel delegation (released 2026-11-14)
 
 > **Status**: Released as tag `v0.10.0` (PR #5, `62e8fb6`). The tag also carries

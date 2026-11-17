@@ -978,15 +978,46 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                  let removed = List.filter (fun n -> not (List.mem n after)) before in
                  let servers_now = ref 0 in
                  Par.Types.htbl_iter (Runtime.mcp_servers rt) (fun _ _ -> incr servers_now);
+                 (* PAR 0.17.1 exposes the bindings behind the descriptors, so a
+                    reloaded tool can be installed on an agent that is already
+                    registered. Only agents that already hold an MCP tool are
+                    touched — `explore` stays read-only by construction — plus
+                    the main agent, which is where a first server shows up. *)
+                 let bindings = Runtime.mcp_tool_bindings rt in
+                 let add =
+                   List.filter
+                     (fun (b : Par.Types.tool_binding) ->
+                        List.mem b.descriptor.name added)
+                     bindings
+                 in
+                 let holds_mcp (a : Par.Types.agent_config) =
+                   List.exists
+                     (fun (td : Par.Types.tool_descriptor) -> List.mem td.name before)
+                     a.tools
+                 in
+                 let touched = ref [] in
+                 List.iter
+                   (fun (a : Par.Types.agent_config) ->
+                      if holds_mcp a || a.id = Par_code_setup.agent_id then
+                        match
+                          Runtime.update_agent_tools rt ~agent_id:a.id ~add
+                            ~remove:removed
+                        with
+                        | Ok () -> touched := a.id :: !touched
+                        | Error e ->
+                          Par_code_ui.render_warning ui
+                            (Printf.sprintf "[mcp] %s: tools not updated: %s" a.id
+                               (Par_code_setup.error_to_string e)))
+                   (Runtime.list_agents rt);
                  Par_code_ui.render_notice ui
-                   (Printf.sprintf "[mcp] reloaded: %d server(s), %d tool(s)"
-                      !servers_now (List.length after));
+                   (Printf.sprintf
+                      "[mcp] reloaded: %d server(s), %d tool(s); agents updated: %s"
+                      !servers_now (List.length after)
+                      (match !touched with [] -> "none" | ids -> String.concat ", " (List.rev ids)));
                  if added <> [] || removed <> [] then
-                   Par_code_ui.render_warning ui
+                   Par_code_ui.render_notice ui
                      (Printf.sprintf
-                        "[mcp] the tool set changed (added: [%s], removed: [%s]); \
-                         the agent's tool list is fixed at startup, so restart \
-                         par to expose them (jcz2020/par#39)"
+                        "[mcp] tool set changed (added: [%s], removed: [%s])"
                         (String.concat ", " added) (String.concat ", " removed)))
             end else begin
               let running = Runtime.mcp_servers rt in

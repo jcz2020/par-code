@@ -31,7 +31,7 @@
    ;; PAR is the upstream SDK. As of writing it is not yet on the public opam
    ;; repository; install it from source:
    ;;   opam pin add par https://github.com/jcz2020/par.git
-      (par (>= 0.17.0-beta.20261117))
+      (par (>= 0.17.1-beta.20261117))
    cmdliner
    eio
    eio_main
