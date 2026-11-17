@@ -142,6 +142,13 @@ let vsnap ?(align=`Top) target img =
     in
     vpad t b img
 
+(* v0.14.0 S1: structured view of an image for the Notty screen. The image
+   already carries style per run, so this is a projection, not a re-parse. *)
+let lines (img : image) : (string * style) list list =
+  List.map
+    (fun line -> List.map (fun (R { sty; txt }) -> (txt, sty)) line)
+    img.lines
+
 let width img = img.w
 let height img = img.h
 

@@ -37,6 +37,10 @@ type image
     capability, cached dimensions). *)
 type backend
 
+(** Structured access for backends that render their own cells (the Notty
+    screen): one list per line, each entry a run of text with its style. *)
+val lines : image -> (string * style) list list
+
 (** {1 Styles} *)
 
 (** No style — default terminal rendering. *)

@@ -95,6 +95,18 @@ the tool: `→ echo_http ✓ (17.5ms)` returning `http-echo: http-ok`.
   is typed.
 - `Par_code_ui.commands` is now the single list that feeds the help screen, the
   completion list and the hints, so they cannot drift.
+### Screen foundation (S1a)
+
+- `par_code_screen` owns the alternate screen: a transcript that other fibers
+  append to, a streamed partial line (`feed` / `end_line`), a one-line status
+  bar and j/k/PgUp/PgDn scrolling. `Par_code_ui.lines` exposes the image as
+  styled runs and `attr_of_style` maps them to Notty attributes, so the screen
+  renders what the existing renderers produce instead of re-parsing ANSI.
+- Input is detected through `Term.fds` readability (S0's finding); `Term.pending`
+  alone never sees raw bytes.
+
+**Not done yet**: the `render_*` call sites still write to stdout, and long
+output is not truncated inside the frame — that is S1b.
 ### Approval prompt (W1)
 
 - The bash confirmation is a three-line block instead of one long line: the
