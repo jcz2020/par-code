@@ -55,4 +55,8 @@
     ;; Full-screen terminal (v0.14): the OCaml 5 fork of notty. The upstream
     ;; notty package requires ocaml < 4.14; notty-community.unix provides
     ;; Notty_unix used by lib/par_code_screen.ml.
-    (notty-community (>= 0.2))))
+    (notty-community (>= 0.2))
+    ;; Display width of a character (CJK/emoji are two columns) for wrapping
+    ;; long answers to the terminal width, and the UTF-8 fold that feeds it.
+    uucp
+    uutf))

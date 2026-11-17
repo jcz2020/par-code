@@ -761,8 +761,8 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
       match screen with
       | Some s ->
         refresh_status s ~tokens:!cost.Par_code_repl_io.total_tokens;
-        Par_code_screen.read_line s
-          ~prompt:(Par_code_ui.prompt_string !Par_code_mode.current)
+        (* The mode lives in the status bar; keep the input line quiet. *)
+        Par_code_screen.read_line s ~prompt:"\xe2\x80\xba "
       | None -> LNoise.linenoise (Par_code_ui.prompt_string !Par_code_mode.current)
     in
     let line =
