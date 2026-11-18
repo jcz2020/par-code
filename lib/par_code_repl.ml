@@ -105,7 +105,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                   (Printf.sprintf "%s %.0fs"
                      frames.(!i mod Array.length frames)
                      (Unix.gettimeofday () -. start));
-                Par_code_screen.render screen
+                (try Par_code_screen.render screen with _ -> ())
               end
             done)
      | None -> ());
