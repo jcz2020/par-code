@@ -1016,14 +1016,18 @@ let frame (t : t) : Notty.image =
     let hint =
       if t.last_key = "" then "" else Printf.sprintf "  [%s]" t.last_key
     in
-    let scroll_hint = if t.scroll = 0 then "" else Printf.sprintf "  ↑%d" t.scroll in
+    (* The scroll position goes first: a long bar would otherwise clip it, and
+       it is the one field that explains why the transcript is not at the end. *)
+    let scroll_hint =
+      if t.scroll = 0 then "" else Printf.sprintf "↑%d · " t.scroll
+    in
     let text =
       match t.busy, t.status with
       | "", s -> s
       | b, "" -> b
       | b, s -> b ^ " · " ^ s
     in
-    let left = " " ^ text ^ scroll_hint ^ hint in
+    let left = " " ^ scroll_hint ^ text ^ hint in
     (* v0.15.1: while a turn runs, the right edge says how to stop it. *)
     let left_w = text_width left in
     (* A long bar wins: the hint is dropped rather than clipping the facts. *)
