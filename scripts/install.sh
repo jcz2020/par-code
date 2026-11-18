@@ -43,10 +43,19 @@ trap cleanup EXIT
 # user and cannot overwrite a root-owned file. To elevate the whole pipeline,
 # use `curl ... | sudo bash`.
 ensure_target_writable() {
-    _t="$PREFIX/bin/par"
+    _bin="$PREFIX/bin"
+    mkdir -p "$_bin" 2>/dev/null || { error "cannot create $_bin"; exit 1; }
+    _t="$_bin/par"
     [ -e "$_t" ] || return 0
     [ -w "$_t" ] && return 0
-    error "cannot overwrite $_t (not writable; likely owned by another user)"
+    # The file can be unwritable while the directory is ours (a previous
+    # `curl | sudo bash` leaves a root-owned binary). Replacing it then only
+    # needs write permission on the directory: unlink, do not open for writing.
+    if [ -w "$_bin" ] && rm -f "$_t" 2>/dev/null; then
+        info "removed the unwritable $_t before installing"
+        return 0
+    fi
+    error "cannot replace $_t (its directory is not writable; likely owned by another user)"
     error "fix: sudo rm -f '$_t'  &&  re-run this installer"
     error "  (or, to elevate the whole pipeline: curl <url> | sudo bash)"
     exit 1
@@ -101,6 +110,18 @@ resolve_prefix() {
     info "prefix: $PREFIX"
 }
 
+# _latest_tag: the newest release tag, or empty when the query fails.
+# fetch_latest_tag wraps this with the user-facing error; the source path uses
+# it to build a release rather than the default branch.
+_latest_tag() {
+    _u="https://$_mirror/jcz2020/par-code/releases/latest"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSLI "$_u" 2>/dev/null | grep -i '^location:' | tail -1 | sed 's|.*/||' | tr -d '\r\n' || true
+    elif command -v wget >/dev/null 2>&1; then
+        wget --spider -S "$_u" 2>&1 | grep -i 'Location:' | tail -1 | sed 's|.*/||' | tr -d '\r\n' || true
+    fi
+}
+
 # fetch_latest_tag: query GitHub /releases/latest redirect. Honors PAR_MIRROR.
 TAG=""
 fetch_latest_tag() {
@@ -110,15 +131,8 @@ fetch_latest_tag() {
     fi
     _mirror="github.com"
     if [ "${PAR_MIRROR+_}" = "_" ] && [ -n "$PAR_MIRROR" ]; then _mirror="$PAR_MIRROR"; fi
-    _url="https://$_mirror/jcz2020/par-code/releases/latest"
-    info "fetching latest version from $_url ..."
-    if command -v curl >/dev/null 2>&1; then
-        _tag="$(curl -fsSLI "$_url" 2>/dev/null | grep -i '^location:' | tail -1 | sed 's|.*/||' | tr -d '\r\n' || true)"
-    elif command -v wget >/dev/null 2>&1; then
-        _tag="$(wget --spider -S "$_url" 2>&1 | grep -i 'Location:' | tail -1 | sed 's|.*/||' | tr -d '\r\n' || true)"
-    else
-        error "neither curl nor wget found"; exit 1
-    fi
+    info "fetching latest version from https://$_mirror/jcz2020/par-code/releases/latest ..."
+    _tag="$(_latest_tag)"
     if [ -z "$_tag" ]; then
         error "could not determine latest version; use --version <tag>"; exit 1
     fi
@@ -356,6 +370,20 @@ install_from_source() {
     ensure_opam
     ensure_system_libs
 
+    # A source build needs to know WHICH source. Without --version this used to
+    # clone the default branch while pinning the SDK this script shipped with;
+    # the two drifted and the build died with opam's "no matching version".
+    # Install the latest release instead.
+    if [ -z "$TAG" ]; then
+        _t="$(_latest_tag)"
+        if [ -n "$_t" ]; then
+            TAG="$_t"
+            info "version: $TAG (latest release)"
+        else
+            warn "could not resolve the latest release; building the default branch"
+        fi
+    fi
+
     _src_dir="${TMPDIR_RESOLVED}/par-code-src"
     SRC_DIR="$_src_dir"
     rm -rf "$_src_dir"
@@ -374,25 +402,23 @@ install_from_source() {
 
     _par_mirror="${PAR_PAR_MIRROR:-$_mirror}"
     _par_url="https://${_par_mirror}/jcz2020/par.git"
-    # Pinned to the v0.17.1-beta release tag: a branch-tip pin would install
-    # an SDK whose newer required record fields this par-code version does not
-    # know about, so the source build would fail. Mirrors must carry the tag.
-    info "pinning PAR SDK (v0.17.1-beta tag)..."
-    # Skip only when the pin already points at the required version. The old
-    # check (`grep -q '^par '`) never matched: `opam pin list` prints the name
-    # WITH the version ("par.0.12.0-beta.20261023"), so the source install
-    # always re-pinned.
-    if opam pin list 2>/dev/null | grep -q '^par\.0\.12\.0-beta'; then
-        info "PAR SDK already pinned at v0.17.1-beta; skipping"
-    else
-        _pin_log="${TMPDIR_RESOLVED}/par_opam_pin.log"
-        opam pin add par "$_par_url#v0.17.3-beta.20261118" -y > "$_pin_log" 2>&1 || {
-            error "opam pin add par failed (exit $?)"
-            tail -10 "$_pin_log" >&2; rm -f "$_pin_log"
-            exit 1
-        }
-        rm -f "$_pin_log"
+    # Pin the SDK version this source actually requires, read from the clone's
+    # dune-project. A pin hardcoded in the installer goes stale as soon as the
+    # source moves (the v0.15.2 installer pinned 0.17.2 while main required
+    # 0.17.3), and opam only reports it as "no matching version".
+    _pin_version="$(sed -n 's/.*(par (>= *\([^) ]*\)).*/\1/p' dune-project 2>/dev/null | head -1)"
+    if [ -z "$_pin_version" ]; then
+        error "cannot read the PAR SDK requirement from dune-project"
+        exit 1
     fi
+    info "pinning PAR SDK (v$_pin_version)..."
+    _pin_log="${TMPDIR_RESOLVED}/par_opam_pin.log"
+    opam pin add par "$_par_url#v$_pin_version" -y > "$_pin_log" 2>&1 || {
+        error "opam pin add par failed (exit $?)"
+        tail -10 "$_pin_log" >&2; rm -f "$_pin_log"
+        exit 1
+    }
+    rm -f "$_pin_log"
 
     info "installing dependencies (several minutes)..."
     _inst_log="${TMPDIR_RESOLVED}/par_opam_install.log"

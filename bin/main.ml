@@ -220,7 +220,13 @@ let term_upgrade =
   $ Cli_args.upgrade_check_arg $ Cli_args.upgrade_to_arg
   $ Cli_args.upgrade_uninstall_arg $ Cli_args.upgrade_purge_arg
 
-let info_upgrade = Cmd.info "upgrade" ~doc:"Check for and install the latest par version"
+let info_upgrade =
+  Cmd.info "upgrade" ~doc:"Check for and install the latest par version"
+
+(* Cmdliner 2.x has no [~aliases], and the update notice has always told people
+   to run "par upgrade" — "par update" is the word they reach for instead. *)
+let info_update =
+  Cmd.info "update" ~doc:"Install the latest par version (same as upgrade)"
 
 let parse_kind = function
   | "preference" -> Ok Par_code_memory.Preference
@@ -677,6 +683,7 @@ let cmd =
     [ cmd_config_group;
       Cmd.v info_ask term_ask;
       Cmd.v info_upgrade term_upgrade;
+      Cmd.v info_update term_upgrade;
       cmd_memory;
       cmd_plan;
       cmd_session; ]
@@ -687,7 +694,7 @@ let is_chat_mode () =
     | [] -> true
     | "--help" :: _ | "-h" :: _ -> false
     | "--version" :: _ | "-v" :: _ -> false
-    | "config" :: _ | "ask" :: _ | "upgrade" :: _ | "memory" :: _ | "plan" :: _ | "session" :: _ -> false
+    | "config" :: _ | "ask" :: _ | "upgrade" :: _ | "update" :: _ | "memory" :: _ | "plan" :: _ | "session" :: _ -> false
     | _ :: rest -> scan rest
   in
   match args with _ :: rest -> scan rest | [] -> true

@@ -29,6 +29,20 @@
 - **`/model`**: the config list is now only a fallback for endpoints that do not
   implement the listing route, and when nothing is available the warning says
   why (the provider's error) instead of pointing at the upstream issue.
+- **`par update` works**: `update` is an alias of `upgrade`, so the word the
+  update notice sends people to (`par upgrade`) has a synonym that also works.
+- **The installer replaces an unwritable binary**: a stale `~/.par/bin/par`
+  owned by another user (from an earlier `curl | sudo bash`) used to stop the
+  install with "sudo rm … and re-run". Replacing it only needs write permission
+  on the directory, so the installer now unlinks it and carries on; the sudo
+  hint stays for the case where the directory itself is not ours.
+- **Source installs pin the SDK the source asks for**: `install.sh` and
+  `build-macos.sh` read the version out of the cloned `dune-project` instead of
+  repeating it. A hardcoded pin went stale the moment the requirement moved
+  (the v0.15.2 installer pinned 0.17.2 while main required 0.17.3 — and its
+  log line still said 0.17.1 — and opam only said "no matching version"). A
+  source install without `--version` now builds the latest release instead of
+  the default branch, and the log line names the version it is pinning.
 
 ## v0.15.2 — Visual overhaul (released 2026-11-18)
 
