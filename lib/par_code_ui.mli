@@ -125,9 +125,18 @@ val create_screen_backend : sink:(image -> unit) -> backend
     passes its own append function, so every [render_*] call site lands inside
     the frame without changing. *)
 
-val set_tool_hooks : line:(string -> image -> unit) -> flush:(unit -> unit) -> unit
+val set_tool_hooks :
+  line:(string -> image -> unit) ->
+  replace:(image -> unit) ->
+  flush:(unit -> unit) ->
+  unit
+
 (** v0.15.1: route tool lines to the screen so one turn's calls fold into a
-    block; [flush] is called when the block should be committed. *)
+    block; [replace] swaps a start line for its result and [flush] commits the
+    block. *)
+
+val note_tool_arguments : string -> Yojson.Safe.t -> unit
+(** Remember a call's arguments so the transcript can say what was asked for. *)
 
 val flush_tool_block : unit -> unit
 (** Commit whatever tool lines are pending (the REPL calls this at turn start). *)

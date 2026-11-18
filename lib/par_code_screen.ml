@@ -400,6 +400,13 @@ let append_tool_line (t : t) ~(name : string) (img : Par_code_ui.image) =
   t.tool_block <-
     t.tool_block @ to_notty_lines ~cols:(content_cols t) img
 
+(* The result of a tool call replaces its start line, so a call is one line. *)
+let replace_last_tool_line (t : t) (img : Par_code_ui.image) =
+  let lines = to_notty_lines ~cols:(content_cols t) img in
+  match List.rev t.tool_block with
+  | [] -> t.tool_block <- lines
+  | _ :: rest -> t.tool_block <- List.rev rest @ lines
+
 let flush_tools (t : t) =
   let lines = t.tool_block in
   t.tool_block <- [];
