@@ -317,6 +317,13 @@ let to_notty ~cols (img : Par_code_ui.image) : Notty.image =
   let open Notty in
   match to_notty_lines ~cols img with [] -> I.empty | ls -> I.vcat ls
 
+(* v0.15.1 phase 4: the spacing scale. A device-specific calibration should
+   be a change here, not a hunt through the frame builder. [gutter] is the left
+   margin of the transcript; [turn_gap] is the blank line that separates one
+   turn from the next. *)
+let gutter = 1
+let turn_gap = 1
+
 let width (t : t) = fst (Notty_unix.Term.size t.term)
 
 (* The transcript stores one entry per *line*, not per image: a multi-line
@@ -862,7 +869,7 @@ let frame (t : t) : Notty.image =
   let body_h = max 1 (h - input_h - status_h - 1 - menu_h) in
   let body =
     I.vcat (visible_lines t ~height:body_h)
-    |> fun img -> I.vsnap ~align:`Top body_h (I.pad ~l:1 ~r:0 img)
+    |> fun img -> I.vsnap ~align:`Top body_h (I.pad ~l:gutter ~r:0 img)
   in
   (* v0.15.1 visual pass 2: a one-column scroll indicator on the right edge.
      It only appears when the transcript is taller than the view, so the frame
@@ -1122,7 +1129,9 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
           (* v0.15.1 visual pass: a blank line separates the end of one turn
              from the next, and the echo is bold so it reads as the start of a
              turn rather than as more output. *)
-          append t (Par_code_ui.text "");
+          for _ = 1 to turn_gap do
+            append t (Par_code_ui.text "")
+          done;
           append t
             (Par_code_ui.textf "\xe2\x80\xba %s" line
                ~style:(Par_code_ui.style ~fg:Par_code_ui.Green ~bold:true ()))
