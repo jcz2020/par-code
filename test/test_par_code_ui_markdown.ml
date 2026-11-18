@@ -106,7 +106,8 @@ let enter_code_block_on_fence () =
   let s1, _ = Par_code_ui_markdown.push Par_code_ui_markdown.initial "```oc\n" in
   let s2, out2 = Par_code_ui_markdown.push s1 "code line\n" in
   let _s3, out3 = Par_code_ui_markdown.push s2 "```\n" in
-  Alcotest.(check bool) "code line has dim" true (string_contains out2 "\027[2m");
+  Alcotest.(check bool) "code line carries the left bar" true
+    (string_contains out2 "  ¦ ");
   Alcotest.(check bool) "closing fence has dim" true (string_contains out3 "\027[2m")
 
 let back_to_normal_after_close () =

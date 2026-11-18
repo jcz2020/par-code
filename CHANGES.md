@@ -32,6 +32,14 @@
   `models` list in the config — the OpenAI provider cannot enumerate yet,
   jcz2020/par#42), Up/Down/Enter/Esc, and re-registers the main agent with the
   chosen model so the next turn uses it; the choice is saved to the config.
+- **Real streaming**: the unfinished line is pushed to the frame on every chunk,
+  so output appears as it arrives instead of in whole-line bursts (the markdown
+  machine only emits a line once it is complete, which is why the frame used to
+  jump a line at a time).
+- **Visual pass 1**: code blocks are grouped by a left bar instead of being
+  dimmed, a blank line separates turns, the user echo is bold, and tool lines
+  share one indent and glyph set (`→ name`, `✓ name (12ms)`).
+  Plan and acceptance criteria: `docs/v0.15.1-TUI-VISUAL.md`.
 - **`!command` passthrough**: a line starting with `!` runs that command
   directly (argv, no shell, no model round trip), prints its output in the
   transcript with the exit code and elapsed time, and still obeys `deny`

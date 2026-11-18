@@ -29,7 +29,11 @@ let ansi_cyan = esc ^ "[36m"
 let wrap_bold s = ansi_bold ^ s ^ reset
 let wrap_italic s = ansi_italic ^ s ^ reset
 let wrap_inline_code s = ansi_dim ^ ansi_reverse ^ s ^ reset
-let wrap_code_line s = ansi_dim ^ s ^ reset
+(* v0.15.1 visual pass: code is grouped by a left bar instead of being dimmed
+   (dim made long code hard to read on a phone and collided with tool lines). *)
+let code_bar = "  ¦ "
+let wrap_code_line s = code_bar ^ s
+let wrap_code_fence s = ansi_dim ^ ("  " ^ s) ^ reset
 let wrap_heading s = ansi_bold ^ ansi_cyan ^ s ^ reset
 let wrap_link_text s = ansi_underline ^ s ^ reset
 let wrap_link_url s = ansi_dim ^ s ^ reset
@@ -272,6 +276,25 @@ let render_normal_line line =
 
 let has_pending (st : state) : bool = st.line_buf <> ""
 
+(* v0.15.1: the half line currently being streamed, rendered the way it will
+   look once complete. The frame shows it live, so output appears as it
+   arrives instead of in whole-line bursts. *)
+let render_pending_line (st : state) (line : string) =
+  match st.ctx with
+  | InCodeBlock _ ->
+    (* A fence that arrives without its newline is still a fence. *)
+    (match try_code_fence line with
+     | Some _ -> wrap_code_fence line
+     | None -> wrap_code_line line)
+  | Normal ->
+    (* A fence that has not received its newline yet is still a fence. *)
+    (match try_code_fence line with
+     | Some _ -> wrap_code_fence line
+     | None -> render_normal_line line)
+
+let pending_text (st : state) : string =
+  if st.line_buf = "" then "" else render_pending_line st st.line_buf
+
 let push (st : state) (chunk : string) : state * string =
   let buf_content = st.line_buf ^ chunk in
   let buf_len = String.length buf_content in
@@ -288,7 +311,7 @@ let push (st : state) (chunk : string) : state * string =
          | InCodeBlock _ ->
            if try_code_fence line <> None then begin
              (* Closing fence *)
-             Buffer.add_string out_buf (wrap_code_line line);
+             Buffer.add_string out_buf (wrap_code_fence line);
              Buffer.add_char out_buf '\n';
              new_ctx := Normal
            end else begin
@@ -301,7 +324,7 @@ let push (st : state) (chunk : string) : state * string =
             | Some lang ->
               (* Opening fence — enter code block *)
               new_ctx := InCodeBlock { lang };
-              Buffer.add_string out_buf (wrap_code_line line);
+              Buffer.add_string out_buf (wrap_code_fence line);
               Buffer.add_char out_buf '\n'
             | None ->
               Buffer.add_string out_buf (render_normal_line line);
@@ -314,7 +337,4 @@ let push (st : state) (chunk : string) : state * string =
 
 let flush (st : state) : string =
   if st.line_buf = "" then ""
-  else
-    match st.ctx with
-    | InCodeBlock _ -> wrap_code_line st.line_buf
-    | Normal -> render_normal_line st.line_buf
+  else render_pending_line st st.line_buf

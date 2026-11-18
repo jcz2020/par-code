@@ -89,6 +89,11 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
            so nobody else would. *)
         Par_code_screen.render screen)
   in
+  (* v0.15.1: stream the unfinished line. The markdown machine emits a line at
+     a time, so without this hook the frame only moved in whole-line bursts. *)
+  Par_code_ui.set_partial_sink ui (fun s ->
+      Par_code_screen.set_partial screen s;
+      Par_code_screen.render screen);
   (* v0.7.3 W5: per-invoke cancellation state. turn_token_ref holds the
      current turn's token while Runtime.invoke is in flight (cleared in a
      Fun.protect finally, Oracle R3(b)); in_invoke/cancel_pending drive the
