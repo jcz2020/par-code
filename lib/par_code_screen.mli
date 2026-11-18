@@ -28,6 +28,9 @@ val end_line : t -> unit
 val set_partial : t -> string -> unit
 (** The half line being streamed, shown after the transcript; empty clears it. *)
 
+val width : t -> int
+(** Current terminal width in columns. *)
+
 val set_status : t -> string -> unit
 
 val set_busy : t -> string -> unit(** Transient text (a spinner, elapsed time) shown before the status line while

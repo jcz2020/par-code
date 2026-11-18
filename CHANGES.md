@@ -32,6 +32,10 @@
   `models` list in the config — the OpenAI provider cannot enumerate yet,
   jcz2020/par#42), Up/Down/Enter/Esc, and re-registers the main agent with the
   chosen model so the next turn uses it; the choice is saved to the config.
+- **Visual pass 2**: a one-column scroll indicator appears on the right edge
+  once the transcript is taller than the view and moves with the scroll; the
+  status bar now fits the terminal instead of being clipped mid-word (branch
+  first to drop, then context, then tokens).
 - **Real streaming**: the unfinished line is pushed to the frame on every chunk,
   so output appears as it arrives instead of in whole-line bursts (the markdown
   machine only emits a line once it is complete, which is why the frame used to

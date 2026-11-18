@@ -63,14 +63,36 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
       | Par_code_mode.Build -> "build"
       | Par_code_mode.Plan -> "plan"
     in
-    let parts =
-      [ !model_name; mode;
-        Printf.sprintf "%d tok" tokens;
-        !ctx_part;
-        git_branch ]
-      |> List.filter (fun x -> x <> "")
+    (* v0.15.1: fit the bar to the terminal instead of letting it clip
+       mid-word. Lower-value fields drop first — branch, then context, then
+       tokens — and the model name is truncated only as a last resort. *)
+    let budget = Stdlib.max 20 (Par_code_screen.width s - 2) in
+    let render parts =
+      String.concat " · " (List.filter (fun x -> x <> "") parts)
     in
-    Par_code_screen.set_status s (String.concat " · " parts)
+    let options =
+      [ ([ Printf.sprintf "%d tok" tokens; !ctx_part ], true);
+        ([ Printf.sprintf "%d tok" tokens ], true);
+        ([], false) ]
+    in
+    let rec pick = function
+      | [] ->
+        let room = Stdlib.max 4 (budget - String.length mode - 5) in
+        let m = !model_name in
+        let m =
+          if String.length m > room then String.sub m 0 (Stdlib.max 1 (room - 1)) ^ "\xe2\x80\xa6"
+          else m
+        in
+        render [ m; mode ]
+      | (extras, with_branch) :: rest ->
+        let parts =
+          [ !model_name; mode ] @ extras
+          @ (if with_branch then [ git_branch ] else [])
+        in
+        let text = render parts in
+        if String.length text <= budget then text else pick rest
+    in
+    Par_code_screen.set_status s (pick options)
   in
   let screen =
     let s = Par_code_screen.create () in
