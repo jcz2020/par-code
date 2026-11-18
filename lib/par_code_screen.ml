@@ -103,6 +103,9 @@ type t = {
   (* v0.15: a live "working" line while the model runs; set from the REPL's
      ticker fiber so the frame keeps moving when no chunks arrive. *)
   mutable busy : string;
+  (* v0.15.1: slash-command menu while the input starts with a command. *)
+  mutable menu : (string * string) list;
+  mutable menu_index : int;
   (* Terminal attributes as they were before notty took the tty. A signal
      handler cannot safely call into notty (it can deadlock on a lock the
      interrupted code holds), so the cleanup path restores from here. *)
@@ -133,7 +136,9 @@ let create () : t =
     last_ctrl_c = None;
     modal = None;
     modal_answer = None;
-    busy = "" }
+    busy = "";
+    menu = [];
+    menu_index = 0 }
 
 (* Notty rejects control characters inside [I.string] (it raises on "\n"),
    and model output is full of them. Split runs on newlines into separate lines
@@ -382,6 +387,30 @@ let all_commands () =
       (fun (e : Par_code_skills.entry) -> "/" ^ e.descriptor.id)
       (Par_code_skills.list_custom ())
 
+let starts_with ~prefix s =
+  String.length s >= String.length prefix
+  && String.sub s 0 (String.length prefix) = prefix
+
+(* v0.15.1: the menu opencode shows while a command is being typed. It lists
+   commands and custom skills, is driven by Up/Down, and Enter completes the
+   highlighted one unless the typed text already is it. *)
+let refresh_menu (t : t) =
+  let items =
+    match String.split_on_char ' ' t.input with
+    | [ partial ] when partial <> "" && partial.[0] = '/' ->
+      let all =
+        Par_code_ui.commands
+        @ List.map
+            (fun (e : Par_code_skills.entry) ->
+               ("/" ^ e.descriptor.id, "custom skill"))
+            (Par_code_skills.list_custom ())
+      in
+      List.filter (fun (cmd, _) -> starts_with ~prefix:partial cmd) all
+    | _ -> []
+  in
+  t.menu <- items;
+  t.menu_index <- min t.menu_index (max 0 (List.length items - 1))
+
 let complete (t : t) =
   let text = t.input in
   let starts_with ~prefix s =
@@ -476,7 +505,29 @@ let frame (t : t) : Notty.image =
   let max_input_h = 6 in
   let input_h = max 1 (min max_input_h n_lines) in
   let first_line = max 0 (min (cursor_line - input_h + 1) (n_lines - input_h)) in
-  let body_h = max 1 (h - input_h - status_h - 1) in
+  let menu_rows =
+    let n = List.length t.menu in
+    let visible = min 6 n in
+    let first = max 0 (min (t.menu_index - visible + 1) (n - visible)) in
+    List.filteri (fun i _ -> i >= first && i < first + visible) t.menu
+    |> List.mapi (fun j (cmd, desc) ->
+           let i = first + j in
+           let selected = i = t.menu_index in
+           let sty =
+             if selected then
+               Par_code_ui.style ~fg:Par_code_ui.Green ~bold:true ()
+             else Par_code_ui.no_style
+           in
+           I.hsnap ~align:`Left w
+             (I.string (attr_of_style sty)
+                (sanitize_text
+                   ((if selected then " \xe2\x96\xb8 " else "   ")
+                    ^ cmd
+                    ^ String.make (max 1 (16 - String.length cmd)) ' '
+                    ^ desc))))
+  in
+  let menu_h = List.length menu_rows in
+  let body_h = max 1 (h - input_h - status_h - 1 - menu_h) in
   let body =
     I.vcat (visible_lines t ~height:body_h)
     |> fun img -> I.vsnap ~align:`Top body_h (I.pad ~l:1 ~r:1 img)
@@ -574,7 +625,8 @@ let frame (t : t) : Notty.image =
       in
       I.vsnap ~align:`Middle body_h (I.hsnap ~align:`Middle w content)
   in
-  I.vsnap ~align:`Top body_h body <-> rule <-> input_line <-> status
+  I.vsnap ~align:`Top body_h body <-> I.vcat menu_rows <-> rule <-> input_line
+  <-> status
 
 (** v0.14.0 S2: Ctrl-C follows Claude Code — with input it clears the line, with
     an empty line a second press within two seconds exits. Ctrl-D exits from an
@@ -642,6 +694,23 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
   if not t.csi_drop then
   if t.editing then
     match k with
+    | `Arrow `Up when t.menu <> [] ->
+      t.menu_index <- max 0 (t.menu_index - 1)
+    | `Arrow `Down when t.menu <> [] ->
+      t.menu_index <- min (List.length t.menu - 1) (t.menu_index + 1)
+    | `Tab when t.menu <> [] ->
+      (match List.nth_opt t.menu t.menu_index with
+       | Some (cmd, _) -> t.input <- cmd; t.cursor <- String.length cmd
+       | None -> complete t)
+    | `Enter when t.menu <> []
+                   && (match List.nth_opt t.menu t.menu_index with
+                       | Some (cmd, _) -> cmd <> String.trim t.input
+                       | None -> false) ->
+      (* Completes the highlighted command; a second Enter runs it. *)
+      (match List.nth_opt t.menu t.menu_index with
+       | Some (cmd, _) -> t.input <- cmd; t.cursor <- String.length cmd; t.menu <- []
+       | None -> ())
+    | `Escape when t.menu <> [] -> t.menu <- []
     | `Enter when List.mem `Meta mods ->
       (* Alt+Enter: compose a multi-line message; Enter still submits. *)
       put_back t "\n"
@@ -783,7 +852,8 @@ let pump (t : t) ~(tick : t -> unit) =
     | `Resize _ -> ()
     | `Key (k, mods) ->
       let _, h = Notty_unix.Term.size t.term in
-      handle_key t ~page:(max 1 (h / 2)) (k, mods)
+      handle_key t ~page:(max 1 (h / 2)) (k, mods);
+      refresh_menu t
     | `Mouse (`Press (`Scroll `Up), _, _) -> t.scroll <- t.scroll + 3
     | `Mouse (`Press (`Scroll `Down), _, _) ->
       t.scroll <- max 0 (t.scroll - 3)
@@ -805,6 +875,8 @@ let read_line (t : t) ~(prompt : string) : string option =
   set_prompt t prompt;
   t.input <- "";
   t.cursor <- 0;
+  t.menu <- [];
+  t.menu_index <- 0;
   t.submitted <- None;
   t.scroll <- 0;
   t.editing <- true;
