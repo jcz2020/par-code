@@ -386,7 +386,7 @@ install_from_source() {
         info "PAR SDK already pinned at v0.17.1-beta; skipping"
     else
         _pin_log="${TMPDIR_RESOLVED}/par_opam_pin.log"
-        opam pin add par "$_par_url#v0.17.1-beta.20261117" -y > "$_pin_log" 2>&1 || {
+        opam pin add par "$_par_url#v0.17.2-beta.20261118" -y > "$_pin_log" 2>&1 || {
             error "opam pin add par failed (exit $?)"
             tail -10 "$_pin_log" >&2; rm -f "$_pin_log"
             exit 1

@@ -1,5 +1,34 @@
 # CHANGES
 
+## v0.14.1 — Fixes from the phone (unreleased)
+
+> **Status**: In progress on `main`. No version bump yet.
+
+- **Ctrl-C at the prompt exits cleanly again**: linenoise raises `Sys.Break`
+  from its own C stub, and the old catch clause sat on an already-evaluated
+  value, so the escape surfaced as Cmdliner's `internal error, uncaught
+  exception: Stdlib.Sys.Break`.
+- **`par config set ui tui|line` works**, and `config show` lists `ui` and
+  `snapshot_enabled`; before this the only way to reach the full-screen mode was
+  hand-editing `~/.par/config.json`.
+- **Split escape sequences no longer leak into the input line**: a mouse report
+  written in pieces left `[<65;83;39M` in the prompt and submitted it as a
+  message. ESC now waits for the next key and swallows a following CSI tail.
+- **Long lines wrap instead of being clipped** (uucp display widths, so CJK and
+  emoji count two columns), and modal bodies wrap with a hanging indent.
+- **Layout**: one column of padding, a rule above the input, a quiet `›` prompt
+  (the mode lives in the status bar), a dim status line, and the input line
+  clears on submit — the sent message is kept in the transcript as a green
+  `› …` line.
+- **Markdown renders off the stream too**: a non-streamed answer used to be
+  printed as one plain image, so `**bold**`, headings and tables showed raw.
+- **Bash contract in the prompt appendix**: every turn states that the bash
+  tool takes an argv array and runs it without a shell.
+- **PAR SDK pinned to `v0.17.2-beta.20261118`** (all six pin points). It fixes
+  jcz2020/par#40 (an integer `timeout` crashed the bash handler) and
+  jcz2020/par#41 (the blacklist rejected `$(...)`/backticks even though argv is
+  executed directly).
+
 ## v0.11.0 — Ecosystem (shipped inside v0.13.0, 2026-11-17)
 
 > **Status**: Shipped together with v0.13.0; see the note in that section.
