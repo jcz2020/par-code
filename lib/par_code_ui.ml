@@ -600,12 +600,26 @@ let set_partial_sink backend f = backend.partial <- Some f
 let tool_line_hook : (string -> image -> unit) option ref = ref None
 let tool_flush_hook : (unit -> unit) option ref = ref None
 
-let set_tool_hooks ~line ~flush =
+let tool_replace_hook : (image -> unit) option ref = ref None
+
+let set_tool_hooks ~line ~replace ~flush =
   tool_line_hook := Some line;
+  tool_replace_hook := Some replace;
   tool_flush_hook := Some flush
 
 let flush_tool_block () =
   match !tool_flush_hook with Some f -> f () | None -> ()
+
+(* v0.15.3: one line per tool call. The start line names what was asked for,
+   and the result replaces that same line instead of adding a second one. The
+   events carry no arguments, so the tool_call_hook records them by tool name. *)
+let tool_args : (string, Yojson.Safe.t) Hashtbl.t = Hashtbl.create 8
+
+let note_tool_arguments (name : string) (json : Yojson.Safe.t) =
+  Hashtbl.replace tool_args (String.lowercase_ascii name) json
+
+let arguments_of (name : string) =
+  Hashtbl.find_opt tool_args (String.lowercase_ascii name)
 
 let emit_markdown backend s =
   (* Only real answer text ends a tool block. A flushed half line emits "\n",
@@ -670,10 +684,23 @@ let flush_pending_line backend =
 (** A tool line: the frame folds these per turn and shows [name] as the current
     activity, so the running line can say what is happening. *)
 let render_tool_line backend ~name img =
-  flush_pending_line backend;
-  match !tool_line_hook with
-  | Some f -> f name img
-  | None -> render_line backend img
+  (* A rendering fault must never turn a healthy tool call into a failed one:
+     the engine reports an exception from this path as a 0.0ms tool failure. *)
+  try
+    flush_pending_line backend;
+    match !tool_line_hook with
+    | Some f -> f name img
+    | None -> render_line backend img
+  with _ -> ()
+
+let replace_tool_line backend ~name img =
+  try
+    flush_pending_line backend;
+    match !tool_replace_hook with
+    | Some f -> f img
+    | None -> render_tool_line backend ~name img
+  with _ -> ()
+
 
 let render_llm_chunk backend (chunk : Par.Types.llm_response_chunk) =
   let close_thinking_window () =
@@ -720,16 +747,33 @@ let render_llm_chunk backend (chunk : Par.Types.llm_response_chunk) =
 
 let render_tool_event backend (evt : Par.Types.event) =
   match evt with
-  | Tool_invoked _ ->
-    (* Tool started — wait for completion to show summary, but make sure any
-       streamed text that preceded the tool call is not left buffered. *)
-    flush_pending_line backend
-  | Tool_completed { tool_name; duration_ms; _ } ->
-    render_tool_line backend ~name:tool_name (textf "  ✓ %s (%.1fms)" tool_name duration_ms
-      ~style:(style ~fg:Green ~dim:true ()))
-  | Tool_failed { tool_name; _ } ->
-    render_tool_line backend ~name:tool_name (textf "  ✗ %s" tool_name
-      ~style:(style ~fg:Red ~bold:true ()))
+  | Tool_invoked { tool_name; _ } ->
+    (* v0.15.3: the start line says what was asked for; the result replaces it,
+       so one call is one line instead of two. *)
+    let asked =
+      Par_code_tool_summary.of_arguments ~name:tool_name
+        (Option.value (arguments_of tool_name) ~default:`Null)
+    in
+    let label = if asked = "" then tool_name else tool_name ^ " " ^ asked in
+    render_tool_line backend ~name:tool_name
+      (textf "  → %s" label ~style:(style ~dim:true ()))
+  | Tool_completed { tool_name; duration_ms; result_preview; _ } ->
+    let line =
+      Par_code_tool_summary.line ~name:tool_name
+        ~args:(arguments_of tool_name) ~preview:result_preview
+        ~duration_ms:(Some duration_ms) ~failed:false
+    in
+    replace_tool_line backend ~name:tool_name
+      (textf "  ✓ %s" line ~style:(style ~fg:Green ~dim:true ()))
+  | Tool_failed { tool_name; error; _ } ->
+    let line =
+      Par_code_tool_summary.line ~name:tool_name
+        ~args:(arguments_of tool_name) ~preview:None ~duration_ms:None
+        ~failed:true
+    in
+    replace_tool_line backend ~name:tool_name
+      (textf "  ✗ %s (%s)" line (Par.Types.string_of_error_category error)
+         ~style:(style ~fg:Red ~bold:true ()))
   | Tool_progress { tool_name; message; _ } ->
     render_tool_line backend ~name:tool_name (textf "  → %s: %s" tool_name message
       ~style:(style ~dim:true ()))

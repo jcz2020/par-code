@@ -7,6 +7,11 @@
 - **PAR SDK `v0.17.3-beta.20261118`** (all six pin points). Both built-in HTTP
   providers now implement `list_models`, so `/model` asks the endpoint instead
   of relying on a hand-written `models` list in the config.
+- **Tool calls describe themselves**: a call is one transcript line that says
+  what was asked and what came back — `✓ read lib/dune · 12 lines · 3.0ms`,
+  `✓ grep TODO in lib · 9 matches`, `✓ bash make · ok · 2.5s` — instead of
+  `→ read` followed by `✓ read (1.2ms)`. The arguments come from a tool-call
+  hook (the events carry none), and the result replaces the start line.
 - **Root cause found while testing it**: par-code hand-built its `llm_service`
   record and set `list_models_fn = None`, so even with the SDK fixed the picker
   still answered "not supported". Both provider paths now call the provider's

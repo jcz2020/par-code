@@ -28,6 +28,9 @@ val fold_plan : int -> int * int * int
 val activity : t -> string
 (** Name of the tool running right now ("" when none). *)
 
+val replace_last_tool_line : t -> Par_code_ui.image -> unit
+(** Swap the pending start line for the finished one. *)
+
 val flush_tools : t -> unit
 (** Commit the collected tool lines to the transcript, folding long runs. *)
 
