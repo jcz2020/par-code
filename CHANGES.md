@@ -1,5 +1,17 @@
 # CHANGES
 
+## v0.15.1 — Conversational input (unreleased)
+
+> **Status**: In progress on `main`. No version bump yet.
+
+- **Live progress**: while a turn runs, the status bar animates a spinner and
+  the elapsed seconds (a fiber keeps repainting when the provider is quiet), so
+  a slow model no longer looks frozen.
+- **Multi-line input**: Alt+Enter adds a line, and so does finishing a line with
+  `\` (phone keyboards have no Alt). The composer grows to six rows and scrolls
+  with the cursor.
+- `/help` now lists the input keys next to the commands.
+
 ## v0.15.0 — One interface (released 2026-11-18)
 
 > **Status**: Released as tag `v0.15.0`. The line interface is gone; the

@@ -27,6 +27,10 @@ val end_line : t -> unit
 
 val set_status : t -> string -> unit
 
+val set_busy : t -> string -> unit
+(** Transient text (a spinner, elapsed time) shown before the status line while
+    a turn runs. Empty clears it. *)
+
 val line_count : t -> int
 (** Lines currently in the transcript (for tests and the status bar). *)
 
