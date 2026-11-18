@@ -97,6 +97,8 @@ type t = {
   (* v0.15.1: tool lines of the current turn, folded into one block when the
      answer arrives so a long tool sequence does not bury it. *)
   mutable tool_block : Notty.image list;
+  (* Name of the tool currently running, for the activity line. *)
+  mutable activity : string;
   mutable status : string;
   mutable scroll : int;                   (* lines up from the bottom *)
   mutable running : bool;
@@ -151,6 +153,7 @@ let create () : t =
     transcript = [];
     partial = "";
     tool_block = [];
+    activity = "";
     status = "";
     scroll = 0;
     running = true;
@@ -343,13 +346,15 @@ let append_text (t : t) (s : string) =
 (* v0.15.1: collect this turn's tool lines, then fold them on release. Up to
    eight lines survive intact; beyond that the head and tail stay and the
    middle collapses into a count, so the block keeps a size ceiling. *)
-let append_tool_line (t : t) (img : Par_code_ui.image) =
+let append_tool_line (t : t) ~(name : string) (img : Par_code_ui.image) =
+  t.activity <- name;
   t.tool_block <-
     t.tool_block @ to_notty_lines ~cols:(width t - 2) img
 
 let flush_tools (t : t) =
   let lines = t.tool_block in
   t.tool_block <- [];
+  t.activity <- "";
   let n = List.length lines in
   if n = 0 then ()
   else begin
@@ -388,6 +393,8 @@ let set_status (t : t) (s : string) = t.status <- s
 
 (** A transient line shown before the status text while a turn runs. *)
 let set_busy (t : t) (s : string) = t.busy <- s
+
+let activity (t : t) = t.activity
 
 let line_count (t : t) =
   List.length t.transcript + List.length t.tool_block

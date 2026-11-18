@@ -32,6 +32,8 @@
   `models` list in the config — the OpenAI provider cannot enumerate yet,
   jcz2020/par#42), Up/Down/Enter/Esc, and re-registers the main agent with the
   chosen model so the next turn uses it; the choice is saved to the config.
+- **Visual pass 6**: the running line names the tool in flight (`⠹ find 3s`)
+  instead of showing a bare spinner, so a long turn says what it is doing.
 - **Visual pass 5**: a cancelled turn has its own terminal signature (`⊘`, the
   same weight as `✓` and `✗`) instead of printing as a plain notice.
 - **Visual pass 4**: every box (approval modal, model and session pickers) now
