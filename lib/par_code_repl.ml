@@ -738,16 +738,12 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
       | Par_code_chain.Chain_continue next -> run_chain next)
    in
   let rec loop () =
-    (* linenoise writes the prompt directly to fd 1, bypassing OCaml's stdout
-       buffer — flush first so rendered output (slash commands via render,
-       which doesn't flush) appears before the next prompt overwrites the view. *)
+    (* Flush first so output rendered by a slash command (which does not flush)
+       is on screen before the frame redraws around the input line. *)
     flush stdout;
-    (* linenoise raises Sys.Break itself when the user presses Ctrl+C at the
-       prompt (its C stub re-raises the registered [sys_break] exception), so
-       the exception comes from the read, not from the SIGINT handler. It has
-       to be caught HERE: [match line with exception ...] cannot see an
-       exception raised while [line] was being evaluated, and the escape ended
-       in Cmdliner's "internal error, uncaught exception: Stdlib.Sys.Break". *)
+    (* The screen owns input; Sys.Break can still land here from a signal
+       outside the screen loop, and Cmdliner would print it as an internal
+       error, so it exits like a normal quit. *)
     let read_input () =
       refresh_status screen ~tokens:!cost.Par_code_repl_io.total_tokens;
       (* The mode lives in the status bar; keep the input line quiet. *)

@@ -48,12 +48,6 @@ val render : t -> unit
 
 val stop : t -> unit
 
-val suspend : t -> unit
-(** Release the terminal so a /dev/tty modal can run. *)
-
-val resume : t -> unit
-(** Recreate the terminal and repaint after {!suspend}. *)
-
 val ask :
   t ->
   title:string ->

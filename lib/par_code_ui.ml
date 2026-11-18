@@ -338,41 +338,29 @@ let render_success backend msg =
 (* v0.14.0 S2: when the full-screen UI is active, a modal that reads /dev/tty
    must first give the terminal back. The REPL installs these hooks; in line
    mode they stay empty and nothing changes. *)
-let suspend_hooks : (unit -> unit) option ref = ref None
-let resume_hooks : (unit -> unit) option ref = ref None
 let modal_hooks :
   (title:string -> body:string list -> options:(string * string) list -> string option)
     option
   ref =
   ref None
 
-let set_suspend_hooks ~suspend ~resume =
-  suspend_hooks := suspend;
-  resume_hooks := resume
-
 let set_modal_hook f = modal_hooks := f
 
-let with_terminal_released f =
-  (match !suspend_hooks with Some s -> s () | None -> ());
-  Fun.protect
-    ~finally:(fun () -> match !resume_hooks with Some r -> r () | None -> ())
-    f
-
-(** Render + FLUSH + read one line from /dev/tty (stdin fallback).
+(** Render + FLUSH + read one line from /dev/tty (stdin fallback), for the CLI
+    flows that ask a question outside the frame.
     The flush is load-bearing: without it the prompt stays in stdout's
     block buffer while we block on input — the user never sees it. *)
 let prompt_read ?(backend=create_backend ()) () =
-  with_terminal_released (fun () ->
-      flush backend.out;
-      let read_tty () =
-        try
-          let tty = open_in "/dev/tty" in
-          Fun.protect ~finally:(fun () -> close_in tty) (fun () -> input_line tty)
-        with Sys_error _ -> input_line stdin
-      in
-      match read_tty () with
-      | line -> Some (String.lowercase_ascii (String.trim line))
-      | exception _ -> None)
+  flush backend.out;
+  let read_tty () =
+    try
+      let tty = open_in "/dev/tty" in
+      Fun.protect ~finally:(fun () -> close_in tty) (fun () -> input_line tty)
+    with Sys_error _ -> input_line stdin
+  in
+  match read_tty () with
+  | line -> Some (String.lowercase_ascii (String.trim line))
+  | exception _ -> None
 
 (* v0.14.0 W1: the approval question as a small block instead of one long line,
    with the reason spelled out and the meaning of each key next to it. Pure, so
@@ -893,12 +881,8 @@ let render_prompt backend mode =
      buffered until the next \n. See v0.5.4 audit P1 #8. *)
   flush backend.out
 
-(* Plain-text prompt for [LNoise.linenoise]. No ANSI: linenoise sizes the
-   cursor with strlen(prompt), so color codes would misposition it.
-   [render_prompt] above still produces the colored version for tests/non-
-   linenoise contexts. *)
-(* v0.14.2: the REPL prompt is drawn by [Par_code_screen]; the line interface
-   and its prompt string are gone. *)
+(* Colored prompt banner, used by CLI flows (the REPL draws its own input line
+   in the frame). *)
 let commands : (string * string) list =
   [ ("/help", "Show this help");
     ("/session", "Show session info");

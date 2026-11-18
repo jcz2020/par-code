@@ -76,7 +76,7 @@ type modal = {
 }
 
 type t = {
-  mutable term : Notty_unix.Term.t;
+  term : Notty_unix.Term.t;
   mutable transcript : Notty.image list;  (* oldest first *)
   mutable partial : string;               (* line being streamed *)
   mutable status : string;
@@ -98,7 +98,6 @@ type t = {
      swallow that tail instead of typing it into the input line. *)
   mutable escape_at : float option;
   mutable csi_drop : bool;
-  mutable suspended : bool;
   mutable modal : modal option;
   mutable modal_answer : string option;
   (* Terminal attributes as they were before notty took the tty. A signal
@@ -129,7 +128,6 @@ let create () : t =
     submitted = None;
     editing = false;
     last_ctrl_c = None;
-    suspended = false;
     modal = None;
     modal_answer = None }
 
@@ -799,18 +797,5 @@ let close (t : t) =
   t.running <- false;
   Notty_unix.Term.release t.term
 
-(* v0.14.0 S2: a modal that reads /dev/tty (approval, /distill) cannot work
-   while the alt-screen owns the terminal. Release it, let the modal run, then
-   recreate and repaint. The transcript lives in memory, so nothing is lost. *)
-let suspend (t : t) =
-  if not t.suspended then begin
-    (try Notty_unix.Term.release t.term with _ -> ());
-    t.suspended <- true
-  end
-
-let resume (t : t) =
-  if t.suspended then begin
-    t.term <- Notty_unix.Term.create ~mouse:true ~bpaste:true ();
-    t.suspended <- false;
-    render t
-  end
+(* v0.15.0: suspend/resume existed for /dev/tty modals under the line
+   interface; the frame owns every prompt now. *)
