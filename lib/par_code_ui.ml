@@ -597,7 +597,7 @@ let set_partial_sink backend f = backend.partial <- Some f
    the screen and folded into a single block, so a 20-call turn does not push
    the answer off the frame. When no hook is installed (plain output) they are
    rendered one per line as before. *)
-let tool_line_hook : (image -> unit) option ref = ref None
+let tool_line_hook : (string -> image -> unit) option ref = ref None
 let tool_flush_hook : (unit -> unit) option ref = ref None
 
 let set_tool_hooks ~line ~flush =
@@ -665,10 +665,12 @@ let flush_pending_line backend =
     emit_markdown backend output
   end
 
-let render_event_line backend img =
+(** A tool line: the frame folds these per turn and shows [name] as the current
+    activity, so the running line can say what is happening. *)
+let render_tool_line backend ~name img =
   flush_pending_line backend;
   match !tool_line_hook with
-  | Some f -> f img
+  | Some f -> f name img
   | None -> render_line backend img
 
 let render_llm_chunk backend (chunk : Par.Types.llm_response_chunk) =
@@ -702,7 +704,7 @@ let render_llm_chunk backend (chunk : Par.Types.llm_response_chunk) =
     end
   | Tool_call_start { tool_call_id = _; name } ->
     close_thinking_window ();
-    render_event_line backend
+    render_tool_line backend ~name
       (textf "  → %s" name ~style:(style ~dim:true ()))
   | Tool_call_delta _ ->
     close_thinking_window ()
@@ -721,13 +723,13 @@ let render_tool_event backend (evt : Par.Types.event) =
        streamed text that preceded the tool call is not left buffered. *)
     flush_pending_line backend
   | Tool_completed { tool_name; duration_ms; _ } ->
-    render_event_line backend (textf "  ✓ %s (%.1fms)" tool_name duration_ms
+    render_tool_line backend ~name:tool_name (textf "  ✓ %s (%.1fms)" tool_name duration_ms
       ~style:(style ~fg:Green ~dim:true ()))
   | Tool_failed { tool_name; _ } ->
-    render_event_line backend (textf "  ✗ %s" tool_name
+    render_tool_line backend ~name:tool_name (textf "  ✗ %s" tool_name
       ~style:(style ~fg:Red ~bold:true ()))
   | Tool_progress { tool_name; message; _ } ->
-    render_event_line backend (textf "  → %s: %s" tool_name message
+    render_tool_line backend ~name:tool_name (textf "  → %s: %s" tool_name message
       ~style:(style ~dim:true ()))
   | Bash_invoked { argv; risk; _ } ->
     let cmd = String.concat " " argv in
@@ -736,7 +738,7 @@ let render_tool_event backend (evt : Par.Types.event) =
       | "medium" -> style ~fg:Yellow ()
       | _ -> style ~fg:Cyan ()
     in
-    render_event_line backend (textf "  $ %s" cmd ~style:risk_style)
+    render_tool_line backend ~name:"bash" (textf "  $ %s" cmd ~style:risk_style)
   | Bash_completed { exit_code; duration; stdout_truncated; stderr_truncated; _ } ->
     let exit_style = if exit_code = 0
       then style ~fg:Green ()
@@ -746,7 +748,7 @@ let render_tool_event backend (evt : Par.Types.event) =
       if stdout_truncated || stderr_truncated then " [output truncated]"
       else ""
     in
-    render_event_line backend
+    render_tool_line backend ~name:"bash"
       (textf "  exit %d (%.1fs)%s" exit_code duration truncation ~style:exit_style)
   | Task_created _
   | Task_started _

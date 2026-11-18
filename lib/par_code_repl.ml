@@ -119,7 +119,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
   (* v0.15.1: tool lines for one turn collect in the screen and fold when the
      answer starts, so a long tool sequence cannot bury the reply. *)
   Par_code_ui.set_tool_hooks
-    ~line:(fun img -> Par_code_screen.append_tool_line screen img)
+    ~line:(fun name img -> Par_code_screen.append_tool_line screen ~name img)
     ~flush:(fun () -> Par_code_screen.flush_tools screen);
   (* v0.7.3 W5: per-invoke cancellation state. turn_token_ref holds the
      current turn's token while Runtime.invoke is in flight (cleared in a
@@ -157,13 +157,16 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                      Par.Cancellation.request_cancel tok Types.User_cancelled
                    | None -> ());
                 let elapsed = Unix.gettimeofday () -. start in
+                let activity = Par_code_screen.activity screen in
+                let label =
+                  frames.(!i mod Array.length frames)
+                  ^ (if activity = "" then "" else " " ^ activity)
+                in
                 (* v0.15.1: the clock only appears once a turn actually takes
                    time; a fast turn should not flash "0s"/"1s". *)
                 Par_code_screen.set_busy screen
-                  (if elapsed < 2.0 then frames.(!i mod Array.length frames)
-                   else
-                     Printf.sprintf "%s %.0fs" frames.(!i mod Array.length frames)
-                       elapsed);
+                  (if elapsed < 2.0 then label
+                   else Printf.sprintf "%s %.0fs" label elapsed);
                 (try Par_code_screen.render screen with _ -> ())
               end
             done)

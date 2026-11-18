@@ -19,8 +19,11 @@ val append_truncated : t -> Par_code_ui.image -> unit
 
 val append_text : t -> string -> unit
 
-val append_tool_line : t -> Par_code_ui.image -> unit
+val append_tool_line : t -> name:string -> Par_code_ui.image -> unit
 (** Collect a tool line for the current turn; folded into one block on flush. *)
+
+val activity : t -> string
+(** Name of the tool running right now ("" when none). *)
 
 val flush_tools : t -> unit
 (** Commit the collected tool lines to the transcript, folding long runs. *)

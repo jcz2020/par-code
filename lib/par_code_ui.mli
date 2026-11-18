@@ -125,7 +125,7 @@ val create_screen_backend : sink:(image -> unit) -> backend
     passes its own append function, so every [render_*] call site lands inside
     the frame without changing. *)
 
-val set_tool_hooks : line:(image -> unit) -> flush:(unit -> unit) -> unit
+val set_tool_hooks : line:(string -> image -> unit) -> flush:(unit -> unit) -> unit
 (** v0.15.1: route tool lines to the screen so one turn's calls fold into a
     block; [flush] is called when the block should be committed. *)
 
