@@ -187,6 +187,7 @@ let run_wizard ?(ui=Par_code_ui.create_backend ()) () =
   let cfg = {
     Par_code_config.
     provider; api_key; api_base; model;
+    models = [];
     persistence = "sqlite"; db_uri = None;
     temperature; system_prompt = Par_code_config.default_system_prompt; max_iterations;
     planner_max_iterations;

@@ -49,8 +49,7 @@ val pump : t -> tick:(t -> unit) -> unit
 
 val render : t -> unit
 
-val poll_interrupt : t -> bool
-(** While a turn runs (the REPL reader is idle), drain pending events and report
+val poll_interrupt : t -> bool(** While a turn runs (the REPL reader is idle), drain pending events and report
     whether Esc or Ctrl-C was pressed. Other keys are discarded; a modal keeps
     its own reader and is left alone. *)
 
@@ -65,6 +64,10 @@ val ask :
   string option
 (** In-frame modal: returns the key the user pressed (a member of [options]),
     or [None] when Esc dismisses it. Blocks until answered. *)
+
+val pick : t -> title:string -> items:string list -> initial:int -> string option
+(** A scrollable list picker: Up/Down move, Enter selects (returns the item),
+    Esc returns [None]. Blocks until answered. *)
 
 val close : t -> unit
 (** Release the terminal (alt-screen off, cursor restored). [run] does this

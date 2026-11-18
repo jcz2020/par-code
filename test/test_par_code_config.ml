@@ -135,6 +135,14 @@ let test_show_custom_system_prompt () =
 
 (* ── default_mode ────────────────────────────────────────────────────── *)
 
+let test_models_roundtrip () =
+  let cfg = { default with models = [ "MiniMax-M3.1-flash"; "MiniMax-M2.5" ] } in
+  match of_json (to_json cfg) with
+  | Ok loaded ->
+    Alcotest.(check (list string)) "models roundtrip"
+      [ "MiniMax-M3.1-flash"; "MiniMax-M2.5" ] loaded.models
+  | Error e -> Alcotest.fail e
+
 let test_default_mode_is_build () =
   Alcotest.(check bool) "default mode is Build" true
     (default.default_mode = Par_code_mode.Build)
@@ -688,6 +696,7 @@ let () =
         Alcotest.test_case "show_output"                `Quick test_show_goal_auto_chain;
       ];
       "max_mode", [
+        Alcotest.test_case "models_roundtrip"           `Quick test_models_roundtrip;
         Alcotest.test_case "defaults"                   `Quick test_max_mode_defaults;
         Alcotest.test_case "roundtrip"                  `Quick test_max_mode_roundtrip;
         Alcotest.test_case "absent_defaults"            `Quick test_max_mode_absent_defaults;

@@ -75,6 +75,14 @@ type modal = {
   options : (string * string) list;  (* key, label *)
 }
 
+(* v0.15.1: model picker — a list that scrolls, unlike a modal's one-key choice. *)
+type picker = {
+  p_title : string;
+  p_items : string list;
+  mutable p_index : int;
+  mutable p_answer : string option;
+}
+
 type t = {
   term : Notty_unix.Term.t;
   mutable transcript : Notty.image list;  (* oldest first *)
@@ -100,6 +108,8 @@ type t = {
   mutable csi_drop : bool;
   mutable modal : modal option;
   mutable modal_answer : string option;
+  (* v0.15.1: a scrollable list picker (model selection). *)
+  mutable picker : picker option;
   (* v0.15: a live "working" line while the model runs; set from the REPL's
      ticker fiber so the frame keeps moving when no chunks arrive. *)
   mutable busy : string;
@@ -142,6 +152,7 @@ let create () : t =
     last_ctrl_c = None;
     modal = None;
     modal_answer = None;
+    picker = None;
     busy = "";
     menu = [];
     menu_index = 0;
@@ -704,47 +715,60 @@ let frame (t : t) : Notty.image =
     I.string A.(fg lightblack) (String.concat "" (List.init w (fun _ -> "─")))
   in
   let body =
-    match t.modal with
-    | None -> body
-    | Some m ->
-      (* Box drawn over the body area: title, content, key legend. *)
+    let box ~title ~rows ~footer =
       let inner_w = min (max 32 (w - 12)) 84 in
       let border l r =
         I.string A.empty (l ^ String.concat "" (List.init inner_w (fun _ -> "─")) ^ r)
       in
-      (* Pad by display width, not bytes: "⚠" is one column but three bytes, and
-         manual padding made the right border ragged. *)
       let row s =
         I.hcat
           [ I.string A.empty "│"
             ; I.hsnap ~align:`Left inner_w (I.string A.(st bold) (sanitize_text s))
             ; I.string A.empty "│" ]
       in
+      let content =
+        I.vcat
+          (border "┌" "┐"
+           :: List.map row title
+           @ [ border "├" "┤" ]
+           @ List.map row rows
+           @ List.map row footer @ [ border "└" "┘" ])
+      in
+      I.vsnap ~align:`Middle body_h (I.hsnap ~align:`Middle w content)
+    in
+    match t.modal, t.picker with
+    | None, None -> body
+    | None, Some p ->
+      let total = List.length p.p_items in
+      let visible = min 12 total in
+      let first = max 0 (min (p.p_index - visible + 1) (total - visible)) in
+      let items =
+        List.filteri (fun i _ -> i >= first && i < first + visible) p.p_items
+        |> List.mapi (fun j s ->
+               let i = first + j in
+               (if i = p.p_index then " ▸ " else "   ") ^ s)
+      in
+      box ~title:[ " " ^ p.p_title ] ~rows:items
+        ~footer:[ "  ↑/↓ move · Enter select · Esc close" ]
+    | Some m, _ ->
+      let inner_w = min (max 32 (w - 12)) 84 in
+      let leading_spaces s =
+        let n = ref 0 in
+        while !n < String.length s && s.[!n] = ' ' do incr n done;
+        !n
+      in
+      let wrapped s =
+        let lead = leading_spaces s in
+        let body = String.sub s lead (String.length s - lead) in
+        let indent = " " ^ String.make lead ' ' in
+        wrap_text ~cols:(max 8 (inner_w - 1 - lead)) body
+        |> List.map (fun l -> indent ^ l)
+      in
       let legend =
         String.concat "   " (List.map (fun (k, label) -> k ^ ": " ^ label) m.options)
       in
-      let content =
-        let leading_spaces s =
-          let n = ref 0 in
-          while !n < String.length s && s.[!n] = ' ' do incr n done;
-          !n
-        in
-        let wrapped s =
-          let lead = leading_spaces s in
-          let body = String.sub s lead (String.length s - lead) in
-          let indent = " " ^ String.make lead ' ' in
-          wrap_text ~cols:(max 8 (inner_w - 1 - lead)) body
-          |> List.map (fun l -> indent ^ l)
-        in
-        let rows_of s = List.map row (wrapped s) in
-        I.vcat
-          (border "┌" "┐"
-           :: rows_of m.title
-           @ [ border "├" "┤" ]
-           @ List.concat_map rows_of m.body
-           @ rows_of legend @ [ border "└" "┘" ])
-      in
-      I.vsnap ~align:`Middle body_h (I.hsnap ~align:`Middle w content)
+      box ~title:(wrapped m.title) ~rows:(List.concat_map wrapped m.body)
+        ~footer:(wrapped legend)
   in
   I.vsnap ~align:`Top body_h body <-> I.vcat menu_rows <-> rule <-> input_line
   <-> status
@@ -976,6 +1000,18 @@ let poll_interrupt (t : t) : bool =
    Waiting goes through [Unix.select] with a real timeout: a keystroke wakes the
    loop immediately, and an idle prompt costs one wakeup every 50ms instead of
    a spin. *)
+let picker_key (p : picker) (k : Notty.Unescape.special)
+    (set_answer : string option -> unit) =
+  let n = List.length p.p_items in
+  match k with
+  | `Arrow `Up -> p.p_index <- max 0 (p.p_index - 1)
+  | `Arrow `Down -> p.p_index <- min (max 0 (n - 1)) (p.p_index + 1)
+  | `Page `Up -> p.p_index <- max 0 (p.p_index - 10)
+  | `Page `Down -> p.p_index <- min (max 0 (n - 1)) (p.p_index + 10)
+  | `Enter -> (match List.nth_opt p.p_items p.p_index with Some v -> set_answer (Some v) | None -> ())
+  | `Escape -> set_answer None
+  | _ -> ()
+
 let pump (t : t) ~(tick : t -> unit) =
   let read_fd, _ = Notty_unix.Term.fds t.term in
   let ready =
@@ -995,9 +1031,18 @@ let pump (t : t) ~(tick : t -> unit) =
     | `End -> t.running <- false
     | `Resize _ -> ()
     | `Key (k, mods) ->
-      let _, h = Notty_unix.Term.size t.term in
-      handle_key t ~page:(max 1 (h / 2)) (k, mods);
-      refresh_menu t
+      (match t.picker with
+       | Some p ->
+         (match k with
+          | #Notty.Unescape.special as sp ->
+            picker_key p sp (fun answer ->
+                p.p_answer <- answer;
+                if answer = None then t.picker <- None)
+          | _ -> ())
+       | None ->
+         let _, h = Notty_unix.Term.size t.term in
+         handle_key t ~page:(max 1 (h / 2)) (k, mods);
+         refresh_menu t)
     | `Mouse (`Press (`Scroll `Up), _, _) -> t.scroll <- t.scroll + 3
     | `Mouse (`Press (`Scroll `Down), _, _) ->
       t.scroll <- max 0 (t.scroll - 3)
@@ -1061,6 +1106,33 @@ let ask (t : t) ~(title : string) ~(body : string list)
         end
   in
   loop ()
+
+(** A scrollable list picker: [Some item] on Enter, [None] on Esc. *)
+let pick (t : t) ~(title : string) ~(items : string list) ~(initial : int) :
+    string option =
+  if items = [] then None
+  else begin
+    let p =
+      { p_title = title;
+        p_items = items;
+        p_index = max 0 (min initial (List.length items - 1));
+        p_answer = None }
+    in
+    t.picker <- Some p;
+    let rec loop () =
+      if not t.running then None
+      else
+        match p.p_answer, t.picker with
+        | Some v, _ ->
+          t.picker <- None;
+          Some v
+        | None, None -> None
+        | None, Some _ ->
+          pump t ~tick:(fun _ -> ());
+          loop ()
+    in
+    loop ()
+  end
 
 (* Kill signals do not run [at_exit], so a SIGTERM used to leave the shell in
    raw mode with the alt screen still owned. The handler touches nothing but
