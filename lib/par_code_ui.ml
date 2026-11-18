@@ -888,6 +888,7 @@ let commands : (string * string) list =
     ("/session", "Show session info");
     ("/health", "Show runtime health");
     ("/model", "Switch the model for this session");
+    ("/sessions", "Pick a saved session to continue");
     ("/cost", "Show session token usage");
     ("/plan", "Switch to plan mode (read-only; produces a plan file)");
     ("/build", "Switch to build mode (full tool access; saves current plan)");
@@ -921,6 +922,7 @@ let render_help backend =
            item "Tab" "complete a command or flow id";
            item "Esc" "clear the line";
            item "Ctrl-C" "clear the line; press twice to exit";
+           item "Ctrl-Left/Right" "move by word (Alt+Backspace deletes one)";
            item "PgUp/PgDn" "scroll the transcript (wheel works too)" ])
   in
   render_line backend image
