@@ -854,6 +854,38 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
     | Some line ->
       let trimmed = String.trim line in
       if trimmed = "" then loop ()
+      else if trimmed.[0] = '!' then begin
+        let cmd =
+          String.trim (String.sub trimmed 1 (String.length trimmed - 1))
+        in
+        (match Par_code_shell.split_argv cmd with
+         | [] -> Par_code_ui.render_notice ui "[shell] usage: !<command>"
+         | argv ->
+           (match Par_code_shell.deny_reason cmd with
+            | Some _ ->
+              Par_code_ui.render_error ui
+                (Printf.sprintf "[shell] %s is denied by the permission rules"
+                   cmd)
+            | None ->
+              (let started = Unix.gettimeofday () in
+               match Par_code_setup.run_shell argv with
+               | None ->
+                 Par_code_ui.render_warning ui
+                   "[shell] no process manager in this runtime"
+               | Some (code, out, err) ->
+                    let emit prefix text =
+                      String.split_on_char '\n' text
+                      |> List.iter (fun l ->
+                             if String.trim l <> "" then
+                               Par_code_ui.render_notice ui (prefix ^ l))
+                    in
+                    emit "" out;
+                    emit "! " err;
+                    Par_code_ui.render_notice ui
+                      (Printf.sprintf "[shell] %s \xe2\x86\x92 exit %d in %.1fs"
+                         cmd code (Unix.gettimeofday () -. started)))));
+        loop ()
+      end
       else if trimmed.[0] = '/' then begin
         let parts = String.split_on_char ' ' trimmed in
         let cmd = match parts with c :: _ -> c | [] -> "" in
