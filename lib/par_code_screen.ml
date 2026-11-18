@@ -359,6 +359,42 @@ let delete_back (t : t) =
     t.cursor <- !i
   end
 
+(* v0.15.1: word-wise motion/editing, the Ctrl-Left / Alt-Backspace habits a
+   shell gives. A run of non-spaces counts as one word (paths are one word). *)
+let prev_word_start (s : string) (i : int) : int =
+  let i = ref (min i (String.length s)) in
+  while !i > 0 && s.[!i - 1] = ' ' do
+    decr i
+  done;
+  while !i > 0 && s.[!i - 1] <> ' ' do
+    decr i
+  done;
+  !i
+
+let next_word_end (s : string) (i : int) : int =
+  let n = String.length s in
+  let i = ref (min i n) in
+  while !i < n && s.[!i] = ' ' do
+    incr i
+  done;
+  while !i < n && s.[!i] <> ' ' do
+    incr i
+  done;
+  !i
+
+let delete_word_back (t : t) =
+  let i = prev_word_start t.input t.cursor in
+  t.input <-
+    String.sub t.input 0 i
+    ^ String.sub t.input t.cursor (String.length t.input - t.cursor);
+  t.cursor <- i
+
+let delete_word_forward (t : t) =
+  let j = next_word_end t.input t.cursor in
+  t.input <-
+    String.sub t.input 0 t.cursor
+    ^ String.sub t.input j (String.length t.input - j)
+
 let delete_forward (t : t) =
   if t.cursor < String.length t.input then begin
     let j = ref (t.cursor + 1) in
@@ -890,6 +926,12 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
          the same byte starts every CSI sequence, and a terminal may write the
          rest of the sequence a moment later. *)
       t.escape_at <- Some (Unix.gettimeofday ())
+    | `Backspace when ctrl || List.mem `Meta mods -> delete_word_back t
+    | `Delete when ctrl || List.mem `Meta mods -> delete_word_forward t
+    | `Arrow `Left when ctrl || List.mem `Meta mods ->
+      t.cursor <- prev_word_start t.input t.cursor
+    | `Arrow `Right when ctrl || List.mem `Meta mods ->
+      t.cursor <- next_word_end t.input t.cursor
     | `Backspace -> delete_back t
     | `Delete -> delete_forward t
     | `Arrow `Left -> move_left t

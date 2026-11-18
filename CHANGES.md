@@ -32,6 +32,10 @@
   `models` list in the config — the OpenAI provider cannot enumerate yet,
   jcz2020/par#42), Up/Down/Enter/Esc, and re-registers the main agent with the
   chosen model so the next turn uses it; the choice is saved to the config.
+- **Word-wise editing**: Ctrl/Alt+Left and Ctrl/Alt+Right move by word, and
+  Alt/Ctrl+Backspace (or Delete) removes one; a path counts as a single word.
+- **`/sessions`**: lists the saved sessions (id prefix, age, event count) in the
+  same picker as `/model` and switches the conversation to the chosen one.
 - **`@file` references**: typing `@` lists workspace files (fuzzy, skipping
   `.git`/`_build`/`.par`/`node_modules`); Tab or Enter completes the token
   wherever it sits in the sentence. On submit each referenced file is attached

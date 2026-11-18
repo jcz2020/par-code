@@ -875,6 +875,52 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                     Par_code_ui.render_success ui
                       (Printf.sprintf "model \xe2\x86\x92 %s" m))));
            loop ()
+         | "/sessions" ->
+           (match Par_code_session.list_sessions ~limit:20 with
+            | Error e ->
+              Par_code_ui.render_error ui (Printf.sprintf "[sessions] %s" e)
+            | Ok [] -> Par_code_ui.render_notice ui "[sessions] none saved yet"
+            | Ok sessions ->
+              let items =
+                List.map
+                  (fun (s : Par_code_session.session_info) ->
+                     let id = String.sub s.id 0 (min 8 (String.length s.id)) in
+                     Printf.sprintf "%s  %s  %d events" id
+                       (Par_code_session.format_age s.last_event_at)
+                       s.event_count)
+                  sessions
+              in
+              (match
+                 Par_code_screen.pick screen ~title:"Sessions" ~items
+                   ~initial:0
+               with
+               | None -> ()
+               | Some label ->
+                 let prefix =
+                   match String.index_opt label ' ' with
+                   | Some i -> String.sub label 0 i
+                   | None -> label
+                 in
+                 (match Par_code_session.resolve_id prefix with
+                  | Error e ->
+                    Par_code_ui.render_error ui (Printf.sprintf "[sessions] %s" e)
+                  | Ok full ->
+                    (match Par_code_session.load full with
+                     | Error e ->
+                       Par_code_ui.render_error ui
+                         (Printf.sprintf "[sessions] %s" e)
+                     | Ok None ->
+                       Par_code_ui.render_warning ui
+                         "[sessions] that session could not be loaded"
+                     | Ok (Some c) ->
+                       conv := Some c;
+                       session_id := Some full;
+                       turn_count := 0;
+                       Par_code_ui.render_success ui
+                         (Printf.sprintf "session \xe2\x86\x92 %s (%d messages)"
+                            (String.sub full 0 (min 8 (String.length full)))
+                            (List.length c.Types.messages))))));
+           loop ()
          | "/session" ->
            let msg_count = match !conv with
              | None -> 0
