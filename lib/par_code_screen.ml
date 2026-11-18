@@ -348,12 +348,20 @@ let turn_gap = 1
 
 let width (t : t) = fst (Notty_unix.Term.size t.term)
 
+(* v0.15.2: a 200-column tablet-wide terminal turns prose into unreadable long
+   lines, so the transcript is capped at a comfortable measure and centred. On
+   a phone the cap never applies. *)
+let max_content_cols = 110
+
+let content_cols (t : t) = min (width t - 2) max_content_cols
+let content_margin (t : t) = max 0 ((width t - 2 - content_cols t) / 2)
+
 (* The transcript stores one entry per *line*, not per image: a multi-line
    image used to count as a single entry, so pagination and scrolling were off
    by however many lines it had. *)
 let append (t : t) (img : Par_code_ui.image) =
   t.transcript <-
-    t.transcript @ List.map (fun l -> Line l) (to_notty_lines ~cols:(width t - 2) img)
+    t.transcript @ List.map (fun l -> Line l) (to_notty_lines ~cols:(content_cols t) img)
 
 (* v0.14.0 S1b: a frame is not a scroll buffer — one huge tool output must not
    push everything else out. Cap the lines taken from a single image and mark
@@ -361,7 +369,7 @@ let append (t : t) (img : Par_code_ui.image) =
 let max_lines_per_image = 60
 
 let append_truncated (t : t) (img : Par_code_ui.image) =
-  let lines = to_notty_lines ~cols:(width t - 2) img in
+  let lines = to_notty_lines ~cols:(content_cols t) img in
   let n = List.length lines in
   let kept =
     if n <= max_lines_per_image then lines
@@ -370,7 +378,7 @@ let append_truncated (t : t) (img : Par_code_ui.image) =
         if k <= 0 then [] else match l with [] -> [] | h :: tl -> h :: take (k - 1) tl
       in
       take max_lines_per_image lines
-      @ [ to_notty ~cols:(width t - 2)
+      @ [ to_notty ~cols:(content_cols t)
             (Par_code_ui.textf "… (%d more lines)" (n - max_lines_per_image)) ]
     end
   in
@@ -385,7 +393,7 @@ let append_text (t : t) (s : string) =
 let append_tool_line (t : t) ~(name : string) (img : Par_code_ui.image) =
   t.activity <- name;
   t.tool_block <-
-    t.tool_block @ to_notty_lines ~cols:(width t - 2) img
+    t.tool_block @ to_notty_lines ~cols:(content_cols t) img
 
 let flush_tools (t : t) =
   let lines = t.tool_block in
@@ -458,7 +466,7 @@ let entry_lines ~cols (e : entry) : Notty.image list =
   match e with Line img -> [ img ] | Tools b -> block_view ~cols b
 
 let line_count (t : t) =
-  let cols = width t - 2 in
+  let cols = content_cols t in
   List.fold_left (fun acc e -> acc + List.length (entry_lines ~cols e)) 0
     t.transcript
   + List.length t.tool_block
@@ -864,10 +872,10 @@ let history_move (t : t) (delta : int) =
 
 let visible_lines (t : t) ~(height : int) : Notty.image list =
   let all =
-    let cols = width t - 2 in
+    let cols = content_cols t in
     let base = List.concat_map (entry_lines ~cols) t.transcript @ t.tool_block in
     if t.partial = "" then base
-    else base @ [ to_notty ~cols:(width t - 2) (Par_code_ui.text t.partial) ]
+    else base @ [ to_notty ~cols:(content_cols t) (Par_code_ui.text t.partial) ]
   in
   let n = List.length all in
   let start = max 0 (n - height - t.scroll) in
@@ -921,7 +929,13 @@ let frame (t : t) : Notty.image =
   let body_h = max 1 (h - input_h - status_h - 1 - menu_h) in
   let body =
     I.vcat (visible_lines t ~height:body_h)
-    |> fun img -> I.vsnap ~align:`Top body_h (I.pad ~l:gutter ~r:0 img)
+    |> fun img ->
+    I.vsnap ~align:`Top body_h
+      (I.pad ~l:(gutter + content_margin t) ~r:0 img)
+    (* The bar is pinned to the last column: without the snap its position
+       followed the widest line of whatever was on screen, which made it drift
+       left as new content arrived. *)
+    |> fun img -> I.hsnap ~align:`Left (max 1 (w - 1)) img
   in
   (* v0.15.1 visual pass 2: a one-column scroll indicator on the right edge.
      It only appears when the transcript is taller than the view, so the frame
@@ -1317,6 +1331,7 @@ let poll_interrupt (t : t) : bool =
   else begin
     let read_fd, _ = Notty_unix.Term.fds t.term in
     let hit = ref false in
+    let page = 10 in
     while
       t.running
       && (Notty_unix.Term.pending t.term
@@ -1325,6 +1340,17 @@ let poll_interrupt (t : t) : bool =
       (match Notty_unix.Term.event t.term with
        | `Key (`Escape, _) -> hit := true
        | `Key (`ASCII 'c', mods) when List.mem `Ctrl mods -> hit := true
+       (* v0.15.2: a running turn used to swallow these, which is exactly when
+          the transcript is long enough to want them. *)
+       | `Key (`Page `Up, _) -> t.scroll <- t.scroll + page
+       | `Key (`Page `Down, _) -> t.scroll <- max 0 (t.scroll - page)
+       | `Key (`Arrow `Up, mods) when List.mem `Shift mods ->
+         t.scroll <- t.scroll + 1
+       | `Key (`Arrow `Down, mods) when List.mem `Shift mods ->
+         t.scroll <- max 0 (t.scroll - 1)
+       | `Mouse (`Press (`Scroll `Up), _, _) -> t.scroll <- t.scroll + 3
+       | `Mouse (`Press (`Scroll `Down), _, _) ->
+         t.scroll <- max 0 (t.scroll - 3)
        | _ -> ())
     done;
     !hit

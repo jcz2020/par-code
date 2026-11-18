@@ -70,9 +70,24 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
     let render parts =
       String.concat " │ " (List.filter (fun x -> x <> "") parts)
     in
+    (* v0.15.2: the bar says where you are. The directory survives longer
+       than the token count because it answers "which project am I in". *)
+    let dir =
+      let c = Sys.getcwd () in
+      let base = Filename.basename c in
+      let name = if base = "" || base = "." then c else base in
+      (* A deep checkout can put a long path here; the tail is what tells you
+         which project you are in. *)
+      if String.length name > 24 then
+        "…" ^ String.sub name (String.length name - 23) 23
+      else name
+    in
     let options =
-      [ ([ Printf.sprintf "%d tok" tokens; !ctx_part ], true);
-        ([ Printf.sprintf "%d tok" tokens ], true);
+      [ ([ dir; Printf.sprintf "%d tok" tokens; !ctx_part ], true);
+        ([ dir; Printf.sprintf "%d tok" tokens ], true);
+        ([ dir ], true);
+        (* The branch is the first thing to go; where you are is not. *)
+        ([ dir ], false);
         ([], false) ]
     in
     let rec pick = function
