@@ -1,8 +1,9 @@
 # CHANGES
 
-## v0.15.0 — One interface (unreleased)
+## v0.15.0 — One interface (released 2026-11-18)
 
-> **Status**: In progress on `main`. No version bump yet.
+> **Status**: Released as tag `v0.15.0`. The line interface is gone; the
+> framed REPL is the only interactive one.
 
 - The line interface is gone: `par` always runs the full-screen REPL. Without a
   terminal it keeps working as a one-shot: stdin is the question and the reply
