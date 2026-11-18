@@ -1011,8 +1011,13 @@ let frame (t : t) : Notty.image =
     in
     let left = " " ^ text ^ scroll_hint ^ hint in
     (* v0.15.1: while a turn runs, the right edge says how to stop it. *)
-    let right = if t.busy = "" then "" else "esc interrupt " in
-    let gap = max 1 (w - text_width left - text_width right) in
+    let left_w = text_width left in
+    (* A long bar wins: the hint is dropped rather than clipping the facts. *)
+    let right =
+      if t.busy = "" || left_w + text_width "esc interrupt " + 2 > w then ""
+      else "esc interrupt "
+    in
+    let gap = max 1 (w - left_w - text_width right) in
     I.hsnap ~align:`Left w
       (I.hcat
          [ I.string A.(fg lightblack) (sanitize_text left)
