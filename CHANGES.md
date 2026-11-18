@@ -1,8 +1,9 @@
 # CHANGES
 
-## v0.14.1 — Fixes from the phone (unreleased)
+## v0.14.1 — Fixes from the phone (released 2026-11-18)
 
-> **Status**: In progress on `main`. No version bump yet.
+> **Status**: Released as tag `v0.14.1`. No new capability — the full-screen
+> interface and the bash tool needed repair before the next feature wave.
 
 - **Ctrl-C at the prompt exits cleanly again**: linenoise raises `Sys.Break`
   from its own C stub, and the old catch clause sat on an already-evaluated

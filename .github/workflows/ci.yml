@@ -21,8 +21,8 @@ jobs:
           dune-cache: true
           cache-prefix: v3-par069
       # PAR SDK is not yet on the public opam repo — pin it from source.
-      # Pinned to the v0.17.1-beta release tag, not the branch tip: a
-      # branch-tip pin makes every build depend on whatever upstream's main
+      # Pinned to a release tag, not the branch tip: a branch-tip pin makes
+      # every build depend on whatever upstream's main happens to contain.
       # happened to be, so the same par-code tag could build two different
       # binaries — and an upstream change with a new required record field
       # breaks the build with no par-code change involved.

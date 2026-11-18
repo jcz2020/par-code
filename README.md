@@ -9,7 +9,13 @@ CLI conventions and drives the **core** PAR surface — ReAct loop, tool dispatc
 type-safe bash, skills, streaming, persistence, MCP reload, workflows — to both
 ship a useful agent and prove out the PAR SDK in anger.
 
-**Status:** `v0.14.0` — polished terminal. `ui = "tui"` runs the REPL inside a
+**Status:** `v0.14.1` — polished terminal, plus the repairs the phone
+session asked for. v0.14.1 keeps the message you sent in the transcript, wraps
+long lines instead of clipping them, stops a split mouse report from leaking
+into the input line, renders a non-streamed answer as markdown, exits cleanly
+on Ctrl-C at the prompt, and makes `par config set ui tui|line` work; PAR SDK
+0.17.2 (bundled) accepts an integer `timeout` and no longer rejects literal
+`$(...)` under direct argv execution. `ui = "tui"` runs the REPL inside a
 Notty frame: transcript, one-line status bar (`model · mode · N tok · git
 branch`), scrollback, bracketed paste, mouse wheel, resize handling, and both
 approvals and confirmations as in-frame modals; streamed answers render inside
