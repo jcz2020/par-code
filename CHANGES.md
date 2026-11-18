@@ -1,8 +1,6 @@
 # CHANGES
 
-## v0.15.2 — Visual overhaul (unreleased)
-
-> **Status**: In progress on `main`. No version bump yet.
+## v0.15.2 — Visual overhaul (released 2026-11-18)
 
 - **Syntax highlighting**: code blocks are highlighted (comments, strings,
   numbers, keywords) for OCaml, JavaScript/TypeScript, Python, Rust, Go, shell

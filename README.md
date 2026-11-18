@@ -173,7 +173,7 @@ pinned version:
 
 ```sh
 curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.sh | bash -s -- --prefix /opt/par
-curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.sh | bash -s -- --version v0.15.1
+curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.sh | bash -s -- --version v0.15.2
 ```
 
 `par upgrade` checks for and installs newer releases; `par upgrade --check`
