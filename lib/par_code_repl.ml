@@ -687,10 +687,10 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                         ignore (Par_code_doom_loop.write_incident
                                   ~signal:"doom_loop" ~reason:r ~normalized:"" ~original:"");
                         Par_code_ui.render_error ui
-                          ("\xe2\x9c\x97 goal aborted (doom loop) \xe2\x80\x94 " ^ r)
+                          ("goal aborted (doom loop) \xe2\x80\x94 " ^ r)
                       | _ ->
                         Par_code_ui.render_error ui
-                          ("\xe2\x9c\x97 turn aborted (doom loop) \xe2\x80\x94 " ^ r)));
+                          ("turn aborted (doom loop) \xe2\x80\x94 " ^ r)));
                   doom_abort := false; doom_force_judge := false;
                   cancel_pending := false
                 | Error (e, recovered_conv) ->
