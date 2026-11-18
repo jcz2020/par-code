@@ -80,6 +80,14 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
            so nobody else would. *)
         Par_code_screen.render screen)
   in
+  (* v0.7.3 W5: per-invoke cancellation state. turn_token_ref holds the
+     current turn's token while Runtime.invoke is in flight (cleared in a
+     Fun.protect finally, Oracle R3(b)); in_invoke/cancel_pending drive the
+     SIGINT ladder (reset at every execute_turn entry). Declared before the
+     progress ticker, which cancels the turn on Esc. *)
+  let turn_token_ref : Types.cancellation_token option ref = ref None in
+  let in_invoke = ref false in
+  let cancel_pending = ref false in
   (* A turn blocks the main fiber inside [invoke]; Eio keeps other fibers
      running, so a ticker can keep the status line moving (spinner + elapsed)
      even when the provider sends nothing for a while. *)
@@ -101,6 +109,12 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
               (try Eio.Time.sleep clock 0.15 with _ -> ());
               if not !finished then begin
                 incr i;
+                (if Par_code_screen.poll_interrupt screen then
+                   match !turn_token_ref with
+                   | Some tok ->
+                     cancel_pending := true;
+                     Par.Cancellation.request_cancel tok Types.User_cancelled
+                   | None -> ());
                 Par_code_screen.set_busy screen
                   (Printf.sprintf "%s %.0fs"
                      frames.(!i mod Array.length frames)
@@ -219,13 +233,6 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
   let doom_force_judge = ref false in
   let doom_abort_msg = ref None in
   let doom_abort = ref false in
-  (* v0.7.3 W5: per-invoke cancellation state. turn_token_ref holds the
-     current turn's token while Runtime.invoke is in flight (cleared in a
-     Fun.protect finally, Oracle R3(b)); in_invoke/cancel_pending drive the
-     SIGINT ladder (reset at every execute_turn entry). *)
-  let turn_token_ref : Types.cancellation_token option ref = ref None in
-  let in_invoke = ref false in
-  let cancel_pending = ref false in
   let make_tool_event ?rt () =
     make_tool_event_callback ui ?rt ~doom:(Some doom_detector)
       ~goal_active:(fun () ->

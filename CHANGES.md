@@ -25,6 +25,9 @@
 - **Command menu**: typing `/` shows the matching commands and custom skills
   with their descriptions; Up/Down move, Tab or Enter complete the highlighted
   one (a second Enter runs it), Esc closes the list.
+- **Esc interrupts a running turn**: while the model is working, Esc (or
+  Ctrl-C) cancels it and the transcript records `[cancelled by user]`. Only the
+  interrupt key is read during a turn; approval modals keep their own reader.
 
 ## v0.15.0 — One interface (released 2026-11-18)
 
