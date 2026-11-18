@@ -3,7 +3,9 @@ set -euo pipefail
 source "$(dirname "$0")/../lib/config.sh"
 source "$(dirname "$0")/../lib/harness.sh"
 
-# Regression: v0.7.2 — QA once saw --resume blank for 70s; pins banner+prompt ≤ 3s.
+# Regression: v0.7.2 — QA once saw --resume blank for 70s; pins frame+prompt ≤ 3s.
+# v0.15.3 moved the startup banner into the frame title line, so the frame is
+# up when that title shows.
 spawn_resume() {
   SESSION_ID="par-$$-$RANDOM"
   tmux kill-session -t "$SESSION_ID" 2>/dev/null || true
@@ -11,7 +13,7 @@ spawn_resume() {
     "env TERM=screen-256color HOME=$HOME PAR_NO_UPDATE_CHECK=1 PAR_NO_AUTO_EXTRACT=1 PAR_NO_CHECKPOINT=1 $PAR_BIN --resume"
 }
 
-test_resume_banner_within_3s() {
+test_resume_frame_within_3s() {
   setup_home; trap teardown_home EXIT
   tmux_spawn
   tmux_wait_for '›' 8
@@ -25,16 +27,16 @@ test_resume_banner_within_3s() {
   SESSION_ID=""
   spawn_resume
   local deadline=$((SECONDS + 3))
-  local saw_banner=0 saw_prompt=0
+  local saw_title=0 saw_prompt=0
   while (( SECONDS < deadline )); do
     local pane
     pane="$(tmux_capture)"
-    echo "$pane" | grep -q 'type a message' && saw_banner=1
+    echo "$pane" | grep -qE 'par [0-9]+\.[0-9]+' && saw_title=1
     echo "$pane" | grep -q '›' && saw_prompt=1
-    (( saw_banner && saw_prompt )) && break
+    (( saw_title && saw_prompt )) && break
     sleep 0.2
   done
-  (( saw_banner )) || fail "banner not visible within 3s of --resume"
+  (( saw_title )) || fail "title line not visible within 3s of --resume"
   (( saw_prompt )) || fail "prompt not visible within 3s of --resume"
   tmux_kill
 }
@@ -56,6 +58,6 @@ test_resume_session_turn_count() {
   tmux_kill
 }
 
-test_case "--resume shows banner+prompt within 3s"   test_resume_banner_within_3s
+test_case "--resume shows title+prompt within 3s"    test_resume_frame_within_3s
 test_case "--resume /session shows turn history"     test_resume_session_turn_count
 run_tests "$@"

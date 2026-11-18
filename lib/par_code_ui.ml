@@ -951,12 +951,7 @@ let render_delegation_error backend ~agent_type ~error =
   in
   render backend (textf "  %s ✗ failed: %s\n" label error ~style:(style ~fg:Red ~dim:true ()))
 
-(* E. Banner / Prompt / Help *)
-
-let render_banner backend ~version =
-  render_line backend
-    (textf "par %s — type a message, /help for commands." version
-       ~style:(style ~bold:true ()))
+(* E. Prompt / Help *)
 
 let render_prompt backend mode =
   let prefix = match mode with
