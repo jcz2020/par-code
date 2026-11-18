@@ -32,6 +32,9 @@
   `models` list in the config — the OpenAI provider cannot enumerate yet,
   jcz2020/par#42), Up/Down/Enter/Esc, and re-registers the main agent with the
   chosen model so the next turn uses it; the choice is saved to the config.
+- **Visual pass 3**: one turn's tool lines are collected and folded into a single
+  block (head and tail kept, the middle becomes a count) instead of scrolling
+  the answer away.
 - **Visual pass 2**: a one-column scroll indicator appears on the right edge
   once the transcript is taller than the view and moves with the scroll; the
   status bar now fits the terminal instead of being clipped mid-word (branch

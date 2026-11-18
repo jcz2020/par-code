@@ -125,6 +125,10 @@ val create_screen_backend : sink:(image -> unit) -> backend
     passes its own append function, so every [render_*] call site lands inside
     the frame without changing. *)
 
+val set_tool_hooks : line:(image -> unit) -> flush:(unit -> unit) -> unit
+(** v0.15.1: route tool lines to the screen so one turn's calls fold into a
+    block; [flush] is called when the block should be committed. *)
+
 val set_partial_sink : backend -> (string -> unit) -> unit
 (** v0.15.1: where the unfinished line goes on every streamed chunk ("" clears
     it). The screen draws it after the transcript so output appears live. *)

@@ -94,6 +94,9 @@ type t = {
   term : Notty_unix.Term.t;
   mutable transcript : Notty.image list;  (* oldest first *)
   mutable partial : string;               (* line being streamed *)
+  (* v0.15.1: tool lines of the current turn, folded into one block when the
+     answer arrives so a long tool sequence does not bury it. *)
+  mutable tool_block : Notty.image list;
   mutable status : string;
   mutable scroll : int;                   (* lines up from the bottom *)
   mutable running : bool;
@@ -147,6 +150,7 @@ let create () : t =
     saved_tty;
     transcript = [];
     partial = "";
+    tool_block = [];
     status = "";
     scroll = 0;
     running = true;
@@ -336,6 +340,37 @@ let append_truncated (t : t) (img : Par_code_ui.image) =
 let append_text (t : t) (s : string) =
   append t (Par_code_ui.text s)
 
+(* v0.15.1: collect this turn's tool lines, then fold them on release. Up to
+   eight lines survive intact; beyond that the head and tail stay and the
+   middle collapses into a count, so the block keeps a size ceiling. *)
+let append_tool_line (t : t) (img : Par_code_ui.image) =
+  t.tool_block <-
+    t.tool_block @ to_notty_lines ~cols:(width t - 2) img
+
+let flush_tools (t : t) =
+  let lines = t.tool_block in
+  t.tool_block <- [];
+  let n = List.length lines in
+  if n = 0 then ()
+  else begin
+    let kept =
+      if n <= 8 then lines
+      else begin
+        let rec take k l =
+          if k <= 0 then [] else match l with [] -> [] | h :: tl -> h :: take (k - 1) tl
+        in
+        let rec drop k l =
+          if k <= 0 then l else match l with [] -> [] | _ :: tl -> drop (k - 1) tl
+        in
+        take 4 lines
+        @ [ to_notty ~cols:(width t - 2)
+              (Par_code_ui.textf "  … %d more tool lines" (n - 7)) ]
+        @ drop (n - 3) lines
+      end
+    in
+    t.transcript <- t.transcript @ kept
+  end
+
 (* v0.15.1: the streamed half line, replaced wholesale by the REPL on every
    chunk so the frame shows text as it arrives. *)
 let set_partial (t : t) (s : string) = t.partial <- s
@@ -354,7 +389,8 @@ let set_status (t : t) (s : string) = t.status <- s
 (** A transient line shown before the status text while a turn runs. *)
 let set_busy (t : t) (s : string) = t.busy <- s
 
-let line_count (t : t) = List.length t.transcript
+let line_count (t : t) =
+  List.length t.transcript + List.length t.tool_block
 
 (* ------------------------------------------------------------------ *)
 (* Input line                                                          *)
@@ -757,8 +793,9 @@ let history_move (t : t) (delta : int) =
 
 let visible_lines (t : t) ~(height : int) : Notty.image list =
   let all =
-    if t.partial = "" then t.transcript
-    else t.transcript @ [ to_notty ~cols:(width t - 2) (Par_code_ui.text t.partial) ]
+    let base = t.transcript @ t.tool_block in
+    if t.partial = "" then base
+    else base @ [ to_notty ~cols:(width t - 2) (Par_code_ui.text t.partial) ]
   in
   let n = List.length all in
   let start = max 0 (n - height - t.scroll) in
