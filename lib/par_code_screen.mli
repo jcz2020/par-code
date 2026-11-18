@@ -49,6 +49,11 @@ val pump : t -> tick:(t -> unit) -> unit
 
 val render : t -> unit
 
+val poll_interrupt : t -> bool
+(** While a turn runs (the REPL reader is idle), drain pending events and report
+    whether Esc or Ctrl-C was pressed. Other keys are discarded; a modal keeps
+    its own reader and is left alone. *)
+
 
 val stop : t -> unit
 

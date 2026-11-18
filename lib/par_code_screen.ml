@@ -828,6 +828,27 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
 
 let render (t : t) = Notty_unix.Term.image t.term (frame t)
 
+(** During a turn the REPL's own reader is not running. This drains pending
+    events and reports an interrupt key (Esc, or Ctrl-C) without touching the
+    input line; every other key is ignored. Modals keep their own reader. *)
+let poll_interrupt (t : t) : bool =
+  if t.modal <> None then false
+  else begin
+    let read_fd, _ = Notty_unix.Term.fds t.term in
+    let hit = ref false in
+    while
+      t.running
+      && (Notty_unix.Term.pending t.term
+          || (let r, _, _ = Unix.select [ read_fd ] [] [] 0.0 in r <> []))
+    do
+      (match Notty_unix.Term.event t.term with
+       | `Key (`Escape, _) -> hit := true
+       | `Key (`ASCII 'c', mods) when List.mem `Ctrl mods -> hit := true
+       | _ -> ())
+    done;
+    !hit
+  end
+
 (* One pass of the UI loop: drain input, let [tick] update state, render.
    Waiting goes through [Unix.select] with a real timeout: a keystroke wakes the
    loop immediately, and an idle prompt costs one wakeup every 50ms instead of
