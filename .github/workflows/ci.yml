@@ -3,8 +3,16 @@ name: CI
 on:
   push:
     branches: [main]
+    # Documentation-only pushes cannot break the build.
+    paths-ignore: ['**.md', 'docs/**']
   pull_request:
     branches: [main]
+    paths-ignore: ['**.md', 'docs/**']
+
+# A superseded run on the same branch is wasted; cancel it.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -12,7 +20,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, ubuntu-24.04-arm, macos-15]
+        # A pull request gets one fast Linux gate; the full platform matrix runs
+        # once on main after the merge, so the merged artifact is what gets the
+        # expensive arm64/macOS verification.
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-22.04"]' || '["ubuntu-22.04","ubuntu-24.04-arm","macos-15"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: ocaml/setup-ocaml@v3
