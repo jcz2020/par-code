@@ -1,12 +1,11 @@
 # CHANGES
 
-## v0.15.3 — Model listing from the SDK (unreleased)
+## v0.15.3 — Readable tool calls and an installer that works (released 2026-11-18)
 
-> **Status**: In progress on `main`. No version bump yet.
-
-- **PAR SDK `v0.17.3-beta.20261118`** (all six pin points). Both built-in HTTP
-  providers now implement `list_models`, so `/model` asks the endpoint instead
-  of relying on a hand-written `models` list in the config.
+- **PAR SDK `v0.17.3-beta.20261118`** (three hardcoded pin points; the two
+  source installers read it from `dune-project`). Both built-in HTTP providers
+  now implement `list_models`, so `/model` asks the endpoint instead of relying
+  on a hand-written `models` list in the config.
 - **Conversation stays valid after an abort**: a tool result is kept only when
   it directly follows the assistant message that announced its call, and a call
   whose result was pruned is dropped, so the provider no longer rejects a
