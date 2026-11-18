@@ -19,7 +19,9 @@ let bash_tool_contract =
    The `bash` tool runs an argv array directly, with no shell. Do not wrap \
    commands in `sh -c` or `bash -lc`, and do not use `$(...)`, backticks, \
    `eval`, pipes or redirection: the tool's policy rejects those calls before \
-   anything runs. One command per call; use read/write/edit/grep for file work."
+   anything runs. One command per call; use read/write/edit/grep for file work. \
+   The default timeout is 30 s — pass a larger `timeout` (seconds, up to 600) \
+   for builds and test runs."
 
 let ui = lazy (Par_code_ui.create_backend ())let ui_render_error msg = Par_code_ui.render_error (Lazy.force ui) msg
 let ui_render_warning msg = Par_code_ui.render_warning (Lazy.force ui) msg
