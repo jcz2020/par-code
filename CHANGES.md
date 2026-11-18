@@ -32,6 +32,9 @@
   `models` list in the config — the OpenAI provider cannot enumerate yet,
   jcz2020/par#42), Up/Down/Enter/Esc, and re-registers the main agent with the
   chosen model so the next turn uses it; the choice is saved to the config.
+- **`Ctrl-R` reverse search**: type to filter the prompt history, Up/Down or
+  `Ctrl-R` again to step through matches, Enter to take one, Esc to restore what
+  was being typed.
 - **Prompt history survives restarts** again: entries are loaded from and saved
   to `~/.par/history` (newest 200), so Up recalls the previous session too. The
   status bar also shows how full the context is (`ctx 7%`).

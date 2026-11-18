@@ -83,6 +83,13 @@ type picker = {
   mutable p_answer : string option;
 }
 
+type search = {
+  mutable s_query : string;
+  mutable s_index : int;
+  s_saved : string;   (* input restored on Esc *)
+  s_cursor : int;
+}
+
 type t = {
   term : Notty_unix.Term.t;
   mutable transcript : Notty.image list;  (* oldest first *)
@@ -124,6 +131,8 @@ type t = {
   (* Set after accepting or dismissing the menu, so the refresh at the end of
      the same keypress does not reopen it. *)
   mutable menu_suppress : bool;
+  (* v0.15.1: Ctrl-R reverse search over the prompt history. *)
+  mutable search : search option;
   (* Terminal attributes as they were before notty took the tty. A signal
      handler cannot safely call into notty (it can deadlock on a lock the
      interrupted code holds), so the cleanup path restores from here. *)
@@ -161,7 +170,8 @@ let create () : t =
     menu_index = 0;
     files = None;
     menu_token = None;
-    menu_suppress = false }
+    menu_suppress = false;
+    search = None }
 
 (* Notty rejects control characters inside [I.string] (it raises on "\n"),
    and model output is full of them. Split runs on newlines into separate lines
@@ -653,6 +663,69 @@ let load_history (t : t) ~(path : string) =
          with End_of_file -> ())
   with Sys_error _ -> ()
 
+let search_matches (t : t) (q : string) : string list =
+  if q = "" then t.history
+  else begin
+    let q = String.lowercase_ascii q in
+    let n = String.length q in
+    List.filter
+      (fun h ->
+         let h = String.lowercase_ascii h in
+         let m = String.length h in
+         let rec go i = i + n <= m && (String.sub h i n = q || go (i + 1)) in
+         go 0)
+      t.history
+  end
+
+let search_current (t : t) : string =
+  match t.search with
+  | None -> ""
+  | Some s ->
+    (match List.nth_opt (search_matches t s.s_query) (max 0 s.s_index) with
+     | Some m -> m
+     | None -> "")
+
+let search_begin (t : t) =
+  t.search <-
+    Some { s_query = ""; s_index = 0; s_saved = t.input; s_cursor = t.cursor }
+
+let search_cancel (t : t) =
+  (match t.search with
+   | Some s ->
+     t.input <- s.s_saved;
+     t.cursor <- s.s_cursor
+   | None -> ());
+  t.search <- None
+
+let search_accept (t : t) =
+  let m = search_current t in
+  if m <> "" then begin
+    t.input <- m;
+    t.cursor <- String.length m
+  end;
+  t.search <- None
+
+let search_handle (t : t) (k : _) ~(ctrl : bool) =
+  match t.search with
+  | None -> ()
+  | Some s ->
+    (match k with
+     | `ASCII c when not ctrl ->
+       let c = if c >= 'A' && c <= 'Z' then Char.lowercase_ascii c else c in
+       s.s_query <- s.s_query ^ String.make 1 c;
+       s.s_index <- 0
+     | `Backspace ->
+       if s.s_query <> "" then
+         s.s_query <- String.sub s.s_query 0 (String.length s.s_query - 1);
+       s.s_index <- 0
+     | `ASCII c when ctrl && (c = 'r' || c = 'R') ->
+       s.s_index <- s.s_index + 1
+     | `Arrow `Up -> s.s_index <- s.s_index + 1
+     | `Arrow `Down -> s.s_index <- max 0 (s.s_index - 1)
+     | `Enter -> search_accept t
+     | `Escape -> search_cancel t
+     | _ -> ())
+
 let history_push (t : t) (line : string) =
   if String.trim line <> "" then begin
     t.history <- line :: List.filter (fun h -> h <> line) t.history;
@@ -737,6 +810,15 @@ let frame (t : t) : Notty.image =
     |> fun img -> I.vsnap ~align:`Top body_h (I.pad ~l:1 ~r:1 img)
   in
   let input_line =
+    match t.search with
+    | Some s ->
+      I.vsnap ~align:`Bottom input_h
+        (I.hsnap ~align:`Left w
+           (I.string A.(fg cyan)
+              (sanitize_text
+                 (Printf.sprintf " (reverse-i-search) `%s': %s" s.s_query
+                    (search_current t)))))
+    | None ->
     let indent = " " ^ t.prompt in
     let cont_indent = String.make (String.length indent) ' ' in
     let rows =
@@ -866,8 +948,8 @@ let ctrl_c (t : t) =
 
 let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
   let ctrl = List.mem `Ctrl mods in
-  match t.modal with
-  | Some modal ->
+  match t.modal, t.search with
+  | Some modal, _ ->
     (* A modal owns the keyboard: only its keys, Esc, and Ctrl-C matter. *)
     let key =
       match k with
@@ -885,7 +967,8 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
        t.modal_answer <- Some k;
        t.modal <- None
      | _ -> ignore ctrl)
-  | None ->
+  | None, Some _ -> search_handle t k ~ctrl
+  | None, None ->
   let ascii = match k with `ASCII c -> Some c | _ -> None in
   if t.csi_drop then begin
     (* Dropping the tail of a split escape sequence (a mouse report arrives as
@@ -994,6 +1077,7 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
        | 'u' -> kill_to_start t
        | 'k' -> kill_to_end t
        | 'w' -> kill_word t
+       | 'r' -> search_begin t
        | _ -> ())
     | `ASCII c ->
       (* Control keys arrive as bare ASCII codes (Tab = 0x09, Ctrl-C = 0x03),
