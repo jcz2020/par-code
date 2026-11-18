@@ -812,7 +812,29 @@ let frame (t : t) : Notty.image =
   let body_h = max 1 (h - input_h - status_h - 1 - menu_h) in
   let body =
     I.vcat (visible_lines t ~height:body_h)
-    |> fun img -> I.vsnap ~align:`Top body_h (I.pad ~l:1 ~r:1 img)
+    |> fun img -> I.vsnap ~align:`Top body_h (I.pad ~l:1 ~r:0 img)
+  in
+  (* v0.15.1 visual pass 2: a one-column scroll indicator on the right edge.
+     It only appears when the transcript is taller than the view, so the frame
+     stays quiet in the common case. *)
+  let body =
+    let total = line_count t in
+    if total <= body_h then body
+    else begin
+      let thumb = max 1 (body_h * body_h / total) in
+      let max_top = total - body_h in
+      let top =
+        ((max_top - min t.scroll max_top) * (body_h - thumb)) / max 1 max_top
+      in
+      let bar =
+        I.vcat
+          (List.init body_h (fun i ->
+               I.string
+                 A.(fg (if i >= top && i < top + thumb then lightwhite else lightblack))
+                 (if i >= top && i < top + thumb then "█" else "│")))
+      in
+      I.hcat [ body; bar ]
+    end
   in
   let input_line =
     match t.search with
