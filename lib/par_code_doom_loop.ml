@@ -157,7 +157,7 @@ let record (t : t) (evt : tool_event) : action =
       in
       if n >= 3 * thr.bash_retries && not t.bash_aborted then begin
         t.bash_aborted <- true;
-        Abort (Printf.sprintf "Bash retry signal: %d consecutive failures with identical normalized output — aborting goal" n)
+        Abort (Printf.sprintf "Bash retry signal: %d consecutive failures with identical normalized output — stopping here" n)
       end else if n >= thr.bash_retries && not t.bash_nudged then begin
         t.bash_nudged <- true;
         Nudge (Printf.sprintf "Bash retry signal: %d consecutive failures — reassess your approach" n)
@@ -185,7 +185,7 @@ let record (t : t) (evt : tool_event) : action =
       let total = t.edit_total_matches in
       if total >= 3 * thr.edit_matches && not t.edit_aborted then begin
         t.edit_aborted <- true;
-        Abort (Printf.sprintf "Edit repeat signal: %d near-duplicate edits detected — aborting goal" total)
+        Abort (Printf.sprintf "Edit repeat signal: %d near-duplicate edits detected — stopping here" total)
       end else if total >= 2 * thr.edit_matches && not t.edit_judged then begin
         t.edit_judged <- true;
         Force_judge (Printf.sprintf "Edit repeat signal: %d near-duplicate edits detected — forcing judge evaluation" total)
@@ -217,7 +217,7 @@ let record (t : t) (evt : tool_event) : action =
       let n = t.action_count in
       if n >= 3 * thr.action_streak && not t.action_aborted then begin
         t.action_aborted <- true;
-        Abort (Printf.sprintf "Action streak signal: %d consecutive %s actions — aborting goal" n kind)
+        Abort (Printf.sprintf "Action streak signal: %d consecutive %s actions — stopping here" n kind)
       end else if n >= 2 * thr.action_streak && not t.action_judged then begin
         t.action_judged <- true;
         Force_judge (Printf.sprintf "Action streak signal: %d consecutive %s actions — forcing judge evaluation" n kind)

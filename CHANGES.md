@@ -7,6 +7,12 @@
 - **PAR SDK `v0.17.3-beta.20261118`** (all six pin points). Both built-in HTTP
   providers now implement `list_models`, so `/model` asks the endpoint instead
   of relying on a hand-written `models` list in the config.
+- **Conversation stays valid after an abort**: a tool result is kept only when
+  it directly follows the assistant message that announced its call, and a call
+  whose result was pruned is dropped, so the provider no longer rejects a
+  resumed session with "Tool result call_... has no matching call".
+- **Doom-loop messages describe what happened**: they said "aborting goal" on
+  turns with no goal, and the marker was printed twice.
 - **Tool calls describe themselves**: a call is one transcript line that says
   what was asked and what came back — `✓ read lib/dune · 12 lines · 3.0ms`,
   `✓ grep TODO in lib · 9 matches`, `✓ bash make · ok · 2.5s` — instead of
