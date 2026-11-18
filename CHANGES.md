@@ -1,5 +1,20 @@
 # CHANGES
 
+## v0.15.3 — Model listing from the SDK (unreleased)
+
+> **Status**: In progress on `main`. No version bump yet.
+
+- **PAR SDK `v0.17.3-beta.20261118`** (all six pin points). Both built-in HTTP
+  providers now implement `list_models`, so `/model` asks the endpoint instead
+  of relying on a hand-written `models` list in the config.
+- **Root cause found while testing it**: par-code hand-built its `llm_service`
+  record and set `list_models_fn = None`, so even with the SDK fixed the picker
+  still answered "not supported". Both provider paths now call the provider's
+  own `to_llm_service`, which carries the complete capability set.
+- **`/model`**: the config list is now only a fallback for endpoints that do not
+  implement the listing route, and when nothing is available the warning says
+  why (the provider's error) instead of pointing at the upstream issue.
+
 ## v0.15.2 — Visual overhaul (released 2026-11-18)
 
 - **Syntax highlighting**: code blocks are highlighted (comments, strings,
