@@ -29,6 +29,9 @@ type backend = {
      screen owns the terminal, so the existing render_* call sites can stay
      untouched while their output lands inside the frame. *)
   sink : (image -> unit) option;
+  (* v0.15.1: the half line being streamed. The markdown machine only emits a
+     finished line, so without this the frame updated in whole-line bursts. *)
+  mutable partial : (string -> unit) option;
 }
 
 let no_style = {
@@ -267,7 +270,8 @@ let create_backend_out oc =
     markdown_state = Par_code_ui_markdown.initial;
     think_buf = Buffer.create 256;
     thinking_start = None;
-    sink = None }
+    sink = None;
+    partial = None }
 
 (* v0.14.0 S1b: a backend whose output lands in the screen instead of a file.
    Everything that takes [~backend] works unchanged. *)
@@ -276,7 +280,8 @@ let create_screen_backend ~sink =
     markdown_state = Par_code_ui_markdown.initial;
     think_buf = Buffer.create 256;
     thinking_start = None;
-    sink = Some sink }
+    sink = Some sink;
+    partial = None }
 
 let create_backend () = create_backend_out stdout
 
@@ -574,12 +579,22 @@ let of_ansi (s : string) : image =
 
 (* Route renderer text to the sink when one exists, so the screen owns every
    byte that reaches the terminal. *)
+(** v0.15.1: tell whoever draws the frame what the unfinished line looks like
+    right now (empty string clears it). *)
+let publish_partial backend =
+  match backend.partial with
+  | None -> ()
+  | Some f -> f (Par_code_ui_markdown.pending_text backend.markdown_state)
+
+let set_partial_sink backend f = backend.partial <- Some f
+
 let emit_markdown backend s =
   if s <> "" then begin
     match backend.sink with
     | Some f -> f (of_ansi s)
     | None -> output_string backend.out s; flush backend.out
-  end
+  end;
+  publish_partial backend
 
 let flush_markdown backend =
   (match backend.thinking_start with
@@ -607,12 +622,15 @@ let flush_markdown backend =
         Par_code_ui_markdown.push backend.markdown_state safe
       in
       backend.markdown_state <- new_state;
-      emit_markdown backend output
+      emit_markdown backend output;
     end
   end;
   let final = Par_code_ui_markdown.flush backend.markdown_state in
   emit_markdown backend final;
-  backend.markdown_state <- Par_code_ui_markdown.initial
+  backend.markdown_state <- Par_code_ui_markdown.initial;
+  (* v0.15.1: [flush] renders the leftover line without clearing it, so the
+     frame would keep showing it under the committed copy. *)
+  (match backend.partial with Some f -> f "" | None -> ())
 
 (* A status/tool line must not be appended to a half-rendered markdown line.
    [push "\n"] renders the pending line and keeps the code-block context, so
@@ -658,12 +676,12 @@ let render_llm_chunk backend (chunk : Par.Types.llm_response_chunk) =
         Par_code_ui_markdown.push backend.markdown_state safe_text
       in
       backend.markdown_state <- new_state;
-      emit_markdown backend output
+      emit_markdown backend output;
     end
   | Tool_call_start { tool_call_id = _; name } ->
     close_thinking_window ();
     render_event_line backend
-      (textf "→ %s..." name ~style:(style ~dim:true ()))
+      (textf "  → %s" name ~style:(style ~dim:true ()))
   | Tool_call_delta _ ->
     close_thinking_window ()
   | Usage_update _ ->
@@ -681,10 +699,10 @@ let render_tool_event backend (evt : Par.Types.event) =
        streamed text that preceded the tool call is not left buffered. *)
     flush_pending_line backend
   | Tool_completed { tool_name; duration_ms; _ } ->
-    render_event_line backend (textf "  → %s ✓ (%.1fms)" tool_name duration_ms
-      ~style:(style ~fg:Green ()))
+    render_event_line backend (textf "  ✓ %s (%.1fms)" tool_name duration_ms
+      ~style:(style ~fg:Green ~dim:true ()))
   | Tool_failed { tool_name; _ } ->
-    render_event_line backend (textf "  → %s ✗" tool_name
+    render_event_line backend (textf "  ✗ %s" tool_name
       ~style:(style ~fg:Red ~bold:true ()))
   | Tool_progress { tool_name; message; _ } ->
     render_event_line backend (textf "  → %s: %s" tool_name message

@@ -34,6 +34,10 @@ val push : state -> string -> state * string
     Callers use this to flush the line before an out-of-band status line. *)
 val has_pending : state -> bool
 
+val pending_text : state -> string
+(** The half-written line, rendered (ANSI included) so a caller can display it
+    while the model is still streaming. Empty when no line is pending. *)
+
 (** End of stream. Flush any remaining buffer, closing unclosed
     constructs gracefully (unclosed code block emits remaining content
     with code styling; unclosed inline markers emit literally). *)
