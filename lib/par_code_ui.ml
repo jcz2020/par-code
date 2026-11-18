@@ -588,7 +588,22 @@ let publish_partial backend =
 
 let set_partial_sink backend f = backend.partial <- Some f
 
+(* v0.15.1 visual pass 2: consecutive tool lines of one turn are collected by
+   the screen and folded into a single block, so a 20-call turn does not push
+   the answer off the frame. When no hook is installed (plain output) they are
+   rendered one per line as before. *)
+let tool_line_hook : (image -> unit) option ref = ref None
+let tool_flush_hook : (unit -> unit) option ref = ref None
+
+let set_tool_hooks ~line ~flush =
+  tool_line_hook := Some line;
+  tool_flush_hook := Some flush
+
+let flush_tool_block () =
+  match !tool_flush_hook with Some f -> f () | None -> ()
+
 let emit_markdown backend s =
+  if s <> "" then flush_tool_block ();
   if s <> "" then begin
     match backend.sink with
     | Some f -> f (of_ansi s)
@@ -647,7 +662,9 @@ let flush_pending_line backend =
 
 let render_event_line backend img =
   flush_pending_line backend;
-  render_line backend img
+  match !tool_line_hook with
+  | Some f -> f img
+  | None -> render_line backend img
 
 let render_llm_chunk backend (chunk : Par.Types.llm_response_chunk) =
   let close_thinking_window () =

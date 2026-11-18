@@ -116,6 +116,11 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
   Par_code_ui.set_partial_sink ui (fun s ->
       Par_code_screen.set_partial screen s;
       Par_code_screen.render screen);
+  (* v0.15.1: tool lines for one turn collect in the screen and fold when the
+     answer starts, so a long tool sequence cannot bury the reply. *)
+  Par_code_ui.set_tool_hooks
+    ~line:(fun img -> Par_code_screen.append_tool_line screen img)
+    ~flush:(fun () -> Par_code_screen.flush_tools screen);
   (* v0.7.3 W5: per-invoke cancellation state. turn_token_ref holds the
      current turn's token while Runtime.invoke is in flight (cleared in a
      Fun.protect finally, Oracle R3(b)); in_invoke/cancel_pending drive the
