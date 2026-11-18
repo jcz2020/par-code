@@ -6,7 +6,7 @@ source "$(dirname "$0")/../lib/harness.sh"
 test_cjk_chars_display() {
   setup_home; trap teardown_home EXIT
   tmux_spawn
-  tmux_wait_for 'par>' 8
+  tmux_wait_for '›' 8
   tmux send-keys -t "$SESSION_ID" "你好"
   sleep 0.5
   tmux_assert_contains '你好'
@@ -16,7 +16,7 @@ test_cjk_chars_display() {
 test_cjk_multiple_chars() {
   setup_home; trap teardown_home EXIT
   tmux_spawn
-  tmux_wait_for 'par>' 8
+  tmux_wait_for '›' 8
   tmux send-keys -t "$SESSION_ID" "你好世界"
   sleep 0.5
   tmux_assert_contains '你好世界'
@@ -26,7 +26,7 @@ test_cjk_multiple_chars() {
 test_ascii_backspace_after_cjk() {
   setup_home; trap teardown_home EXIT
   tmux_spawn
-  tmux_wait_for 'par>' 8
+  tmux_wait_for '›' 8
   tmux send-keys -t "$SESSION_ID" "你好X"
   sleep 0.5
   tmux_assert_contains '你好X'
@@ -40,7 +40,7 @@ test_ascii_backspace_after_cjk() {
 test_mixed_cjk_ascii() {
   setup_home; trap teardown_home EXIT
   tmux_spawn
-  tmux_wait_for 'par>' 8
+  tmux_wait_for '›' 8
   tmux send-keys -t "$SESSION_ID" "hello你好world"
   sleep 0.5
   tmux_assert_contains 'hello'
@@ -52,7 +52,7 @@ test_mixed_cjk_ascii() {
 test_japanese_input() {
   setup_home; trap teardown_home EXIT
   tmux_spawn
-  tmux_wait_for 'par>' 8
+  tmux_wait_for '›' 8
   tmux send-keys -t "$SESSION_ID" "こんにちは"
   sleep 0.5
   tmux_assert_contains 'こんにちは'
@@ -62,7 +62,7 @@ test_japanese_input() {
 test_korean_input() {
   setup_home; trap teardown_home EXIT
   tmux_spawn
-  tmux_wait_for 'par>' 8
+  tmux_wait_for '›' 8
   tmux send-keys -t "$SESSION_ID" "안녕하세요"
   sleep 0.5
   tmux_assert_contains '안녕하세요'
@@ -72,15 +72,21 @@ test_korean_input() {
 test_cjk_then_quit_clean() {
   setup_home; trap teardown_home EXIT
   tmux_spawn
-  tmux_wait_for 'par>' 8
+  tmux_wait_for '›' 8
   tmux send-keys -t "$SESSION_ID" "你好"
   sleep 0.5
   tmux_assert_contains '你好'
+  # First press clears the line, the second within two seconds exits.
   tmux send-keys -t "$SESSION_ID" C-c
-  sleep 1
-  if tmux has-session -t "$SESSION_ID" 2>/dev/null; then
-    fail "session still alive after Ctrl+C"
-  fi
+  sleep 0.3
+  tmux send-keys -t "$SESSION_ID" C-c
+  local deadline=$((SECONDS + 8))
+  while tmux has-session -t "$SESSION_ID" 2>/dev/null; do
+    if (( SECONDS >= deadline )); then
+      fail "session still alive 8s after two Ctrl+C presses"
+    fi
+    sleep 0.2
+  done
   SESSION_ID=""
 }
 

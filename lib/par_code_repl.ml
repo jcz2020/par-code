@@ -38,14 +38,8 @@ let forget_orphan (id : string) : (unit, string) result =
 
 let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goal
     ?max () =
-  (* v0.14.2: the full-screen interface is the only one. A non-TTY run cannot
-     paint a frame, so say so instead of degrading into a second UI. *)
-  let is_tty = try Unix.isatty Unix.stdout with Unix.Unix_error _ -> false in
-  if not is_tty then begin
-    Printf.eprintf
-      "par needs an interactive terminal; use `par ask \"…\"` for one-shot runs.\n";
-    exit 1
-  end;
+  (* v0.15.0: the full-screen interface is the only one; [cmd_chat] sends a
+     non-TTY run down the one-shot path before it gets here. *)
   let git_branch =
     try
       let ic = Unix.open_process_in "git rev-parse --abbrev-ref HEAD 2>/dev/null" in

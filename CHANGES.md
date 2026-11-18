@@ -4,10 +4,11 @@
 
 > **Status**: In progress on `main`. No version bump yet.
 
-- The line interface is gone: `par` always runs the full-screen REPL, and a
-  non-TTY run exits with a message pointing at `par ask` instead of silently
-  switching to a second UI. `par ask`, the config wizard and the CLI commands
-  are unchanged.
+- The line interface is gone: `par` always runs the full-screen REPL. Without a
+  terminal it keeps working as a one-shot: stdin is the question and the reply
+  goes out as plain text (`echo "…" | par`), and only an empty stdin exits with
+  a message pointing at `par ask`. The CLI commands and the wizard are
+  unchanged.
 - The `ui` config key is gone with it (an old `"ui": "line"` in a config file
   is ignored), as are the `linenoise` dependency, the `/dev/tty` modal fallback
   for the REPL, and the duplicate history/completion wiring.

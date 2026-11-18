@@ -3169,5 +3169,5 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 - **before**：`ui` 在 `"line"` 与 `"tui"` 之间切换，行式界面由 linenoise 提供输入、`/dev/tty` 提供弹窗回退；两套界面各自维护历史、补全与重绘。
 - **after**：行式界面整体删除——REPL 只在全屏里运行，非 TTY 直接报错并提示用 `par ask`；`ui` 配置字段、`linenoise` 依赖、REPL 的历史/补全回调、行模式的 `/dev/tty` 弹窗回退一并移除；`Par_code_ui.read_line` 保留为 CLI 向导的 stdin 问答。
 - **reason**：用户判定行式界面只是权宜之计。保留第二套界面的成本是双份输入/渲染路径与双份回归面（v0.14.0 的三处缺陷都出在这条分支上），收益只剩“非 TTY 也能聊”，而 `par ask` 已经覆盖一次性调用。
-- **scope**：非 TTY 运行 `par` 从“降级为行式”变成“报错退出”（破坏性变更，故走 minor 而不是 patch）；一次性脚本用 `par ask`。
+- **scope**：非 TTY 运行 `par` 不再降级为行式界面，而是走单次问答（stdin 即问题、输出纯文本，空 stdin 才报错），所以 `echo "…" | par` 这类脚本仍可用；破坏性变更主要在配置字段与界面本身，故走 minor。
 - **rollback**：回退到 v0.14.1 tag；代码侧恢复 `run` 里的 `screen = None` 分支与 `linenoise` 依赖即可。

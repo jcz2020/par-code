@@ -14,8 +14,8 @@ ship a useful agent and prove out the PAR SDK in anger.
 (`model · mode · N tok · git branch`), scrollback, bracketed paste, mouse
 wheel, resize handling, in-frame approval modals, streamed markdown, and
 Ctrl-C with Claude Code's two-press semantics. The sent message stays in the
-transcript, long lines wrap instead of being clipped, and a non-TTY run says so
-and points at `par ask` rather than silently switching to a second interface.
+transcript, long lines wrap instead of being clipped, and a non-TTY run turns
+stdin into a one-shot question (`echo "…" | par`) with plain-text output.
 v0.14.1's repairs are included; PAR SDK 0.17.2 (bundled) accepts an integer
 `timeout` and no longer rejects literal `$(...)` under direct argv execution.
 v0.13.0's

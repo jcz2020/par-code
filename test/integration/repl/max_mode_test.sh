@@ -26,7 +26,7 @@ test_max_status_defaults_off() {
   setup_home; trap teardown_home EXIT
   write_dead_endpoint_config
   tmux_spawn
-  tmux_wait_for "par>" 60
+  tmux_wait_for "›" 60
   tmux_send "/max"
   tmux_wait_for "max mode: off" 10
   tmux_assert_contains "3 candidates"
@@ -37,7 +37,7 @@ test_max_rejects_out_of_range() {
   setup_home; trap teardown_home EXIT
   write_dead_endpoint_config
   tmux_spawn
-  tmux_wait_for "par>" 60
+  tmux_wait_for "›" 60
   tmux_send "/max 9"
   tmux_wait_for "between 2 and 5" 10
   tmux_assert_not_contains "Max mode on: 9"
