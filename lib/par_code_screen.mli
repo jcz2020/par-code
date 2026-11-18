@@ -27,8 +27,7 @@ val end_line : t -> unit
 
 val set_status : t -> string -> unit
 
-val set_busy : t -> string -> unit
-(** Transient text (a spinner, elapsed time) shown before the status line while
+val set_busy : t -> string -> unit(** Transient text (a spinner, elapsed time) shown before the status line while
     a turn runs. Empty clears it. *)
 
 val line_count : t -> int
@@ -64,6 +63,10 @@ val ask :
   string option
 (** In-frame modal: returns the key the user pressed (a member of [options]),
     or [None] when Esc dismisses it. Blocks until answered. *)
+
+val load_history : t -> path:string -> unit
+(** Load prompt history from [path] (oldest line first on disk) and remember it
+    so later entries are saved back there. *)
 
 val pick : t -> title:string -> items:string list -> initial:int -> string option
 (** A scrollable list picker: Up/Down move, Enter selects (returns the item),
