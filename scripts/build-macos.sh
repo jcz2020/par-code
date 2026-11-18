@@ -125,24 +125,19 @@ install_dylib gmp    libgmp.dylib    libgmp.10.dylib
 info "setting up opam environment ..."
 eval "$(opam env)"
 
-# Pin PAR SDK to the v0.17.1-beta release tag — the SDK this release targets.
-# A branch-tip pin makes the bundle depend on whatever upstream's main
-# happened to be; an upstream change with a new required record field then
-# breaks the build with no par-code change involved.
-# Idempotent: skip only when the pin already points at the required version.
-# The previous check (`opam list --columns=name | grep -qx par`) never matched
-# anything — `opam list` prints only INSTALLED packages, and `opam pin list`
-# prints the name WITH the version ("par.0.12.0-beta.20261023"), so the script
-# always re-pinned and overwrote CI's tag pin with a branch-tip pin.
-if opam pin list 2>/dev/null | grep -q '^par\.0\.12\.0-beta'; then
-    info "PAR SDK already pinned at v0.17.1-beta; skipping"
-else
-    info "pinning PAR SDK (v0.17.1-beta tag) ..."
-    opam pin add par https://github.com/jcz2020/par.git#v0.17.3-beta.20261118 -y \
-        || { rc=$?; [ "$rc" -eq 31 ] \
-             || die "opam pin failed with exit $rc"; \
-             warn "opam pin returned 31 (out of sync) — continuing"; }
-fi
+# Pin PAR SDK to the release tag this source requires, read from dune-project.
+# A branch-tip pin makes the bundle depend on whatever upstream's main happened
+# to be, and an upstream change with a new required record field then breaks the
+# build with no par-code change involved. A pin hardcoded here goes stale as
+# soon as the requirement moves, so the requirement itself is the source of
+# truth. Re-pinning to the same tag is a no-op for opam.
+_par_pin="$(sed -n 's/.*(par (>= *\([^) ]*\)).*/\1/p' dune-project 2>/dev/null | head -1)"
+[ -n "$_par_pin" ] || die "cannot read the PAR SDK requirement from dune-project"
+info "pinning PAR SDK (v$_par_pin) ..."
+opam pin add par "https://github.com/jcz2020/par.git#v$_par_pin" -y \
+    || { rc=$?; [ "$rc" -eq 31 ] \
+         || die "opam pin failed with exit $rc"; \
+         warn "opam pin returned 31 (out of sync) — continuing"; }
 
 # Deps (idempotent; --with-test is harmless when no test deps are missing).
 info "installing deps ..."
