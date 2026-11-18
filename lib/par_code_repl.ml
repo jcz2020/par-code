@@ -68,7 +68,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
        tokens — and the model name is truncated only as a last resort. *)
     let budget = Stdlib.max 20 (Par_code_screen.width s - 2) in
     let render parts =
-      String.concat " · " (List.filter (fun x -> x <> "") parts)
+      String.concat " │ " (List.filter (fun x -> x <> "") parts)
     in
     let options =
       [ ([ Printf.sprintf "%d tok" tokens; !ctx_part ], true);
