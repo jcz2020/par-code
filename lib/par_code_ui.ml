@@ -912,7 +912,15 @@ let render_help backend =
   let image =
     vcat
       ((text "Commands:" ~style:(style ~bold:true ()))
-       :: List.map (fun (cmd, desc) -> item cmd desc) commands)
+       :: List.map (fun (cmd, desc) -> item cmd desc) commands
+       @ [ empty;
+           text "Keys:" ~style:(style ~bold:true ());
+           item "Enter" "send the message";
+           item "Alt+Enter" "add a line (or finish a line with \\)";
+           item "Tab" "complete a command or flow id";
+           item "Esc" "clear the line";
+           item "Ctrl-C" "clear the line; press twice to exit";
+           item "PgUp/PgDn" "scroll the transcript (wheel works too)" ])
   in
   render_line backend image
 

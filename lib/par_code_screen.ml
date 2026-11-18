@@ -100,6 +100,9 @@ type t = {
   mutable csi_drop : bool;
   mutable modal : modal option;
   mutable modal_answer : string option;
+  (* v0.15: a live "working" line while the model runs; set from the REPL's
+     ticker fiber so the frame keeps moving when no chunks arrive. *)
+  mutable busy : string;
   (* Terminal attributes as they were before notty took the tty. A signal
      handler cannot safely call into notty (it can deadlock on a lock the
      interrupted code holds), so the cleanup path restores from here. *)
@@ -129,7 +132,8 @@ let create () : t =
     editing = false;
     last_ctrl_c = None;
     modal = None;
-    modal_answer = None }
+    modal_answer = None;
+    busy = "" }
 
 (* Notty rejects control characters inside [I.string] (it raises on "\n"),
    and model output is full of them. Split runs on newlines into separate lines
@@ -216,6 +220,27 @@ let wrap_runs ~(cols : int) (runs : (string * Par_code_ui.style) list) :
   if !cur <> [] || !out = [] then flush_line ();
   List.rev !out
 
+(* vcat pads every line to the image's width with a run of spaces; when such a
+   line is wrapped to the frame width the padding spills onto a second line and
+   shows up as a blank row (v0.15.1: /help was double-spaced). Trailing blanks
+   are invisible in a terminal, so drop them. *)
+let trim_trailing_spaces (runs : (string * Par_code_ui.style) list) =
+  let trim_right s =
+    let n = ref (String.length s) in
+    while !n > 0 && s.[!n - 1] = ' ' do
+      decr n
+    done;
+    String.sub s 0 !n
+  in
+  let rec go = function
+    | [] -> []
+    | (txt, sty) :: tl ->
+      let stripped = trim_right txt in
+      if stripped = "" then go tl
+      else (stripped, sty) :: tl
+  in
+  go (List.rev runs) |> List.rev
+
 let to_notty_lines ~(cols : int) (img : Par_code_ui.image) : Notty.image list =
   let open Notty in
   List.concat_map
@@ -229,7 +254,8 @@ let to_notty_lines ~(cols : int) (img : Par_code_ui.image) : Notty.image list =
                 (List.map
                    (fun (txt, sty) -> I.string (attr_of_style sty) txt)
                    runs))
-         (List.concat_map (wrap_runs ~cols) (split_runs runs)))
+         (List.concat_map (wrap_runs ~cols) (split_runs runs)
+          |> List.map trim_trailing_spaces))
     (Par_code_ui.lines img)
 
 let wrap_text ~cols (s : string) : string list =
@@ -281,6 +307,9 @@ let end_line (t : t) =
   end
 
 let set_status (t : t) (s : string) = t.status <- s
+
+(** A transient line shown before the status text while a turn runs. *)
+let set_busy (t : t) (s : string) = t.busy <- s
 
 let line_count (t : t) = List.length t.transcript
 
@@ -431,32 +460,73 @@ let frame (t : t) : Notty.image =
   let open Notty in
   let open Notty.I in
   let w, h = Notty_unix.Term.size t.term in
-  let input_h = 1 in
   let status_h = 1 in
+  (* Multi-line input (Alt+Enter inserts a newline): show at most six rows and
+     keep the cursor's row in view. *)
+  let input_lines =
+    match String.split_on_char '\n' t.input with [] -> [ "" ] | ls -> ls
+  in
+  let n_lines = List.length input_lines in
+  let cursor_line, cursor_col =
+    let before = String.sub t.input 0 t.cursor in
+    let ls = String.split_on_char '\n' before in
+    let n = List.length ls in
+    (n - 1, String.length (List.nth ls (n - 1)))
+  in
+  let max_input_h = 6 in
+  let input_h = max 1 (min max_input_h n_lines) in
+  let first_line = max 0 (min (cursor_line - input_h + 1) (n_lines - input_h)) in
   let body_h = max 1 (h - input_h - status_h - 1) in
   let body =
     I.vcat (visible_lines t ~height:body_h)
     |> fun img -> I.vsnap ~align:`Top body_h (I.pad ~l:1 ~r:1 img)
   in
   let input_line =
-    let before = String.sub t.input 0 t.cursor in
-    let after = String.sub t.input t.cursor (String.length t.input - t.cursor) in
-    I.hsnap ~align:`Left w
-      (I.hcat
-         [ I.string A.(st bold) (sanitize_text (" " ^ t.prompt ^ before))
-           ; I.string A.(st reverse) (if after = "" then " " else sanitize_text (String.sub after 0 1))
-           ; I.string A.empty
-               (if String.length after > 1 then String.sub after 1 (String.length after - 1)
-                else "") ])
+    let indent = " " ^ t.prompt in
+    let cont_indent = String.make (String.length indent) ' ' in
+    let rows =
+      List.filteri
+        (fun i _ -> i >= first_line && i < first_line + input_h)
+        input_lines
+      |> List.mapi (fun j line ->
+             let i = first_line + j in
+             let lead = if i = 0 then indent else cont_indent in
+             if i = cursor_line then begin
+               let before = String.sub line 0 (min cursor_col (String.length line)) in
+               let after =
+                 String.sub line (min cursor_col (String.length line))
+                   (String.length line - min cursor_col (String.length line))
+               in
+               I.hsnap ~align:`Left w
+                 (I.hcat
+                    [ I.string A.(st bold) (sanitize_text (lead ^ before))
+                      ; I.string A.(st reverse)
+                          (if after = "" then " "
+                           else sanitize_text (String.sub after 0 1))
+                      ; I.string A.empty
+                          (if String.length after > 1 then
+                             String.sub after 1 (String.length after - 1)
+                           else "") ])
+             end else
+               I.hsnap ~align:`Left w
+                 (I.string A.empty (sanitize_text (lead ^ line))))
+    in
+    I.vcat rows
   in
   let status =
     let hint =
       if t.last_key = "" then "" else Printf.sprintf "  [%s]" t.last_key
     in
     let scroll_hint = if t.scroll = 0 then "" else Printf.sprintf "  ↑%d" t.scroll in
+    let text =
+      match t.busy, t.status with
+      | "", s -> s
+      | b, "" -> b
+      | b, s -> b ^ " · " ^ s
+    in
     I.hsnap ~align:`Left w
       (I.string A.(fg lightblack)
-         (sanitize_text (" " ^ t.status ^ scroll_hint ^ hint)))
+         (sanitize_text (" " ^ text ^ scroll_hint ^ hint)))
   in
   let rule =
     I.string A.(fg lightblack) (String.concat "" (List.init w (fun _ -> "─")))
@@ -572,22 +642,33 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
   if not t.csi_drop then
   if t.editing then
     match k with
+    | `Enter when List.mem `Meta mods ->
+      (* Alt+Enter: compose a multi-line message; Enter still submits. *)
+      put_back t "\n"
     | `Enter ->
-      let line = t.input in
-      t.submitted <- Some line;
-      t.input <- "";
-      t.cursor <- 0;
-      t.editing <- false;
-      (* The frame owns the screen: once the input line clears, the message the
-         user just sent would be gone. Keep it in the transcript, the way a
-         shell keeps the command line it echoed. *)
-      (match String.trim line with
-       | "" -> ()
-       | _ ->
-         append t (Par_code_ui.text " ");
-         append t
-           (Par_code_ui.textf "\xe2\x80\xba %s" line
-              ~style:(Par_code_ui.style ~fg:Par_code_ui.Green ())))
+      let len = String.length t.input in
+      if len > 0 && t.input.[len - 1] = '\\' then begin
+        (* shell-style continuation: a trailing backslash starts a new line,
+           for terminals/keyboards where Alt+Enter is awkward (a phone). *)
+        t.input <- String.sub t.input 0 (len - 1) ^ "\n";
+        t.cursor <- String.length t.input
+      end else begin
+        let line = t.input in
+        t.submitted <- Some line;
+        t.input <- "";
+        t.cursor <- 0;
+        t.editing <- false;
+        (* The frame owns the screen: once the input line clears, the message
+           the user just sent would be gone. Keep it in the transcript, the way
+           a shell keeps the command line it echoed. *)
+        match String.trim line with
+        | "" -> ()
+        | _ ->
+          append t (Par_code_ui.text " ");
+          append t
+            (Par_code_ui.textf "\xe2\x80\xba %s" line
+               ~style:(Par_code_ui.style ~fg:Par_code_ui.Green ()))
+      end
     | `Escape ->
       (* Hold the decision until the next key: a lone ESC is a key press, but
          the same byte starts every CSI sequence, and a terminal may write the

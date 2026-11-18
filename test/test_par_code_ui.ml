@@ -377,6 +377,19 @@ let with_backend_output f =
   Sys.remove path;
   s
 
+let help_lists_each_command_once () =
+  let out = with_backend_output (fun b -> render_help b) in
+  Alcotest.(check bool) "no blank lines between rows" false
+    (String.contains out '\n'
+     && (let rec scan i = i + 1 < String.length out &&
+                          ((out.[i] = '\n' && out.[i + 1] = '\n')
+                           || scan (i + 1)) in scan 0));
+  Alcotest.(check bool) "mentions keys" true
+    (let h = "Alt+Enter" in
+     let rec find i = i + String.length h <= String.length out
+                      && (String.sub out i (String.length h) = h || find (i + 1)) in
+     find 0)
+
 let render_table_is_single_spaced () =
   let out = with_backend_output (fun b ->
     render_table b ~headers:["A"; "B"] ~rows:[["1"; "2"]; ["3"; "4"]]) in
@@ -478,6 +491,8 @@ let () =
       "render_edges", [
         Alcotest.test_case "table_single_spaced" `Quick render_table_is_single_spaced;
         Alcotest.test_case "tool_boundary_newline" `Quick tool_call_starts_on_a_fresh_line;
+        Alcotest.test_case "help_lists_each_command_once" `Quick
+          help_lists_each_command_once;
       ];
       "modal", [
         Alcotest.test_case "receives_question" `Quick modal_receives_the_question;

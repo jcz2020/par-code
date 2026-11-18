@@ -80,6 +80,41 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
            so nobody else would. *)
         Par_code_screen.render screen)
   in
+  (* A turn blocks the main fiber inside [invoke]; Eio keeps other fibers
+     running, so a ticker can keep the status line moving (spinner + elapsed)
+     even when the provider sends nothing for a while. *)
+  let with_progress f =
+    let finished = ref false in
+    (match Par_code_setup.clock () with
+     | Some clock ->
+       Eio.Fiber.fork
+         ~sw:(Par.Runtime.cancellation_root rt)
+         (fun () ->
+            let frames =
+              [| "\xe2\xa0\x8b"; "\xe2\xa0\x99"; "\xe2\xa0\xb9"; "\xe2\xa0\xb8";
+                 "\xe2\xa0\xbc"; "\xe2\xa0\xb4"; "\xe2\xa0\xa6"; "\xe2\xa0\xa7";
+                 "\xe2\xa0\x87"; "\xe2\xa0\x8f" |]
+            in
+            let start = Unix.gettimeofday () in
+            let i = ref 0 in
+            while not !finished do
+              (try Eio.Time.sleep clock 0.15 with _ -> ());
+              if not !finished then begin
+                incr i;
+                Par_code_screen.set_busy screen
+                  (Printf.sprintf "%s %.0fs"
+                     frames.(!i mod Array.length frames)
+                     (Unix.gettimeofday () -. start));
+                (try Par_code_screen.render screen with _ -> ())
+              end
+            done)
+     | None -> ());
+    Fun.protect
+      ~finally:(fun () ->
+        finished := true;
+        Par_code_screen.set_busy screen "")
+      f
+  in
   (* v0.5.5 P0 #2: tag every save with the current project scope so that
      `par session list` / `par -r` / `par --continue <prefix>` filter
      correctly. PAR SDK 0.8.3 surfaced ?scope through Runtime.save_conversation. *)
@@ -733,7 +768,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
       back in as the next user message; no user input, no history entries.
       Tail-recursive, bounded by execute_turn's stop conditions. *)
    let rec run_chain (message : string) : unit =
-     (match execute_turn ~chained:true message with
+     (match with_progress (fun () -> execute_turn ~chained:true message) with
       | Par_code_chain.Chain_stop -> ()
       | Par_code_chain.Chain_continue next -> run_chain next)
    in
@@ -1367,7 +1402,9 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
          loop ()
        end else begin
             (* Oracle R3(a): user turn may chain; prompt resumes after. *)
-            (match execute_turn ~chained:false trimmed with
+            (match
+               with_progress (fun () -> execute_turn ~chained:false trimmed)
+             with
              | Par_code_chain.Chain_stop -> ()
              | Par_code_chain.Chain_continue next -> run_chain next);
             loop ()
