@@ -96,9 +96,20 @@ type search = {
   s_cursor : int;
 }
 
+type entry =
+  | Line of Notty.image
+  | Tools of tool_block
+
+and tool_block = {
+  bx_lines : Notty.image list;
+  mutable bx_expanded : bool;
+}
+
 type t = {
   term : Notty_unix.Term.t;
-  mutable transcript : Notty.image list;  (* oldest first *)
+  (* Oldest first. A turn's tool lines travel as one foldable entry so Ctrl-O
+     can bring the hidden ones back without rebuilding the transcript. *)
+  mutable transcript : entry list;
   mutable partial : string;               (* line being streamed *)
   (* v0.15.1: tool lines of the current turn, folded into one block when the
      answer arrives so a long tool sequence does not bury it. *)
@@ -330,7 +341,8 @@ let width (t : t) = fst (Notty_unix.Term.size t.term)
    image used to count as a single entry, so pagination and scrolling were off
    by however many lines it had. *)
 let append (t : t) (img : Par_code_ui.image) =
-  t.transcript <- t.transcript @ to_notty_lines ~cols:(width t - 2) img
+  t.transcript <-
+    t.transcript @ List.map (fun l -> Line l) (to_notty_lines ~cols:(width t - 2) img)
 
 (* v0.14.0 S1b: a frame is not a scroll buffer — one huge tool output must not
    push everything else out. Cap the lines taken from a single image and mark
@@ -351,7 +363,7 @@ let append_truncated (t : t) (img : Par_code_ui.image) =
             (Par_code_ui.textf "… (%d more lines)" (n - max_lines_per_image)) ]
     end
   in
-  t.transcript <- t.transcript @ kept
+  t.transcript <- t.transcript @ List.map (fun l -> Line l) kept
 
 let append_text (t : t) (s : string) =
   append t (Par_code_ui.text s)
@@ -368,26 +380,48 @@ let flush_tools (t : t) =
   let lines = t.tool_block in
   t.tool_block <- [];
   t.activity <- "";
-  let n = List.length lines in
-  if n = 0 then ()
+  if lines <> [] then
+    (* Kept whole: the fold is a view, so Ctrl-O can show what was hidden. *)
+    t.transcript <-
+      t.transcript @ [ Tools { bx_lines = lines; bx_expanded = false } ]
+
+(* v0.15.1: the fold. Up to eight lines show as they are; longer runs keep the
+   head and the tail with a count in the middle. Ctrl-O flips [bx_expanded] on
+   the most recent block, which is what brings the hidden lines back. *)
+let max_block_lines = 8
+
+(* How many lines of a block of [n] survive the fold: head, hidden, tail. Kept
+   pure and exported so the arithmetic is testable without a terminal. *)
+let fold_plan (n : int) : int * int * int =
+  if n <= max_block_lines then (n, 0, 0) else (4, n - 7, 3)
+
+let block_view ~cols (b : tool_block) : Notty.image list =
+  let n = List.length b.bx_lines in
+  if b.bx_expanded then b.bx_lines
   else begin
-    let kept =
-      if n <= 8 then lines
-      else begin
-        let rec take k l =
-          if k <= 0 then [] else match l with [] -> [] | h :: tl -> h :: take (k - 1) tl
-        in
-        let rec drop k l =
-          if k <= 0 then l else match l with [] -> [] | _ :: tl -> drop (k - 1) tl
-        in
-        take 4 lines
-        @ [ to_notty ~cols:(width t - 2)
-              (Par_code_ui.textf "  … %d more tool lines" (n - 7)) ]
-        @ drop (n - 3) lines
-      end
+    let head, hidden, tail = fold_plan n in
+    let rec take k l =
+      if k <= 0 then [] else match l with [] -> [] | h :: tl -> h :: take (k - 1) tl
     in
-    t.transcript <- t.transcript @ kept
+    let rec drop k l =
+      if k <= 0 then l else match l with [] -> [] | _ :: tl -> drop (k - 1) tl
+    in
+    let head_lines = take head b.bx_lines in
+    if hidden <= 0 then head_lines
+    else
+      head_lines
+      @ [ to_notty ~cols
+            (Par_code_ui.textf "  … %d more tool lines (Ctrl-O)" hidden) ]
+      @ drop (n - tail) b.bx_lines
   end
+
+let toggle_last_block (t : t) =
+  match
+    List.find_opt (function Tools _ -> true | Line _ -> false)
+      (List.rev t.transcript)
+  with
+  | Some (Tools b) -> b.bx_expanded <- not b.bx_expanded
+  | _ -> ()
 
 (* v0.15.1: the streamed half line, replaced wholesale by the REPL on every
    chunk so the frame shows text as it arrives. *)
@@ -409,8 +443,14 @@ let set_busy (t : t) (s : string) = t.busy <- s
 
 let activity (t : t) = t.activity
 
+let entry_lines ~cols (e : entry) : Notty.image list =
+  match e with Line img -> [ img ] | Tools b -> block_view ~cols b
+
 let line_count (t : t) =
-  List.length t.transcript + List.length t.tool_block
+  let cols = width t - 2 in
+  List.fold_left (fun acc e -> acc + List.length (entry_lines ~cols e)) 0
+    t.transcript
+  + List.length t.tool_block
 
 (* ------------------------------------------------------------------ *)
 (* Input line                                                          *)
@@ -813,7 +853,8 @@ let history_move (t : t) (delta : int) =
 
 let visible_lines (t : t) ~(height : int) : Notty.image list =
   let all =
-    let base = t.transcript @ t.tool_block in
+    let cols = width t - 2 in
+    let base = List.concat_map (entry_lines ~cols) t.transcript @ t.tool_block in
     if t.partial = "" then base
     else base @ [ to_notty ~cols:(width t - 2) (Par_code_ui.text t.partial) ]
   in
@@ -1174,6 +1215,7 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
        | 'k' -> kill_to_end t
        | 'w' -> kill_word t
        | 'r' -> search_begin t
+       | 'o' -> toggle_last_block t
        | _ -> ())
     | `ASCII c ->
       (* Control keys arrive as bare ASCII codes (Tab = 0x09, Ctrl-C = 0x03),

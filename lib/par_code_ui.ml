@@ -608,7 +608,9 @@ let flush_tool_block () =
   match !tool_flush_hook with Some f -> f () | None -> ()
 
 let emit_markdown backend s =
-  if s <> "" then flush_tool_block ();
+  (* Only real answer text ends a tool block. A flushed half line emits "\n",
+     which used to end the block on every tool line, so nothing ever folded. *)
+  if String.trim s <> "" then flush_tool_block ();
   if s <> "" then begin
     match backend.sink with
     | Some f -> f (of_ansi s)
@@ -967,6 +969,7 @@ let render_help backend =
            item "Ctrl-Left/Right" "move by word (Alt+Backspace deletes one)";
            item "Ctrl-R" "search the prompt history backwards";
            item "!command" "run a command directly (no model round-trip)";
+           item "Ctrl-O" "expand or fold the last block of tool calls";
            item "PgUp/PgDn" "scroll the transcript (wheel works too)" ])
   in
   render_line backend image

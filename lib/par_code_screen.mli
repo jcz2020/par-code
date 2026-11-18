@@ -22,6 +22,9 @@ val append_text : t -> string -> unit
 val append_tool_line : t -> name:string -> Par_code_ui.image -> unit
 (** Collect a tool line for the current turn; folded into one block on flush. *)
 
+val fold_plan : int -> int * int * int
+(** How a block of [n] tool lines is folded: (head, hidden, tail). *)
+
 val activity : t -> string
 (** Name of the tool running right now ("" when none). *)
 
