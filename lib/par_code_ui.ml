@@ -923,6 +923,7 @@ let render_help backend =
            item "Esc" "clear the line";
            item "Ctrl-C" "clear the line; press twice to exit";
            item "Ctrl-Left/Right" "move by word (Alt+Backspace deletes one)";
+           item "Ctrl-R" "search the prompt history backwards";
            item "PgUp/PgDn" "scroll the transcript (wheel works too)" ])
   in
   render_line backend image
