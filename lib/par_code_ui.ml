@@ -887,6 +887,7 @@ let commands : (string * string) list =
   [ ("/help", "Show this help");
     ("/session", "Show session info");
     ("/health", "Show runtime health");
+    ("/model", "Switch the model for this session");
     ("/cost", "Show session token usage");
     ("/plan", "Switch to plan mode (read-only; produces a plan file)");
     ("/build", "Switch to build mode (full tool access; saves current plan)");

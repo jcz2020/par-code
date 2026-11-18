@@ -49,7 +49,10 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
     with _ -> ""
   in
   let model_name =
-    match Par_code_config.load () with Some c -> c.Par_code_config.model | None -> ""
+    ref
+      (match Par_code_config.load () with
+       | Some c -> c.Par_code_config.model
+       | None -> "")
   in
   let refresh_status (s : Par_code_screen.t) ~tokens =
     let mode =
@@ -58,7 +61,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
       | Par_code_mode.Plan -> "plan"
     in
     let parts =
-      [ model_name; mode;
+      [ !model_name; mode;
         Printf.sprintf "%d tok" tokens;
         git_branch ]
       |> List.filter (fun x -> x <> "")
@@ -836,6 +839,42 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
         let cmd = match parts with c :: _ -> c | [] -> "" in
         (match cmd with
          | "/help" -> print_help ui ()
+         | "/model" ->
+           (* Provider list first; the SDK cannot list OpenAI models yet (par#42),
+              so fall back to the models named in the config. *)
+           let models =
+             match with_progress (fun () -> Runtime.list_models rt ()) with
+             | Ok (_ :: _ as l) -> l
+             | _ ->
+               (match loaded_cfg with
+                | Some c -> c.Par_code_config.models
+                | None -> [])
+           in
+           (match models with
+            | [] ->
+              Par_code_ui.render_warning ui
+                "[model] no list available: the provider does not expose its models (par#42); add \"models\": [\"…\"] to ~/.par/config.json"
+            | models ->
+              (match
+                 Par_code_screen.pick screen ~title:"Model" ~items:models
+                   ~initial:0
+               with
+               | None -> Par_code_ui.render_notice ui "[model] unchanged"
+               | Some m ->
+                 (match Par_code_setup.set_model m with
+                  | Error e ->
+                    Par_code_ui.render_error ui (Printf.sprintf "[model] %s" e)
+                  | Ok () ->
+                    (match Par_code_config.load () with
+                     | Some c ->
+                       Par_code_config.save { c with Par_code_config.model = m }
+                     | None -> ());
+                    model_name := m;
+                    refresh_status screen
+                      ~tokens:!cost.Par_code_repl_io.total_tokens;
+                    Par_code_ui.render_success ui
+                      (Printf.sprintf "model \xe2\x86\x92 %s" m))));
+           loop ()
          | "/session" ->
            let msg_count = match !conv with
              | None -> 0

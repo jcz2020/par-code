@@ -229,6 +229,16 @@ let planner_tool_names =
 
 let agent_id = "par"
 
+(* v0.15.1: the model picker re-registers the main agent with a new model.
+   [Runtime.register_agent] overwrites by id, so the same tools, middleware and
+   prompt stay in place and only the model changes. *)
+let model_switcher : (string -> (unit, string) result) option ref = ref None
+
+let set_model (model : string) : (unit, string) result =
+  match !model_switcher with
+  | Some f -> f model
+  | None -> Error "runtime not ready"
+
 let setup_runtime (cfg : Par_code_config.config) ~f =
   ensure_rng ();
   let pers = make_persistence_service cfg in
@@ -422,6 +432,32 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
           ui_render_error (Printf.sprintf "Error registering agent: %s" (error_to_string e));
           exit 1
          | Ok () -> ()));
+    (* v0.15.1: let the model picker swap the main agent's model at runtime.
+       Registration with the same id overwrites the entry, so tools, prompt,
+       middleware and iteration budget stay exactly as configured. *)
+    model_switcher :=
+      Some
+        (fun (model : string) ->
+           let switched =
+             { (Par_code_config.to_model_config cfg) with Types.model_name = model }
+           in
+           match
+             Runtime.make_agent
+               ~id:agent_id
+               ~context_window_override:context_window
+               ~context_strategy:None
+               ~system_prompt:(Types.stable_prompt base_prompt)
+               ~model:switched
+               ~tools:!descriptors
+               ~middleware:[ think_tag_strip_middleware ]
+               ~max_iterations:cfg.Par_code_config.max_iterations
+               ()
+           with
+           | Error e -> Error (error_to_string e)
+           | Ok agent ->
+             (match Runtime.register_agent rt agent with
+              | Ok () -> Ok ()
+              | Error e -> Error (error_to_string e)));
     (* Register the memory-extractor agent (v0.3.1). Tools=[] — pure generation. *)
     (match Runtime.make_agent
        ~id:Par_code_extractor.extractor_agent_id

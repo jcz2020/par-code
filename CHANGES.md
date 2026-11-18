@@ -19,8 +19,8 @@
   the elapsed seconds (a fiber keeps repainting when the provider is quiet), so
   a slow model no longer looks frozen.
 - **Multi-line input**: Alt+Enter adds a line, and so does finishing a line with
-  `` (phone keyboards have no Alt). The composer grows to six rows and scrolls
-  with the cursor.
+  a trailing backslash (phone keyboards have no Alt). The composer grows to six
+  rows and scrolls with the cursor.
 - `/help` now lists the input keys next to the commands.
 - **Command menu**: typing `/` shows the matching commands and custom skills
   with their descriptions; Up/Down move, Tab or Enter complete the highlighted
@@ -28,6 +28,10 @@
 - **Esc interrupts a running turn**: while the model is working, Esc (or
   Ctrl-C) cancels it and the transcript records `[cancelled by user]`. Only the
   interrupt key is read during a turn; approval modals keep their own reader.
+- **`/model` picker**: lists the provider's models (SDK list first, then the
+  `models` list in the config — the OpenAI provider cannot enumerate yet,
+  jcz2020/par#42), Up/Down/Enter/Esc, and re-registers the main agent with the
+  chosen model so the next turn uses it; the choice is saved to the config.
 - **`@file` references**: typing `@` lists workspace files (fuzzy, skipping
   `.git`/`_build`/`.par`/`node_modules`); Tab or Enter completes the token
   wherever it sits in the sentence. On submit each referenced file is attached

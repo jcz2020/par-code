@@ -14,6 +14,9 @@ type config = {
   api_key : string;
   api_base : string option;
   model : string;
+  (* v0.15.1: fallback list for the /model picker. The provider's own list is
+     preferred when the SDK can fetch it (par#42: OpenAI cannot yet). *)
+  models : string list;
   persistence : string;
   db_uri : string option;
   temperature : float;
@@ -126,6 +129,7 @@ let default = {
   api_key = "";
   api_base = None;
   model = "gpt-4o";
+  models = [];
   persistence = "sqlite";
   db_uri = None;
   temperature = 0.7;
@@ -184,6 +188,7 @@ let to_json (cfg : config) : Yojson.Safe.t =
     ("api_key", `String cfg.api_key);
     ("api_base", opt_str cfg.api_base);
     ("model", `String cfg.model);
+    ("models", `List (List.map (fun m -> `String m) cfg.models));
     ("persistence", `String cfg.persistence);
     ("db_uri", opt_str cfg.db_uri);
     ("temperature", `Float cfg.temperature);
@@ -245,6 +250,10 @@ let of_json (json : Yojson.Safe.t) : (config, string) result =
       api_key = get_s "api_key";
       api_base = get_os "api_base";
       model = get_s "model";
+      models =
+        (match json |> member "models" with
+         | `List items -> List.filter_map Yojson.Safe.Util.to_string_option items
+         | _ -> []);
       persistence = get_s "persistence";
       db_uri = get_os "db_uri";
       temperature = get_f "temperature" default.temperature;
@@ -390,6 +399,7 @@ let merge
     api_key = Option.value api_key ~default:cfg.api_key;
     api_base = (match api_base with Some b -> Some b | None -> cfg.api_base);
     model = Option.value model ~default:cfg.model;
+    models = cfg.models;
     persistence = Option.value persistence ~default:cfg.persistence;
     db_uri = (match db_uri with Some u -> Some u | None -> cfg.db_uri);
     temperature = Option.value temperature ~default:cfg.temperature;
@@ -696,6 +706,7 @@ let show ?(ui=Par_code_ui.create_backend ()) (cfg : config) =
     line "api_key:" (mask_api_key cfg.api_key);
     line "api_base:" (match cfg.api_base with Some s -> s | None -> "<default>");
     line "model:" cfg.model;
+    line "models:" (String.concat ", " cfg.models);
     line "persistence:" cfg.persistence;
     line "db_uri:" (match cfg.db_uri with Some s -> s | None -> "<default>");
     line "temperature:" (Printf.sprintf "%.2f" cfg.temperature);
