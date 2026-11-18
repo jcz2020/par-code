@@ -11,6 +11,9 @@
   `\` (phone keyboards have no Alt). The composer grows to six rows and scrolls
   with the cursor.
 - `/help` now lists the input keys next to the commands.
+- **Command menu**: typing `/` shows the matching commands and custom skills
+  with their descriptions; Up/Down move, Tab or Enter complete the highlighted
+  one (a second Enter runs it), Esc closes the list.
 
 ## v0.15.0 — One interface (released 2026-11-18)
 
