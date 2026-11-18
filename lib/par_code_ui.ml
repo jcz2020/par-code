@@ -340,6 +340,11 @@ let render_notice backend msg =
 let render_success backend msg =
   render_line backend (textf "✓ %s" msg ~style:(style ~fg:Green ()))
 
+(* v0.15.1: a turn stopped by the user is its own terminal state, not a plain
+   notice - the same weight as success and failure. *)
+let render_cancel backend msg =
+  render_line backend (textf "⊘ %s" msg ~style:(style ~fg:Yellow ()))
+
 (* v0.14.0 S2: when the full-screen UI is active, a modal that reads /dev/tty
    must first give the terminal back. The REPL installs these hooks; in line
    mode they stay empty and nothing changes. *)
