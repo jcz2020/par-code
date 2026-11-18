@@ -74,6 +74,14 @@ let persistence () = !persistence_service
 
 (* The REPL needs a clock to pace a progress poller while [/flow run] blocks. *)
 let clock_ref : _ Eio.Time.clock option ref = ref None
+(* The REPL's !--command passthrough needs the runtime's process manager and
+   working directory, both of which only exist inside [setup_runtime]; the
+   closure is registered there so callers do not have to carry Eio types. *)
+let run_shell_ref : (string list -> (int * string * string) option) option ref =
+  ref None
+
+let run_shell (argv : string list) : (int * string * string) option =
+  match !run_shell_ref with Some f -> f argv | None -> None
 let clock () = !clock_ref
 
 let make_persistence_service (cfg : Par_code_config.config) =
@@ -351,6 +359,12 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
     descriptors := plan_descriptors @ !descriptors;
     (* Git tools: read-only git status/log for planner (v0.5.1) *)
     let process_mgr = Eio.Stdenv.process_mgr env in
+    let cwd = Eio.Stdenv.cwd env in
+    run_shell_ref :=
+      Some
+        (fun argv ->
+          Par_code_shell.run ~sw:(Runtime.cancellation_root rt)
+            ~process_mgr ~cwd argv);
     let git_tools = Par_code_git_tools.tools ~process_mgr in
     List.iter (fun (tb : Types.tool_binding) ->
       (match Runtime.register_tool rt

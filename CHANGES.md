@@ -32,6 +32,10 @@
   `models` list in the config — the OpenAI provider cannot enumerate yet,
   jcz2020/par#42), Up/Down/Enter/Esc, and re-registers the main agent with the
   chosen model so the next turn uses it; the choice is saved to the config.
+- **`!command` passthrough**: a line starting with `!` runs that command
+  directly (argv, no shell, no model round trip), prints its output in the
+  transcript with the exit code and elapsed time, and still obeys `deny`
+  rules from the permission files.
 - **`Ctrl-R` reverse search**: type to filter the prompt history, Up/Down or
   `Ctrl-R` again to step through matches, Enter to take one, Esc to restore what
   was being typed.

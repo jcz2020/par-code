@@ -924,6 +924,7 @@ let render_help backend =
            item "Ctrl-C" "clear the line; press twice to exit";
            item "Ctrl-Left/Right" "move by word (Alt+Backspace deletes one)";
            item "Ctrl-R" "search the prompt history backwards";
+           item "!command" "run a command directly (no model round-trip)";
            item "PgUp/PgDn" "scroll the transcript (wheel works too)" ])
   in
   render_line backend image
