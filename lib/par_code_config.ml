@@ -55,8 +55,6 @@ type config = {
   skill_sources : string list;
   (* v0.13.0: whole-workspace snapshots before each user turn. *)
   snapshot_enabled : bool;
-  (* v0.14.0: "line" (default) or "tui" for the full-screen interface. *)
-  ui : string;
 }
 
 let default_system_prompt = {|
@@ -165,7 +163,6 @@ let default = {
   mcp_servers = [];
   skill_sources = [];
   snapshot_enabled = true;
-  ui = "line";
 }
 
 let config_dir () =
@@ -224,7 +221,6 @@ let to_json (cfg : config) : Yojson.Safe.t =
     ( "mcp_servers"
     , `List (List.map Par.Mcp_types.server_config_to_yojson cfg.mcp_servers) );
     ("snapshot_enabled", `Bool cfg.snapshot_enabled);
-    ("ui", `String cfg.ui);
     ("skill_sources", `List (List.map (fun s -> `String s) cfg.skill_sources));
   ]
 
@@ -314,8 +310,6 @@ let of_json (json : Yojson.Safe.t) : (config, string) result =
              items
          | _ -> []);
       snapshot_enabled = get_b "snapshot_enabled" default.snapshot_enabled;
-      ui =
-        (match get_s "ui" with "tui" -> "tui" | _ -> default.ui);
       skill_sources =
         (match json |> member "skill_sources" with
          | `List items -> List.filter_map Yojson.Safe.Util.to_string_option items
@@ -433,7 +427,6 @@ let merge
     mcp_servers = cfg.mcp_servers;
     skill_sources = cfg.skill_sources;
     snapshot_enabled = cfg.snapshot_enabled;
-    ui = cfg.ui;
   }
 
 let require_config () =
@@ -666,12 +659,6 @@ let update_field ~field ~value =
        | None ->
          Printf.eprintf "Invalid value for max_candidates: expected int, got '%s'\n" value;
          exit 1)
-    | "ui" ->
-      (match String.lowercase_ascii (String.trim value) with
-       | "tui" | "line" as v -> { cfg with ui = v }
-       | other ->
-         Printf.eprintf "Invalid ui '%s'. Use 'line' or 'tui'.\n" other;
-         exit 1)
     (* ── Excluded ── *)
     | "system_prompt" ->
       Printf.eprintf "system_prompt is multiline; set it via 'par config' wizard instead.\n";
@@ -694,7 +681,7 @@ let update_field ~field ~value =
           "max_iterations"; "max_tokens"; "model";
           "parallel_tool_execution"; "persistence"; "planner_max_iterations";
           "provider"; "snapshot_enabled";
-          "system_prompt"; "temperature"; "top_p"; "ui" ];
+          "system_prompt"; "temperature"; "top_p" ];
       exit 1
   in
   save updated;
@@ -742,7 +729,6 @@ let show ?(ui=Par_code_ui.create_backend ()) (cfg : config) =
     line "bash_approval:" cfg.bash_approval;
     line "max_mode:" (string_of_bool cfg.max_mode);
     line "max_candidates:" (string_of_int cfg.max_candidates);
-    line "ui:" cfg.ui;
     line "snapshot_enabled:" (string_of_bool cfg.snapshot_enabled);
   ] in
   render_line ui image

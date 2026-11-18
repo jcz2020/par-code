@@ -179,11 +179,6 @@ val prompt_permission :
 (** Ask whether a bash command may run. Returns the key the user chose
     (["y"], ["a"], ["n"]) or [None]. *)
 
-val set_suspend_hooks :
-  suspend:(unit -> unit) option -> resume:(unit -> unit) option -> unit
-(** Install terminal suspend/resume hooks so a /dev/tty modal can run while the
-    full-screen UI owns the terminal. Line mode leaves both as [None]. *)
-
 val prompt_read : ?backend:backend -> unit -> string option
 (** Flush and read one line from the terminal (stdlib fallback when there is no
     tty). Used by callers that render their own block before asking. *)
@@ -223,9 +218,6 @@ val render_delegation_error : backend -> agent_type:string -> error:string -> un
 
 val render_banner : backend -> version:string -> unit
 val render_prompt : backend -> Par_code_mode.mode -> unit
-(* Plain-text prompt string for [LNoise.linenoise] (no ANSI — linenoise
-   sizes the cursor with strlen). See [prompt_string] impl in par_code_ui.ml. *)
-val prompt_string : Par_code_mode.mode -> string
 val commands : (string * string) list
 (** Slash commands and their one-line descriptions: the single source for help,
     Tab completion and the hint under the prompt. *)

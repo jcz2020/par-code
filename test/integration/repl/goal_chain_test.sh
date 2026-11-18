@@ -65,8 +65,8 @@ test_goal_blocked_llm_error_x2() {
   # Rendered text: "[goal blocked — LLM errors x2; ...]" (spaces, not underscores)
   tmux_wait_for "LLM errors x2" 60
   # Chain stopped → prompt returns
-  tmux_wait_for "par>" 10
-  tmux_assert_contains "par>"
+  tmux_wait_for "›" 10
+  tmux_assert_contains "›"
   tmux_kill
   # Verify goal file exists on disk with Blocked status
   test -f "$PROJECT_ROOT/.par/goals/current.json" \
@@ -87,8 +87,8 @@ test_goal_auto_chain_false_single_turn() {
   tmux_wait_for "Goal set" 60
   tmux_assert_contains "Starting autonomous chain"
   # One error turn → Chain_stop (auto_chain=false) → prompt returns
-  tmux_wait_for "par>" 30
-  tmux_assert_contains "par>"
+  tmux_wait_for "›" 30
+  tmux_assert_contains "›"
   # Streak 1 < 2 → llm_error_x2 must NOT appear
   tmux_assert_not_contains "llm_error_x2"
   tmux_kill

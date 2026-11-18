@@ -34,7 +34,27 @@ let cmd_chat
     | false, None -> Par_code_repl.No_prior
   in
   Par_code_setup.setup_runtime cfg ~f:(fun rt mem_db ->
-    Par_code_repl.run rt ~mem_db ~resume:resume_target ?goal:goal_opt ?max:max_opt ())
+    (* No terminal to paint a frame on: treat stdin as the question and answer in
+       plain text (same path as `par ask`), so `echo "…" | par` still works. *)
+    let interactive = try Unix.isatty Unix.stdout with Unix.Unix_error _ -> false in
+    if interactive then
+      Par_code_repl.run rt ~mem_db ~resume:resume_target ?goal:goal_opt ?max:max_opt ()
+    else begin
+      let buf = Buffer.create 4096 in
+      (try
+         while true do
+           Buffer.add_string buf (input_line stdin);
+           Buffer.add_char buf '\n'
+         done
+       with End_of_file -> ());
+      let message = String.trim (Buffer.contents buf) in
+      if message = "" then begin
+        Printf.eprintf
+          "par needs an interactive terminal; pipe a message in, or use `par ask \"…\"`.\n";
+        exit 1
+      end;
+      Par_code_repl.run_single_shot rt ~mem_db ~message
+    end)
 
 let term_chat =
   let open Term in

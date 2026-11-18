@@ -3,7 +3,7 @@
  (public_name par_code)
  (wrapped false)
   (libraries par par.memory yojson eio eio_main mirage-crypto-rng.unix sqlite3 logs
-             cohttp-eio tls-eio digestif uuidm linenoise domain-name notty-community.unix
+             cohttp-eio tls-eio digestif uuidm domain-name notty-community.unix
              uutf uucp))
 
 (rule

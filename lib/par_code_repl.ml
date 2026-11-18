@@ -38,14 +38,8 @@ let forget_orphan (id : string) : (unit, string) result =
 
 let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goal
     ?max () =
-  (* v0.14.0 S2: select the interface once. "tui" needs a real terminal; a
-     pipe or CI run falls back to the line interface regardless of config. *)
-  let want_tui =
-    match Par_code_config.load () with
-    | Some (c : Par_code_config.config) -> c.ui = "tui"
-    | None -> false
-  in
-  let is_tty = try Unix.isatty Unix.stdout with Unix.Unix_error _ -> false in
+  (* v0.15.0: the full-screen interface is the only one; [cmd_chat] sends a
+     non-TTY run down the one-shot path before it gets here. *)
   let git_branch =
     try
       let ic = Unix.open_process_in "git rev-parse --abbrev-ref HEAD 2>/dev/null" in
@@ -72,27 +66,19 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
     Par_code_screen.set_status s (String.concat " · " parts)
   in
   let screen =
-    if want_tui && is_tty then begin
-      let s = Par_code_screen.create () in
-      Par_code_screen.install_cleanup s;
-      Par_code_ui.set_suspend_hooks
-        ~suspend:(Some (fun () -> Par_code_screen.suspend s))
-        ~resume:(Some (fun () -> Par_code_screen.resume s));
-      Par_code_ui.set_modal_hook
-        (Some (fun ~title ~body ~options ->
-             Par_code_screen.ask s ~title ~body ~options));
-      Some s
-    end else None
+    let s = Par_code_screen.create () in
+    Par_code_screen.install_cleanup s;
+    Par_code_ui.set_modal_hook
+      (Some (fun ~title ~body ~options ->
+           Par_code_screen.ask s ~title ~body ~options));
+    s
   in
   let ui =
-    match screen with
-    | None -> Par_code_ui.create_backend ()
-    | Some s ->
-      Par_code_ui.create_screen_backend ~sink:(fun img ->
-          Par_code_screen.append_truncated s img;
-          (* Repaint from the streaming callback: the turn blocks in [invoke],
-             so nobody else would. *)
-          Par_code_screen.render s)
+    Par_code_ui.create_screen_backend ~sink:(fun img ->
+        Par_code_screen.append_truncated screen img;
+        (* Repaint from the streaming callback: the turn blocks in [invoke],
+           so nobody else would. *)
+        Par_code_screen.render screen)
   in
   (* v0.5.5 P0 #2: tag every save with the current project scope so that
      `par session list` / `par -r` / `par --continue <prefix>` filter
@@ -266,13 +252,8 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
      Par_code_ui.render_notice ui "\nBye!";
      exit 0
    in
-   (* linenoise handles prompt display + UTF-8/wide-char-aware input editing.
-      None = EOF (Ctrl+D) or Ctrl+C (linenoise default catch_break=false).
-      History persists across sessions at ~/.par/history. *)
-  (try
-     LNoise.history_load ~filename:(Filename.concat (Par_code_config.config_dir ()) "history")
-     |> ignore
-   with _ -> ());
+   (* v0.14.2: the screen keeps its own in-memory history; there is no second
+      input library to persist it for. *)
    (* v0.7.3 W4: the turn body, extracted verbatim from loop()'s
       normal-input branch so the chaining driver (W6) can invoke it
       without user input. Closes over the run-scoped refs (conv,
@@ -757,27 +738,18 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
       | Par_code_chain.Chain_continue next -> run_chain next)
    in
   let rec loop () =
-    (* linenoise writes the prompt directly to fd 1, bypassing OCaml's stdout
-       buffer — flush first so rendered output (slash commands via render,
-       which doesn't flush) appears before the next prompt overwrites the view. *)
+    (* Flush first so output rendered by a slash command (which does not flush)
+       is on screen before the frame redraws around the input line. *)
     flush stdout;
-    (* linenoise raises Sys.Break itself when the user presses Ctrl+C at the
-       prompt (its C stub re-raises the registered [sys_break] exception), so
-       the exception comes from the read, not from the SIGINT handler. It has
-       to be caught HERE: [match line with exception ...] cannot see an
-       exception raised while [line] was being evaluated, and the escape ended
-       in Cmdliner's "internal error, uncaught exception: Stdlib.Sys.Break". *)
+    (* The screen owns input; Sys.Break can still land here from a signal
+       outside the screen loop, and Cmdliner would print it as an internal
+       error, so it exits like a normal quit. *)
     let read_input () =
-      match screen with
-      | Some s ->
-        refresh_status s ~tokens:!cost.Par_code_repl_io.total_tokens;
-        (* The mode lives in the status bar; keep the input line quiet. *)
-        Par_code_screen.read_line s ~prompt:"\xe2\x80\xba "
-      | None -> LNoise.linenoise (Par_code_ui.prompt_string !Par_code_mode.current)
+      refresh_status screen ~tokens:!cost.Par_code_repl_io.total_tokens;
+      (* The mode lives in the status bar; keep the input line quiet. *)
+      Par_code_screen.read_line screen ~prompt:"\xe2\x80\xba "
     in
-    let line =
-      try read_input () with Sys.Break -> exit_normally ()
-    in
+    let line = try read_input () with Sys.Break -> exit_normally () in
     match line with
     | None ->
       exit_normally ()
@@ -1394,11 +1366,6 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
          );
          loop ()
        end else begin
-           (match LNoise.history_add trimmed with Ok () -> () | Error _ -> ());
-            (try LNoise.history_save
-              ~filename:(Filename.concat (Par_code_config.config_dir ()) "history")
-              |> ignore
-            with _ -> ());
             (* Oracle R3(a): user turn may chain; prompt resumes after. *)
             (match execute_turn ~chained:false trimmed with
              | Par_code_chain.Chain_stop -> ()
@@ -1406,41 +1373,8 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
             loop ()
       end
   in
-  (* v0.14.0 W2: Tab completes slash commands and skill ids, and the grey hint
-     under the line explains the command before it is run. Registered once, after
-     the skills are known. *)
-  (let starts_with ~prefix s =
-     String.length s >= String.length prefix
-     && String.sub s 0 (String.length prefix) = prefix
-   in
-   let all_commands () =
-     List.map fst Par_code_ui.commands
-     @ List.map
-         (fun (e : Par_code_skills.entry) -> "/" ^ e.descriptor.id)
-         (Par_code_skills.list_custom ())
-   in
-   LNoise.set_completion_callback (fun line completions ->
-       let trimmed = String.trim line in
-       let candidates =
-         if trimmed = "" || trimmed.[0] <> '/' then []
-         else
-           match String.split_on_char ' ' trimmed with
-           | [ partial ] ->
-             List.filter (fun c -> starts_with ~prefix:partial c) (all_commands ())
-           | [ "/flow"; "run"; partial ] ->
-             List.filter
-               (fun id -> starts_with ~prefix:partial id)
-               (Par_code_flow.available ())
-           | _ -> []
-       in
-       (* A single exact match completes; several leave the prefix alone so the
-          terminal can list them. *)
-       List.iter (fun c -> LNoise.add_completion completions c) candidates);
-   LNoise.set_hints_callback (fun line ->
-       let cmd = String.trim line in
-       match Par_code_ui.command_description cmd with
-       | Some desc -> Some (desc, LNoise.White, false)
-       | None -> None));
+  (* v0.14.0 W2: Tab completion over slash commands / skill ids / flow ids is
+     handled inside [Par_code_screen]; nothing is registered here any more. *)
   (match goal with
    | Some g when g <> "" ->
      Par_code_goal.set_goal ~objective:g ~max_steps:goal_max_steps ();

@@ -6,7 +6,7 @@ source "$(dirname "$0")/../lib/harness.sh"
 test_no_update_notice() {
   setup_home; trap teardown_home EXIT
   tmux_spawn
-  tmux_wait_for 'par>' 8
+  tmux_wait_for '›' 8
   tmux_assert_not_contains 'is available'
   tmux_assert_not_contains "par upgrade"
   tmux_kill
@@ -15,7 +15,7 @@ test_no_update_notice() {
 test_banner_present() {
   setup_home; trap teardown_home EXIT
   tmux_spawn
-  tmux_wait_for 'par>' 8
+  tmux_wait_for '›' 8
   tmux_assert_contains 'par'
   tmux_kill
 }

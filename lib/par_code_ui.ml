@@ -303,25 +303,17 @@ let render_line b img =
      output_char b.out '\n';
      flush b.out)
 
-let read_line _b ~prompt =
-  (* linenoise owns prompt display + input editing (raw mode, UTF-8/wide-char-
-     aware backspace). On non-tty stdin it auto-falls-back to a plain fgetc
-     loop. The prompt must be PLAIN TEXT: linenoise sizes the cursor with
-     strlen(prompt), so ANSI escape codes would misposition it. *)
-  let prompt_str = flatten ~color:false prompt in
-  (* linenoise writes the prompt directly to fd 1, bypassing OCaml's stdout
-     buffer — flush first so any pending rendered output (e.g. a slash command
-     via render, which doesn't flush) reaches the terminal before the prompt. *)
+let read_line b ~prompt =
+  (* CLI flows outside the REPL (the config wizard, upgrade prompts) still ask
+     one question on stdin; the interactive REPL itself runs inside the screen. *)
+  render b prompt;
   flush stdout;
-  match LNoise.linenoise prompt_str with
-  (* Ctrl+C: linenoise raises Sys.Break. Cmdliner's Cmd.eval swallows uncaught
-     term exceptions with an "internal error" message, so this must be caught
-     HERE, not at the top level. exit 130 (SIGINT convention) aborts the
-     config wizard / upgrade-confirm — correct: the user wants out, not to
-     continue with defaults. linenoise has already restored the terminal. *)
-  | exception Sys.Break -> exit 130
-  | None -> None
-  | Some line -> Some line
+  try
+    match input_line stdin with
+    | line -> Some (String.trim line)
+  with
+  | End_of_file -> None
+  | Sys.Break -> exit 130
 
 let get_size b = size_of b
 let supports_color b = color_of b
@@ -346,41 +338,29 @@ let render_success backend msg =
 (* v0.14.0 S2: when the full-screen UI is active, a modal that reads /dev/tty
    must first give the terminal back. The REPL installs these hooks; in line
    mode they stay empty and nothing changes. *)
-let suspend_hooks : (unit -> unit) option ref = ref None
-let resume_hooks : (unit -> unit) option ref = ref None
 let modal_hooks :
   (title:string -> body:string list -> options:(string * string) list -> string option)
     option
   ref =
   ref None
 
-let set_suspend_hooks ~suspend ~resume =
-  suspend_hooks := suspend;
-  resume_hooks := resume
-
 let set_modal_hook f = modal_hooks := f
 
-let with_terminal_released f =
-  (match !suspend_hooks with Some s -> s () | None -> ());
-  Fun.protect
-    ~finally:(fun () -> match !resume_hooks with Some r -> r () | None -> ())
-    f
-
-(** Render + FLUSH + read one line from /dev/tty (stdin fallback).
+(** Render + FLUSH + read one line from /dev/tty (stdin fallback), for the CLI
+    flows that ask a question outside the frame.
     The flush is load-bearing: without it the prompt stays in stdout's
     block buffer while we block on input — the user never sees it. *)
 let prompt_read ?(backend=create_backend ()) () =
-  with_terminal_released (fun () ->
-      flush backend.out;
-      let read_tty () =
-        try
-          let tty = open_in "/dev/tty" in
-          Fun.protect ~finally:(fun () -> close_in tty) (fun () -> input_line tty)
-        with Sys_error _ -> input_line stdin
-      in
-      match read_tty () with
-      | line -> Some (String.lowercase_ascii (String.trim line))
-      | exception _ -> None)
+  flush backend.out;
+  let read_tty () =
+    try
+      let tty = open_in "/dev/tty" in
+      Fun.protect ~finally:(fun () -> close_in tty) (fun () -> input_line tty)
+    with Sys_error _ -> input_line stdin
+  in
+  match read_tty () with
+  | line -> Some (String.lowercase_ascii (String.trim line))
+  | exception _ -> None
 
 (* v0.14.0 W1: the approval question as a small block instead of one long line,
    with the reason spelled out and the meaning of each key next to it. Pure, so
@@ -901,19 +881,8 @@ let render_prompt backend mode =
      buffered until the next \n. See v0.5.4 audit P1 #8. *)
   flush backend.out
 
-(* Plain-text prompt for [LNoise.linenoise]. No ANSI: linenoise sizes the
-   cursor with strlen(prompt), so color codes would misposition it.
-   [render_prompt] above still produces the colored version for tests/non-
-   linenoise contexts. *)
-let prompt_string mode =
-  let prefix = match mode with
-    | Par_code_mode.Plan -> "(plan) "
-    | Par_code_mode.Build -> "(build) "
-  in
-  prefix ^ "par> "
-
-(* v0.14.0 W2: one list feeds the help screen, Tab completion and the grey
-   hint under the prompt, so they cannot drift apart. *)
+(* Colored prompt banner, used by CLI flows (the REPL draws its own input line
+   in the frame). *)
 let commands : (string * string) list =
   [ ("/help", "Show this help");
     ("/session", "Show session info");

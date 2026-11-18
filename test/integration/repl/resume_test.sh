@@ -14,7 +14,7 @@ spawn_resume() {
 test_resume_banner_within_3s() {
   setup_home; trap teardown_home EXIT
   tmux_spawn
-  tmux_wait_for 'par>' 8
+  tmux_wait_for '›' 8
   tmux_send '/help'
   tmux_wait_for '/quit' 5
   tmux send-keys -t "$SESSION_ID" C-d
@@ -30,7 +30,7 @@ test_resume_banner_within_3s() {
     local pane
     pane="$(tmux_capture)"
     echo "$pane" | grep -q 'type a message' && saw_banner=1
-    echo "$pane" | grep -q 'par>' && saw_prompt=1
+    echo "$pane" | grep -q '›' && saw_prompt=1
     (( saw_banner && saw_prompt )) && break
     sleep 0.2
   done
@@ -42,14 +42,14 @@ test_resume_banner_within_3s() {
 test_resume_session_turn_count() {
   setup_home; trap teardown_home EXIT
   tmux_spawn
-  tmux_wait_for 'par>' 8
+  tmux_wait_for '›' 8
   tmux_send '/help'
   tmux_wait_for '/quit' 5
   tmux send-keys -t "$SESSION_ID" C-d
   sleep 1
   SESSION_ID=""
   spawn_resume
-  tmux_wait_for 'par>' 8
+  tmux_wait_for '›' 8
   tmux_send '/session'
   tmux_wait_for 'Turns:' 5
   tmux_assert_contains 'Turns:'

@@ -1,5 +1,18 @@
 # CHANGES
 
+## v0.15.0 — One interface (unreleased)
+
+> **Status**: In progress on `main`. No version bump yet.
+
+- The line interface is gone: `par` always runs the full-screen REPL. Without a
+  terminal it keeps working as a one-shot: stdin is the question and the reply
+  goes out as plain text (`echo "…" | par`), and only an empty stdin exits with
+  a message pointing at `par ask`. The CLI commands and the wizard are
+  unchanged.
+- The `ui` config key is gone with it (an old `"ui": "line"` in a config file
+  is ignored), as are the `linenoise` dependency, the `/dev/tty` modal fallback
+  for the REPL, and the duplicate history/completion wiring.
+
 ## v0.14.1 — Fixes from the phone (released 2026-11-18)
 
 > **Status**: Released as tag `v0.14.1`. No new capability — the full-screen

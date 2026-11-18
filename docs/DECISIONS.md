@@ -3153,3 +3153,21 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 - **reason**：这条规则在直接执行模型下是纯误杀，却让日常开发命令（进程查询、环境初始化）大批被拒，模型只能反复重试，bash 失败率因此很高。
 - **scope**：影响所有使用 Coder 策略的 bash 调用；par-code 侧缓解手段只有提示词（已在每轮 appendix 说明 argv 无 shell）。
 - **rollback**：无（未改代码）。
+
+## 2026-11-18 · 全屏界面改为默认（v0.14.2）
+
+- **tag**：v0.14-default-ui-tui
+- **before**：v0.14.0 发布时 `ui` 默认 `"line"`（决策 `v0.14-default-ui-line`），理由是 TUI 只在 proot 的 tmux 里验过。
+- **after**：默认改为 `"tui"`；非 TTY（管道、CI、重定向）仍强制走 `"line"`，`par config set ui line` 可随时退回。
+- **reason**：用户在真实手机上连续使用后明确要求全屏做默认——行式界面本来就是权宜之计，v0.14.1 修完输入回显、换行、markdown、鼠标拆包之后，全屏已经覆盖日常使用。
+- **scope**：只改默认值；显式写了 `"ui": "line"` 的既有配置保持不动。
+- **rollback**：把 `par_code_config.ml` 的默认值改回 `"line"`，或用户侧 `par config set ui line`。
+
+## 2026-11-18 · 删掉行式界面（v0.15.0）
+
+- **tag**：v0.15-remove-line-ui
+- **before**：`ui` 在 `"line"` 与 `"tui"` 之间切换，行式界面由 linenoise 提供输入、`/dev/tty` 提供弹窗回退；两套界面各自维护历史、补全与重绘。
+- **after**：行式界面整体删除——REPL 只在全屏里运行，非 TTY 直接报错并提示用 `par ask`；`ui` 配置字段、`linenoise` 依赖、REPL 的历史/补全回调、行模式的 `/dev/tty` 弹窗回退一并移除；`Par_code_ui.read_line` 保留为 CLI 向导的 stdin 问答。
+- **reason**：用户判定行式界面只是权宜之计。保留第二套界面的成本是双份输入/渲染路径与双份回归面（v0.14.0 的三处缺陷都出在这条分支上），收益只剩“非 TTY 也能聊”，而 `par ask` 已经覆盖一次性调用。
+- **scope**：非 TTY 运行 `par` 不再降级为行式界面，而是走单次问答（stdin 即问题、输出纯文本，空 stdin 才报错），所以 `echo "…" | par` 这类脚本仍可用；破坏性变更主要在配置字段与界面本身，故走 minor。
+- **rollback**：回退到 v0.14.1 tag；代码侧恢复 `run` 里的 `screen = None` 分支与 `linenoise` 依赖即可。

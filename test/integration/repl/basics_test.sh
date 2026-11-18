@@ -6,7 +6,7 @@ source "$(dirname "$0")/../lib/harness.sh"
 test_startup_banner() {
   setup_home; trap teardown_home EXIT
   tmux_spawn
-  tmux_wait_for 'par>' 8
+  tmux_wait_for '›' 8
   tmux_assert_contains 'par'
   tmux_assert_contains 'type a message|/help'
   tmux_kill
@@ -15,7 +15,7 @@ test_startup_banner() {
 test_help_command() {
   setup_home; trap teardown_home EXIT
   tmux_spawn
-  tmux_wait_for 'par>' 8
+  tmux_wait_for '›' 8
   tmux_send '/help'
   tmux_wait_for '/quit' 5
   tmux_assert_contains '/cost'
@@ -27,7 +27,7 @@ test_help_command() {
 test_session_command() {
   setup_home; trap teardown_home EXIT
   tmux_spawn
-  tmux_wait_for 'par>' 8
+  tmux_wait_for '›' 8
   tmux_send '/session'
   tmux_wait_for 'Messages:' 5
   tmux_assert_contains 'Agent:'
@@ -40,7 +40,7 @@ test_session_command() {
 test_cost_command() {
   setup_home; trap teardown_home EXIT
   tmux_spawn
-  tmux_wait_for 'par>' 8
+  tmux_wait_for '›' 8
   tmux_send '/cost'
   tmux_wait_for 'LLM calls|tokens|Token' 5
   tmux_assert_contains 'LLM calls|tokens|Token'
@@ -50,7 +50,7 @@ test_cost_command() {
 test_quit_command() {
   setup_home; trap teardown_home EXIT
   tmux_spawn
-  tmux_wait_for 'par>' 8
+  tmux_wait_for '›' 8
   tmux_send '/quit'
   local deadline=$((SECONDS + 8))
   while tmux has-session -t "$SESSION_ID" 2>/dev/null; do
@@ -66,7 +66,7 @@ test_quit_command() {
 test_ctrl_d_exits_cleanly() {
   setup_home; trap teardown_home EXIT
   tmux_spawn
-  tmux_wait_for 'par>' 8
+  tmux_wait_for '›' 8
   tmux send-keys -t "$SESSION_ID" C-d
   sleep 1
   if tmux has-session -t "$SESSION_ID" 2>/dev/null; then
@@ -75,16 +75,23 @@ test_ctrl_d_exits_cleanly() {
   SESSION_ID=""
 }
 
-# Regression: v0.7.1 — Ctrl+C at prompt must terminate the process.
+# Regression: v0.7.1 — Ctrl+C at the prompt must terminate the process.
+# The framed REPL follows Claude Code: the first press announces, the second
+# within two seconds exits.
 test_ctrl_c_at_prompt_exits_cleanly() {
   setup_home; trap teardown_home EXIT
   tmux_spawn
-  tmux_wait_for 'par>' 8
+  tmux_wait_for '›' 8
   tmux send-keys -t "$SESSION_ID" C-c
-  sleep 1
-  if tmux has-session -t "$SESSION_ID" 2>/dev/null; then
-    fail "tmux session still alive 1s after Ctrl+C at prompt (process did not exit)"
-  fi
+  sleep 0.3
+  tmux send-keys -t "$SESSION_ID" C-c
+  local deadline=$((SECONDS + 8))
+  while tmux has-session -t "$SESSION_ID" 2>/dev/null; do
+    if (( SECONDS >= deadline )); then
+      fail "tmux session still alive 8s after two Ctrl+C presses at the prompt"
+    fi
+    sleep 0.2
+  done
   SESSION_ID=""
 }
 
