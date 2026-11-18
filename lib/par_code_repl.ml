@@ -381,6 +381,9 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
            "[max mode] skipped during the goal chain \xe2\x80\x94 cost would scale with N"
        end);
       conv := Option.map Par_code_payload.sanitize !conv;
+      (* v0.15.1: a new turn must not inherit the previous turn's pending tool
+         block; flush whatever is left before the first tool of this one. *)
+      Par_code_ui.flush_tool_block ();
       (* v0.13.0 W2: remember the workspace before a user turn touches it. The
          snapshot covers shell commands too, which per-file backups cannot. *)
       let snapshots_on =

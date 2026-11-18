@@ -32,6 +32,12 @@
   `models` list in the config — the OpenAI provider cannot enumerate yet,
   jcz2020/par#42), Up/Down/Enter/Esc, and re-registers the main agent with the
   chosen model so the next turn uses it; the choice is saved to the config.
+- **Foldable tool blocks**: a turn's tool lines now travel as one entry, so a
+  block longer than eight lines folds to head + `… N more tool lines (Ctrl-O)` +
+  tail, and `Ctrl-O` brings the hidden calls back. Two bugs this exposed and
+  fixed: a flushed half line ended the block on every tool line (nothing could
+  ever exceed two lines), and a block at or under the threshold was folded
+  anyway by the old arithmetic.
 - **Visual pass 7**: muted text was being rendered as ordinary text because
   notty has no dim attribute; it now maps to grey, so tool lines and thinking
   lines sit on their own layer on both light and dark terminals.
