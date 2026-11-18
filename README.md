@@ -1,545 +1,336 @@
-# par-code
+# par-code: an open-source AI coding agent for the terminal
 
-> An interactive coding agent built on the [PAR](https://github.com/jcz2020/par)
-> SDK — and a real-world validation case for PAR itself.
+**An open-source AI coding agent that lives in your terminal.**
+Full-screen TUI · persistent project memory · plan and goal modes · MCP · OCaml
 
-`par-code` is a terminal coding assistant (terminal-native, REPL-first) implemented in
-OCaml on top of the **PAR (Programmable Agent Runtime)** SDK. It inherits PAR's
-CLI conventions and drives the **core** PAR surface — ReAct loop, tool dispatch,
-type-safe bash, skills, streaming, persistence, MCP reload, workflows — to both
-ship a useful agent and prove out the PAR SDK in anger.
+[![Release](https://img.shields.io/github/v/release/jcz2020/par-code?display_name=tag&sort=semver)](https://github.com/jcz2020/par-code/releases)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![CI](https://github.com/jcz2020/par-code/actions/workflows/ci.yml/badge.svg)](https://github.com/jcz2020/par-code/actions/workflows/ci.yml)
+[![Platforms](https://img.shields.io/badge/platforms-linux%20%7C%20macos-lightgrey)](#platform-support)
 
-**Status:** `v0.15.0` — the full-screen interface is the only interactive one.
-`par` runs the REPL inside a Notty frame: transcript, one-line status bar
-(`model · mode · N tok · git branch`), scrollback, bracketed paste, mouse
-wheel, resize handling, in-frame approval modals, streamed markdown, and
-Ctrl-C with Claude Code's two-press semantics. The sent message stays in the
-transcript, long lines wrap instead of being clipped, and a non-TTY run turns
-stdin into a one-shot question (`echo "…" | par`) with plain-text output.
-v0.14.1's repairs are included; PAR SDK 0.17.2 (bundled) accepts an integer
-`timeout` and no longer rejects literal `$(...)` under direct argv execution.
-v0.13.0's
-`safe and reversible` work is included: `~/.par/permissions.json` +
-`./.par/permissions.json` rules (`allow` / `ask` / `deny`, first match wins)
-and whole-workspace snapshots under `.par/snapshot.git` with `/undo` and
-`/snapshots`. So is the ecosystem slice from v0.11.0 (MCP over stdio and HTTP,
-`/mcp reload`, remote skill sources), v0.10.0's compose groundwork (batch
-delegation, durable turns with `/resume`, file-defined flows) and v0.10.1's
-built-in seven-stage `compose-seven` flow with `/flow run <id> <spec…>`.
-v0.9.0's custom skills and `/distill` are unchanged.
-Pre-built binaries with a one-line installer (`curl | bash`) for Linux
-x86_64/arm64 + macOS arm64, plus `par upgrade`
-self-update. No OCaml or opam needed for end users.
+`par-code` is a terminal coding agent: you describe a change in plain language,
+and it reads your repository, edits files, runs commands, and verifies the
+result without leaving the shell. It is written in OCaml on top of the PAR
+agent SDK, ships as a single self-contained binary, and keeps its working
+memory in a local SQLite database instead of a hosted service.
+
+It is built for people who already live in a terminal and want an agent that
+behaves like a careful colleague: it plans before editing, asks before running
+destructive commands, snapshots the workspace so changes can be undone, and
+never needs a browser, an IDE plugin, or a background daemon.
 
 ---
 
-## Why par-code?
+## Quick start
 
-1. **A coding agent, built on PAR.** Read/write/edit code, run type-safe bash,
-   search the codebase, and orchestrate multi-step coding tasks through PAR's
-   ReAct engine and workflow system.
-2. **A validation case for PAR.** Every feature in par-code exercises a PAR SDK
-   capability. Gaps, friction, and bugs found here feed directly back into PAR.
-3. **Inherits PAR's CLI.** `par-code` mirrors PAR's flags (`--provider`,
-   `--api-key`, `--model`, …) for drop-in compatibility, and follows the same
-   dune / cmdliner conventions.
+```sh
+# 1. Install (Linux x86_64/arm64, macOS arm64 — no OCaml toolchain needed)
+curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.sh | bash
 
-## PAR SDK capabilities par-code targets
+# 2. Point it at a chat-completions-compatible endpoint (interactive wizard)
+par config
 
-| PAR feature | How par-code uses it |
-|---|---|
-| ReAct engine (`Par.Runtime.invoke`) | Core coding-agent loop |
-| Built-in tools (`Par.Builtin_tools`) | read/write/edit/apply_patch, grep, find, ls |
-| Type-safe bash (`Par.Bash_safe_command`) | Run commands without shell injection |
-| Custom tool registration | Code-specific tools (memory, plan, git) |
-| Skills (`Par.Skill_registry`) | Builtin skills registered: code-reviewer, summarizer, translator, rag-assistant |
-| Streaming (`invoke_stream`) | Real-time token + tool output |
-| Long generation (`invoke_generate`) | PRDs, docs, large diffs (also: checkpoint-writer + memory-extractor subagents) |
-| Persistence (`Par.Sqlite_persistence`) | Session history across runs |
-| MCP client (`Par.Mcp_client`) | _Persistence wired; client init deferred — roadmap v0.11.0_ |
-| Workflows (`Par.Workflow_engine`) | _State persistence registered; engine not yet invoked — roadmap v0.10.0_ |
+# 3. Start working
+cd ~/your-project && par
+```
+
+Or ask a single question without the interface:
+
+```sh
+par ask "Why does the release workflow pin actions to commit SHAs?"
+```
+
+## Why use it
+
+- **It is a terminal application, not a chat wrapper.** Transcript, status bar,
+  streaming markdown, scrollback, mouse wheel, bracketed paste, in-frame
+  approval prompts, and resize handling are all part of one full-screen UI.
+- **It remembers your project.** Conventions, gotchas, and decisions are stored
+  per repository and recalled in later sessions — no re-explaining the layout
+  every morning.
+- **It asks before it breaks things.** A permission ruleset decides which
+  commands run, and whole-workspace snapshots make `/undo` possible.
+- **Long sessions keep the thread.** Checkpoints summarize hours of work, and a
+  crammed context window is compacted rather than silently truncated.
+- **You can watch it work.** Every tool call, diff, and command result is
+  rendered in the transcript as it happens, not after the fact.
+
+## Features
+
+### A real terminal interface
+
+`par` opens a full-screen frame: the transcript scrolls, the status bar shows
+`model · mode · tokens · context fill · git branch`, and the input line supports
+multi-line editing, word-wise motion (`Ctrl/Alt+←/→`, `Alt+Backspace`),
+command completion, and history that survives restarts (`~/.par/history`).
+
+Approvals for shell commands and plan submissions appear as in-frame modals, so
+the interface never jumps to a second screen. `Ctrl+C` clears the line; pressed
+twice it exits. When stdin is not a terminal (`echo "…" | par`), the same binary
+answers once and prints plain text.
+
+### Code editing that verifies itself
+
+The agent reads, writes, edits, and patch-applies files, searches with
+grep/find, and runs commands through a type-safe bash tool (argv, no shell
+injection). It is instructed to check its work with your project's own build and
+test commands before claiming success.
+
+### Project memory (local, searchable)
+
+Memory lives in SQLite under `~/.par/par.db` with FTS5 full-text search and
+optional vector search, scoped per project (keyed on the git root). A compact
+index is injected into the system prompt each turn; the agent can call
+`recall_memory` / `remember_memory` itself, and on exit it extracts what it
+learned. You stay in control:
+
+```sh
+par memory list
+par memory search "authentication"
+par memory search-history "why did we switch to sqlite"
+par memory export -o MEMORY.md     # readable, commit-friendly snapshot
+par memory prune --older-than 90 --dry-run
+```
+
+Memory kinds: `preference`, `convention`, `insight`, `gotcha`, `task_map`.
+
+### Long-session continuity
+
+A checkpoint writer runs in the background and records decisions, files
+touched, and open threads. When the conversation approaches
+`context_budget_tokens`, older turns are replaced by the latest checkpoint
+summary instead of being cut off mid-sentence. `/checkpoints` lists them,
+`/checkpoint` forces one, and `/resume` continues a run that a crash
+interrupted.
+
+### Plan mode
+
+`/plan` switches to a read-only planner: it can read files, search, and inspect
+git state, but cannot write. The result is a saved plan file you can review;
+`/build` returns to full tool access. Plans are managed with
+`par plan list|show|prune`.
+
+### Goal mode
+
+`/goal <description>` (or `par --goal`) starts an autonomous chain: after each
+turn a separate judge model decides whether the goal is actually met. Doom-loop
+detection, progress checks, and an error-streak guard stop runs that are going
+nowhere, and `Ctrl+C` pauses mid-invoke without losing the conversation.
+
+### Best-of-N reasoning
+
+`/max 3` answers the same request along several strategy angles with read-only
+candidates, then a selector picks one and routes it to a single-writer
+execution. `/max off` returns to the normal single-pass loop.
+
+### Delegation and workflows
+
+A `delegate` tool spawns an `explore` (read-only) or `general` subagent for
+work that can run in parallel. File-defined workflows live in
+`.par/flows/<id>.json` and run with `/flow run <id> <spec…>`; a built-in
+seven-stage `compose-seven` flow (plan → execute → review → tdd → debug →
+verify → merge) is included.
+
+### Custom skills
+
+Repeated workflows become skills: `./.par/skills/<id>/skill.md` in a project or
+`~/.par/skills/<id>/skill.md` for all projects. Only `trigger: manual` skills are
+registered as `/<id>`. `/distill` turns a session into a proposed skill, shows
+it for confirmation, and writes it atomically. Remote skill sources can be
+pulled from URLs on startup.
+
+### MCP servers
+
+Connect Model Context Protocol servers over stdio or HTTP; their tools become
+available to the agent, and `/mcp reload` picks up changed commands, URLs, new
+servers, and removed ones without restarting the session.
+
+### Permissions and undo
+
+Two rule files — `~/.par/permissions.json` and `./.par/permissions.json` — hold
+ordered `allow` / `ask` / `deny` rules matched against tool names and command or
+path substrings; the first match wins, and user-level rules are read before
+project ones. Bash approval has three modes (`ask`, `auto_project`, `always`).
+Whole-workspace snapshots live under `.par/snapshot.git`, so `/undo [n]` and
+`/snapshots` can roll back a bad edit.
+
+### Sessions
+
+Conversations persist locally. `par session list|show|fork` works from the
+shell, `/sessions` picks one from inside the interface, and partial IDs are
+enough to resume.
 
 ## Install
 
-### One-line install (Linux + macOS)
+### One line (recommended)
 
 ```sh
 curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.sh | bash
 ```
 
-Pre-built binary on Linux x64/arm64 + macOS arm64; source compile on macOS Intel. Installs to `~/.par/bin/par` and offers to add it to PATH. Full matrix: [Platform support](#platform-support).
-
-**Custom install prefix or version:**
+Installs to `~/.par/bin/par` and offers to add it to `PATH`. Custom prefix or
+pinned version:
 
 ```sh
-# Custom install location
 curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.sh | bash -s -- --prefix /opt/par
-
-# Pin to a specific version
-curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.sh | bash -s -- --version v0.2.1
+curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.sh | bash -s -- --version v0.15.0
 ```
 
-**Environment variables:**
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `PAR_PREFIX` | `$HOME/.par` | Install directory override |
-| `PAR_MIRROR` | `github.com` | Mirror host (for CN/enterprise users with restricted GitHub access) |
-| `PAR_NO_UPDATE_CHECK` | unset | Set to `1` to disable the startup version check entirely |
-| `PAR_DISABLE_UPDATE_CHECK` | unset | Set to `1` when invoking `install.sh` from `par upgrade` |
-
-### Source compilation (fallback)
-
-On platforms without a pre-built binary (e.g., macOS Intel), the installer
-automatically falls back to compiling from source. You can also force it:
-
-```sh
-curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.sh | bash -s -- --from-source
-```
-
-This installs opam + OCaml 5.x (if missing), pins the PAR SDK, builds par-code,
-and installs the binary to `~/.par/bin/par`. Takes 5-20 minutes depending on
-whether the OCaml compiler needs to be compiled. Requires:
-
-- **macOS**: Homebrew + Xcode Command Line Tools (`xcode-select --install`)
-- **Linux**: C compiler + make + git (the installer installs opam + dev libraries via apt/dnf/pacman/apk)
-
-### Self-update
-
-Once installed, `par upgrade` keeps you current without a package manager:
-
-```sh
-par upgrade                 # upgrade to latest release
-par upgrade --check         # print current vs latest, exit 0 if up-to-date
-par upgrade --to v0.2.5     # pin to a specific version (downgrades too)
-par upgrade --uninstall     # remove par binary (preserves ~/.par/config.json + par.db)
-par upgrade --uninstall --purge  # remove ALL of ~/.par/ (interactive prompt)
-```
-
-A purely-additive startup check prints one stderr line when a newer version
-exists (gated by `PAR_NO_UPDATE_CHECK=1`).
-
-On platforms without a pre-built binary (e.g. macOS Intel), `par upgrade`
-automatically recompiles from source via the installer — it streams build
-progress to the terminal and takes 5-20 minutes on a first-time build. This
-keeps install and upgrade consistent: whatever the installer can do, upgrade
-can redo.
+`par upgrade` checks for and installs newer releases; `par upgrade --check`
+only reports. Release archives ship a `checksums.txt`.
 
 ### Platform support
 
 | Platform | Status | Notes |
 |---|---|---|
-| Linux x86_64 (glibc >= 2.28) | ✅ Pre-built binary | Covers AlmaLinux 8+, Debian 11+, Ubuntu 20.04+, RHEL 8+, Fedora |
-| Linux arm64 (aarch64) | ✅ Pre-built binary (v0.3.2+) | Raspberry Pi 4/5, AWS Graviton, other ARM Linux |
+| Linux x86_64 (glibc >= 2.28) | ✅ Pre-built binary | Debian 11+, Ubuntu 20.04+, RHEL/Alma 8+, Fedora |
+| Linux arm64 (aarch64) | ✅ Pre-built binary | Raspberry Pi 4/5, AWS Graviton |
 | macOS arm64 (Apple Silicon) | ✅ Pre-built binary | Native |
-| macOS x86_64 (Intel) | ✅ Source compile | No pre-built binary; installer and `par upgrade` auto-detect and compile from source (requires Homebrew + Xcode CLT; 5-20 min build) |
-| Windows x86_64 | ❌ Deferred | v0.2.2 deferred (upstream `Eio.Process` Windows blocker); re-scope when eio ships Windows process support |
-| Alpine Linux (musl) | ❌ Not yet | Static musl binary is a stretch goal |
+| macOS x86_64 (Intel) | ✅ Source compile | Installer and `par upgrade` compile from source |
+| Windows x86_64 | ❌ Not yet | Blocked upstream on process support |
+| Alpine / musl | ❌ Not yet | Static musl build is a stretch goal |
 
-### Integrity model
+Binaries bundle SQLite (FTS5, vector extension) and GMP, so they run without
+system SQLite or OCaml/opam installed.
 
-v0.2.1 downloads are protected by HTTPS + GitHub infrastructure + SHA256
-checksum. This catches **transport corruption** (truncated downloads, bit rot)
-but does **not** defend against a determined network attacker (the checksum
-file ships in the same release as the binary; a MITM who can swap one can swap
-both). Real adversarial integrity (signed checksums via cosign/sigstore, signed
-Windows binaries) lands in v0.2.2 alongside Windows support.
-
-macOS binaries are not code-signed in v0.2.1 — this is architecturally correct
-for a CLI installed via `curl | bash` (it never passes through the OS gatekeeper,
-which only intercepts `.app` bundles and browser-downloaded files with quarantine
-attribute). The installer strips `com.apple.quarantine` xattr for the
-browser-download edge case.
-
-### Developer install (from source)
-
-For contributors who want to build par-code from source (requires OCaml 5.x + opam):
+### From source
 
 ```sh
-# 1. PAR SDK (once)
-opam pin add par https://github.com/jcz2020/par.git
-
-# 2. par-code
-git clone https://github.com/jcz2020/par-code.git
-cd par-code
-opam install . --deps-only --with-test
-dune build
-
-# Run
-dune exec -- par --version
+opam install par --deps-only --with-test   # PAR SDK, pinned to a release tag
+git clone https://github.com/jcz2020/par-code && cd par-code
+dune build && dune runtest
+dune exec -- par
 ```
 
-## Project layout
+## Configuration
 
-```
-par-code/
-├── bin/          # `par` executable + CLI args
-├── lib/          # `par_code` library facade
-├── scripts/      # install.sh, build-macos.sh, docker/, checksums.sh
-├── test/         # Alcotest suite
-└── dune-project
-```
+The wizard (`par config`) writes `~/.par/config.json`. `par config show` prints
+every field with the API key masked, and `par config set <field> <value>` edits
+one. Typical fields:
 
-## Quickstart
-
-```sh
-# 1. Configure a provider (interactive wizard)
-par config
-
-# 2. Start the REPL
-par
-
-# Or ask a single question
-par ask "What does this project do?"
-```
-
-## Project Memory
-
-par-code remembers your project across sessions. Memories are stored per-project
-(keyed on git root) in SQLite with FTS5 full-text search.
-
-### Memory commands
-
-```sh
-par memory add --kind convention --summary "uses conventional commits" --content "..."
-par memory list
-par memory search "authentication"
-par memory search-history "why did we switch to sqlite"
-par memory show <id>
-par memory export -o MEMORY.md
-par memory forget <id>
-par memory prune --older-than 90
-par memory prune --older-than 90 --dry-run  # preview without deleting
-```
-
-### How the agent uses memory
-
-On session start, a compact index of your project's memories is injected into
-the agent's system prompt. The agent can call `recall_memory(query)` to search
-memories via FTS5, and `remember_memory(kind, content, summary)` to save new
-facts it discovers during your session.
-
-On REPL exit, the agent automatically extracts salient facts from the session
-and saves them as memories. Disable with `PAR_NO_AUTO_EXTRACT=1`.
-
-Memory kinds: `preference`, `convention`, `insight`, `gotcha`, `task_map`.
-
-### MEMORY.md export
-
-`par memory export` generates a human-readable markdown file you can commit to
-your repo. This is a read-only export — the database is the source of truth.
-
-## Long-session Continuity
-
-par-code v0.4.0 introduces long-session continuity features that keep hour-long
-coding sessions productive without losing context.
-
-### Session checkpoints
-
-Every N turns (default 10, configurable), a checkpoint-writer subagent snapshots
-the session state into a structured entry:
-
-- **What you're working on** (task description)
-- **Key decisions made** (architectural choices, approach)
-- **Files touched** (read, written, or edited paths)
-- **Interfaces added/modified** (function/type signatures)
-- **Open threads** (TODOs, unresolved questions)
-
-Checkpoints run with `~save:false ~update_current:false` — checkpoint and
-extraction LLM calls never interfere with your conversation state.
-
-```sh
-/checkpoint      # Force an immediate checkpoint
-/checkpoints     # List checkpoints for the current session
-```
-
-Disable with `PAR_NO_CHECKPOINT=1` or `checkpoint_enabled: false` in config.
-
-### Context reconstruction on resume
-
-When resuming a session (`par --resume` or `par --continue <id>`), the most
-recent checkpoints are rendered into a compact session brief and injected into
-the agent's context. The agent picks up exactly where it left off — knowing
-what was done, what was decided, and what remains open.
-
-### Budgeted context injection
-
-When the conversation approaches the model's context window limit, older
-messages are automatically replaced with a checkpoint summary while the most
-recent messages are kept verbatim. A notice is printed:
-
-```
-[context compacted at turn 42 — ~130k → ~45k tokens]
-```
-
-Configure the budget via `context_budget_tokens` in config (default: 100000).
-
-### Periodic memory extraction
-
-In addition to the session-end extraction (v0.3.1), memories are now extracted
-mid-session at each checkpoint cycle. Facts discovered during a long session
-appear in the memory index without waiting for the session to end.
-
-## Goal Mode
-
-`/goal <objective>` sets an objective the agent works toward, with an
-independent judge model evaluating progress. v0.7.3 adds autonomous chaining:
-once a goal is set, the agent chains turns without waiting for user input,
-continuing until the judge verifies completion, a stop condition fires, or
-you hit Ctrl+C.
-
-### Commands
-
-```
-/goal <objective>   set objective (switches to build mode; starts chain)
-/goal               status (step N/M, incl. blocked reason)
-/goal pause         pause (agent stops evaluating)
-/goal resume        resume from paused/blocked
-/goal clear         drop the goal
-```
-
-### Autonomous chaining
-
-When you set a goal (via `/goal` or `--goal`), the agent enters a chain: it
-executes a turn, the chain driver decides whether to continue, and if so the
-next turn fires automatically with a generic continuation nudge. Judge
-feedback is injected via the goal appendix on the following turn, not in the
-continuation message itself.
-
-`--goal <objective>` auto-starts the chain immediately with the objective as
-the first message. Restored goals from disk never auto-continue, you must
-`/goal resume` explicitly.
-
-### Stop conditions
-
-The chain stops (prompt returns) when any of these hold:
-
-- **Goal met** (judge verdict or verify command pass)
-- **Aborted** (doom-loop abort)
-- **Blocked** (`no_progress`, completion-claim failure, or `llm_error_x2`)
-- **Paused** (Ctrl+C)
-- **Max steps** reached
-- **Mode left Build** (switched to Plan)
-- **`goal_auto_chain` = false** (config kill switch, see below)
-
-### Error-streak guard
-
-Two consecutive non-cancelled invoke errors (excluding iteration-cap hits)
-trigger `blocked: llm_error_x2`. The chain stops, the goal is resumable
-via `/goal resume`. Non-cancelled error turns skip the entire goal evaluation
-ladder (no no_progress, no judge, no completion-claim check) because an
-errored turn produced no real assistant reply.
-
-### Ctrl+C semantics
-
-- **During a model/tool turn**: first Ctrl+C cancels the current turn
-  gracefully, pauses the goal, saves the recovered conversation, and returns
-  to the prompt. Second Ctrl+C force-exits immediately (signal ignored,
-  conversation saved). The notice reads `[goal paused — /goal resume to continue]`.
-- **At the prompt, during the judge window, or between turns**: saves and
-  exits (v0.5.4 behavior, unchanged).
-
-### Mid-chain input
-
-While the chain runs the REPL is synchronous. Only Ctrl+C reaches it. Slash
-commands and normal input resume at the prompt after the chain stops.
-
-### Lifecycle and statuses
-
-- **Statuses**: `active` → `met` / `aborted` (one-way) or `blocked: <reason>`
-  (soft-stopped, resumable). Every transition flushes to
-  `.par/goals/current.json`.
-- **Activation is memory-only**: after restart or `--resume`, a saved goal is
-  restored as status-only — the agent never auto-continues; you must
-  `/goal resume`.
-
-### Guardrails
-
-- **No-progress guard**: a turn with zero tool calls, no `goal_done`, and a
-  short reply blocks the goal (`blocked: no_progress`) with a visible notice.
-- **Completion-claim guard**: configure `goal_verify_command` (e.g.
-  `python3 -m pytest tests/ -q`) and the claim "已完成/done" is verified by
-  running it — exit 0 marks the goal `met`; failure blocks it with the output
-  injected as next-turn feedback. Without a verify command, a completion claim
-  forces a judge evaluation immediately (self-reported completion is never
-  trusted).
-- **Doom-loop guard** (v0.7.2): three detectors — identical-failing-bash
-  streaks (normalized), near-identical edits (shingle Jaccard), and
-  same-kind action streaks — escalate nudge → forced judge → real mid-invoke
-  abort (PAR SDK 0.10.0 cancellation). The current turn is cancelled, the goal
-  is marked `aborted` on disk, and an incident record lands in
-  `.par/goals/incidents/`. Thresholds configurable (`doom_bash_retries`,
-  `doom_edit_matches`, `doom_action_streak`).
-
-### Config fields
-
-| Field | Default | Purpose |
-|---|---|---|
-| `goal_auto_chain` | `true` | Autonomous chaining on/off. `false` gives v0.7.2 single-turn judge-supervised semantics (feedback printed, waits at prompt). |
-| `goal_max_steps` | `50` | Maximum turns before forced abort. |
-| `goal_verify_command` | (none) | Shell command to verify completion claims. |
-
-## Max mode (Best-of-N)
-
-Off by default. When on, a build-mode turn first asks the model the same
-question along three different **strategy angles** (minimal change /
-architecture first / risk first), then a dedicated selector agent picks one
-candidate and decides whether it already answers the request or still needs
-execution. Execution is always single-writer: candidates are read-only.
-
-```
-/max                status (off / on, N candidates)
-/max on             enable with the current N
-/max off            disable
-/max 4              enable with 4 candidates (2-5)
---max 4             start the session in max mode with 4 candidates
-```
-
-A max-mode turn looks like:
-
-```
-[max mode] 3 candidates running...
-  candidate 1/3 · done
-  candidate 2/3 · done
-  candidate 3/3 · done
-[max mode] selected candidate 2/3 — it reused the existing backoff helper
-```
-
-Candidates do not stream (N interleaved streams are unreadable); each one
-reports a single line. The winner's final text renders normally, and when the
-selector says "execute", its instruction becomes the next message of a normal
-build turn, which streams as usual. Token cost is multiplied by N and counted
-in `/cost`.
-
-| Field | Default | Purpose |
-|---|---|---|
-| `max_mode` | `false` | Enable max mode by default for build-mode turns. |
-| `max_candidates` | `3` | Number of candidates per turn (2-5). |
-
-Fallbacks: a failing candidate is dropped and the rest continue; if all fail,
-the turn runs as a plain single pass; if the selector itself fails, candidate 1
-answers directly. Max mode is skipped during goal chains and in plan mode.
-
-## Bash approval
-
-`bash_approval` controls how bash commands are confirmed (default `ask`):
-
-| Mode | Behavior |
+| Field | Meaning |
 |---|---|
-| `ask` | every non-trivial command asks `[y/a/N]` |
-| `auto_project` | commands whose paths/redirects stay inside the workspace root run freely; anything touching outside (or unparsable) asks, listing the offending paths |
-| `always` | everything runs without confirmation |
+| `provider` | Chat-completions-compatible endpoint (or messages-style) |
+| `api_base`, `api_key`, `model` | Endpoint, credential, default model |
+| `max_tokens`, `top_p`, `temperature` | Generation limits |
+| `context_window_tokens` | Model context window (default 128000) |
+| `context_budget_tokens` | When older turns collapse into a checkpoint |
+| `bash_approval` | `ask` / `auto_project` / `always` |
+| `max_candidates` | Default Best-of-N width |
+| `auto_extract`, `checkpoint_*` | Memory extraction and checkpoint cadence |
+| `skill_sources` | URLs to pull remote skills from |
 
-With a goal active, `ask` is upgraded to `auto_project` — the agent can work,
-but external writes still require you. Answering `a` persists a
-`<command> *` pattern to `.par/approvals.json`; matching commands skip
-confirmation in future sessions. Classification uses the PAR SDK workspace
-admission check, so the auto-approved scope is exactly the write-tool
-sandbox scope.
+Project state lives next to the code: `.par/` holds permissions, snapshots,
+flows, and project skills. Global state lives in `~/.par/`.
 
-## Plan Mode
+## Command reference
 
-par-code v0.5.0 introduces Plan Mode, a read-only planning mode that runs
-before code changes. In Plan Mode, the agent investigates your codebase and
-produces a structured plan before touching any files.
+Inside the interface:
 
-### Switching modes
+| Command | What it does |
+|---|---|
+| `/help` | Command list and key bindings |
+| `/model` | Switch model for the session (saved to config) |
+| `/sessions`, `/session` | Pick a saved session · show current session info |
+| `/plan`, `/build` | Read-only planning mode · full tool access |
+| `/goal`, `/max` | Autonomous goal with judge · Best-of-N width |
+| `/checkpoints`, `/checkpoint` | List · force a session checkpoint |
+| `/resume` | Continue an interrupted run (`discard` to drop) |
+| `/undo [n]`, `/snapshots` | Roll the workspace back · list snapshots |
+| `/skills`, `/distill` | List user skills · turn a workflow into one |
+| `/flow run\|status\|cancel\|resume` | Run file-defined workflows |
+| `/mcp`, `/mcp reload` | List MCP servers and tools · reload them |
+| `/cost`, `/health` | Token usage · runtime health |
+| `/reset`, `/quit` | Reset conversation · exit |
+
+From the shell: `par`, `par ask "…"`, `par config …`, `par memory …`,
+`par plan …`, `par session …`, `par upgrade …`.
+
+## How it works
 
 ```
-/plan         Switch to plan mode (read-only)
-/build        Switch to build mode (full tool access; saves current plan)
+bin/main.ml        Cmdliner entry point (subcommands + flags)
+   │
+   ▼
+lib/par_code_setup  build the runtime: tools, agents, middleware, approvals
+   │
+   ▼
+PAR SDK ReAct loop  model ⇄ tools, streaming, persistence
+   │
+   ▼
+~/.par/par.db       conversations, checkpoints, memory (SQLite WAL, FTS5)
 ```
 
-The REPL prompt shows the current mode: `(plan) par> ` or `(build) par> `.
+`par-code` registers its tools, subagents, and middleware on one PAR runtime
+per process; every auxiliary model call (checkpointing, memory extraction,
+distillation, judging, candidate selection) runs on that same runtime with
+saving disabled. [`docs/DECISIONS.md`](docs/DECISIONS.md) records why each
+design choice was made, and [`CHANGES.md`](CHANGES.md) lists what shipped in
+each release.
 
-### What the planner can do
+## FAQ
 
-In Plan Mode, the agent has access only to read-only tools: `read`,
-`grep`, `find`, `ls`, `recall_memory`, `search_history`,
-`git_status`, `git_log`. Write, edit, apply_patch, and bash are not
-available, so the LLM never sees their schemas.
+**Is par-code free?** The client is open source under Apache-2.0. You bring your
+own model endpoint, so you pay only that provider.
 
-The planner produces a markdown plan with sections: Goal, Approach, Files to
-Touch, Risks, Open Questions, Steps.
+**Which models can I use?** Any chat-completions-compatible endpoint (a
+messages-style API is supported too). The model is a config field and can be
+switched mid-session with `/model`.
 
-### Plan persistence
+**Does it send my code anywhere?** Code is sent to the model endpoint you
+configure, and to nothing else. Memory, sessions, checkpoints, and snapshots are
+stored locally in SQLite and `.par/`.
 
-When switching from Plan to Build (`/build`), the planner's last output is
-saved to `.par/plans/<ISO8601-timestamp>.md`. On the next build-mode turn,
-the agent is told the plan file path so it can read it before implementing.
+**Does it work without a network?** No — it needs your model endpoint. Everything
+around it (history, memory search, snapshots) is local.
 
-### Managing plans
+**Can it edit files and run commands on its own?** It can, and that is why the
+permission ruleset, approval modes, and workspace snapshots exist. `deny` rules
+win over everything, delete-class commands always prompt, and `/undo` restores a
+snapshot.
 
-```sh
-par plan              # list saved plans (same as `par plan list`)
-par plan list         # list saved plans with size and creation date
-par plan show <file>  # display a saved plan (auto-appends .md if omitted)
-par plan prune        # delete plans older than 30 days
-par plan prune --older-than 7  # delete plans older than 7 days
-```
+**How is it different from other terminal agents?** It is one process with no
+daemon or plugin layer, its state is a local SQLite file you can inspect, long
+sessions are compacted through explicit checkpoints, and the whole thing is
+built on a small OCaml agent runtime rather than a JavaScript or Python stack.
 
-### Agent-invocable switching
+**Does it support Chinese and other non-ASCII text?** Yes — input editing,
+markdown rendering, and truncation are all UTF-8 and display-width aware.
 
-The agent can also switch modes itself by calling the `plan_enter` or
-`plan_exit` tools, useful for smooth handoffs ("Plan ready, switching to
-build").
-
-### Default mode
-
-The default mode is `build` (backward-compatible with v0.4.x). Configure via
-`par config` wizard or `par config set default_mode plan`.
+**Why OCaml?** Startup does not wait on an interpreter or a package loader, the
+binary is self-contained, and the agent loop's types are checked at compile
+time.
 
 ## Roadmap
 
-Each release ships **one** user-facing capability — a thin, demonstrable slice.
-Version numbers stay minimal (no 1.0 until core parity is earned).
+Each release ships one user-facing capability. Shipped so far: interactive
+agent, one-line install, project memory with hybrid search, checkpoint-based
+continuity, plan mode, subagents, goal mode with a judge, Best-of-N reasoning,
+custom skills, workflows, MCP, permissions with snapshots, and the full-screen
+terminal UI. Next milestone is v1.0.0: core-parity stabilisation.
 
-| Version | User-perceivable capability |
-|---|---|
-| **v0.1.0** ✅ | Project skeleton — links the PAR SDK; `par --version` works. |
-| **v0.2.0** ✅ | Interactive coding agent — REPL, provider config, read/write/edit/grep/find/bash, streaming, session persistence. *"It reads and edits my code."* |
-| **v0.2.1** ✅ | One-line install & self-update (Linux + macOS) — `curl … \| bash`, no OCaml/opam required; pre-built binaries bundle sqlite3 + libgmp for true portability (glibc ≥ 2.28); `par upgrade` keeps it current. *"Install in one line. Updates itself."* |
-| **v0.2.2** | Deferred (upstream `Eio.Process` Windows blocker — `Eio.Process` unimplemented on Windows; re-scope when eio ships Windows process support) |
-| **v0.3.0** ✅ | Project memory — SQLite-backed memory with FTS5 full-text search + recall/remember agent tools + `par memory` CLI. *"It remembers my project across sessions."* |
-| **v0.3.1** ✅ | Auto-extraction + history search — session-end memory extraction + FTS5 search over past conversations. *"It remembers without being asked, and recalls what it wrote."* |
-| **v0.3.2** ✅ | Linux arm64 pre-built binary — Raspberry Pi / AWS Graviton / other aarch64 Linux supported with one-line installer. *"Install on ARM without compiling."* |
-| **v0.3.3** ✅ | PAR SDK 0.7.3 + hybrid memory search — memory storage migrated to PAR SDK `Sqlite_memory`; FTS5 + vector + RRF hybrid search via configurable embedding service; per-turn memory injection. *"Memory search understands meaning, not just keywords."* |
-| **v0.4.0** ✅ | Long-session continuity — checkpoint-writer subagent, budgeted context injection, context reconstruction on resume, periodic mid-session memory extraction. *"Hours-long sessions never lose the thread."* |
-| **v0.4.1** ✅ | Async checkpoints + UX polish — periodic checkpoint/extraction now run as background Eio fibers (no REPL freeze); transcript truncation switched from first-N to last-N; `/checkpoints` shows decisions, files, and open threads per entry. Manual `/checkpoint` stays synchronous for verification. *"Checkpoints no longer freeze the REPL."* |
-| **v0.4.2** ✅ | Critical fix — multi-turn conversations now correctly preserve assistant responses in `conversation.history`. PAR SDK 0.7.8 engine bug (silently dropped the terminal assistant message) was affecting v0.4.0 and v0.4.1; this release rebuilds against the fixed PAR SDK. *"The agent remembers what it just said."* |
-| **v0.4.3** ✅ | UX quick patch — `/cost` slash command (per-session token accumulator + operational metrics); `par config show` subcommand (prints all 19 fields with masked api_key); config wizard now prompts for 6 previously-hidden options (max_tokens, top_p, auto_extract, checkpoint_*, context_budget_tokens); memory `recall` no longer drops `usage_count`/`last_used_at` fields. Dead `bump_usage` removed. *"Daily-friction fixes — see what your session costs, inspect config without entering the wizard."* |
-| **v0.4.5** ✅ | UI abstraction layer — `Ui.*` rendering API with composable styled images; streaming markdown state machine; all 175 printf sites migrated; PAR SDK signals (tool_call chunks, usage_update, bash events) now rendered; 73 new tests. Zero new dependencies. *"Output that's structured, colored, and markdown-aware — and ready for a future TUI swap."* |
-| **v0.5.0** ✅ | Plan mode — read-only planner agent + `/plan` `/build` mode switching + plan file persistence + `plan_enter`/`plan_exit` agent tools. *"It plans before it touches code."* |
-| **v0.5.1** ✅ | Plan CLI + git tools — `par plan list/show/prune` commands + `git_status`/`git_log` read-only tools for the planner agent. *"Manage saved plans; planner sees git state."* |
-| **v0.5.2** ✅ | Streaming fallback — print `resp.text` when provider streaming delivers no chunks. *"No more silent empty responses."* |
-| **v0.5.3** ✅ | REPL rendering fixes — tool indicator de-duplication + `/dev/tty` bash confirmation + empty response diagnostics. *"Cleaner tool output; bash no longer swallows your input."* |
-| **v0.5.4** ✅ | Session management — `par session list/show/fork` + partial ID resume + Ctrl+C clean exit. *"Browse, fork, and resume sessions without copy-pasting UUIDs."* |
-| **v0.5.5** ✅ | Hotfix — Plan Mode tool-filter name fix + startup version-notice fix + REPL prompt flush + `<think>` tag middleware + session scope write-side fix. *"Audit findings resolved; advertised features actually work."* |
-| **v0.5.6** ✅ | Audit Wave 2–3 + UX polish — `par config set` all 20 fields + install.sh source compile fallback + `par memory prune --dry-run` + memory prefix resolution + `/session` alignment + legacy scope migration + streaming `<think>` strip + checkpoint/plan `<think>` strips + `/cost` token counts (PAR SDK 0.8.3). *"Every advertised feature works end-to-end; daily-friction UX polished."* |
-| **v0.6.0** ✅ | Subagent delegation — `delegate` tool with `explore` (read-only) and `general` (full capability) subagents. Synchronous, isolated, depth-limited. Plus plan mode fix (find_last_assistant_text bug). *"It spawns helpers to explore and work in parallel."* |
-| **v0.6.1** ✅ | Install/upgrade fixes — stale-binary permission guard in install.sh + `par upgrade` source-fallback parity (no-prebuilt platforms now self-update via source recompile) + `Filename.temp_file` hygiene. *"Intel Mac upgrade no longer dead-ends."* |
-| **v0.6.2** ✅ | UTF-8 REPL input (linenoise) — CJK backspace no longer garbles (raw-mode wcwidth-aware editing) + Ctrl+C-crash fixes (REPL + config wizard) + slash-command stdout-flush fix. New bundled-C `linenoise` dep. *"Type and edit Chinese cleanly."* |
-| **v0.7.0** ✅ | Goal-driven autonomy — `/goal` command + independent judge model + doom-loop detection + `goal_done` agent tool + `--goal` CLI flag. Judge-supervised mode (evaluates after each turn; full autonomous chaining in v0.7.1). PAR SDK 0.8.6. *"It won't declare done until the goal is truly met."* |
-| **v0.7.1** ✅ | Planner budget + REPL exit-path hotfix — dedicated `planner_max_iterations` config field (default 15, was hardcoded 8) + `early_stopping_method = Generate` on planner (synthesizes a best answer instead of error on budget exhaustion) + unified `exit_normally ()` across `/exit`/Ctrl+D/Ctrl+C (kills the double-extraction-on-exit bug). *"Planner stops running out of steam mid-thought; exit actually exits."* |
-| **v0.7.2** ✅ | Goal usability hardening — visible confirmation prompts (bash + plan gate), reasoning-model thinking timer, three-class bash approval (`ask`/`auto_project`/`always`) with always-pattern persistence, planner synthesis fallback, doom-loop v2 (three signals + real abort + incident records), goal lifecycle (blocked status + disk flush + memory-only activation), no-progress & completion-claim guardrails. *"It can actually finish a goal — and you can see what it's waiting for."* |
-| **v0.7.3** ✅ | Autonomous goal chaining — `run_chain` driver (after each turn the judge verdict drives the next without user input); `par --goal` auto-starts the chain; real mid-invoke cancellation (PAR SDK 0.10.0: doom Guard-cancel + Ctrl+C pause with recovered conversation saved + second Ctrl+C force-exit); error-streak guard (`llm_error_x2` after 2 consecutive errors, soft/resumable); `goal_auto_chain` kill switch. *"Give it a goal, it works until the judge verifies it — and Ctrl+C actually stops it mid-stride."* |
-| **v0.7.4** ✅ | Provider-error resilience — context compaction drops orphan tool results instead of shipping them to the provider; a provider rejection of class invalid-input dumps the conversation to `~/.par/debug/` for byte-level root-cause analysis; CI and release pin the PAR SDK to a release tag, so one version always builds the same binary. *"When the provider says no, you can prove why."* |
-| **v0.7.5** ✅ | SDK follow-up — PAR SDK 0.12-beta: `apply_patch` (diff-based multi-file edits) with prompt guidance on when to use it versus `edit`, complete bash output so loop detection sees the real result, SDK floor bump to the new release tag. *"It edits more reliably, and its build no longer depends on upstream's mood."* |
-| **v0.8.0** ✅ | Best-of-N reasoning — max mode: N read-only candidates answered along different strategy angles, a dedicated selector picks one and routes it to answer or single-writer execution; `/max` + `--max N` + two config fields, `/cost` counts all N. *"It tries several approaches and picks the best."* |
-| **v0.8.1** ✅ | Hardening — context truncation, malformed tool-call payloads and unconfigured embeddings can no longer break a session; one plan file per submission; fork ids resolve; UTF-8-safe CLI output; `--db-uri` honored. *"Long sessions stay healthy."* |
-| **v0.8.2** ✅ | P2 cleanup — doom-loop no longer counts routine bash/edit sequences; streamed text and tool lines stop gluing; `/cost` records tool invocations and computes visible tools; manual `/checkpoint` skips memory extraction; zero-row migration noise and table blank lines are gone. *"The daily loop stops lying to you."* |
-| **v0.9.0** ✅ | Self-improvement — custom slash commands + `/distill`. *"It turns my repeated workflows into reusable skills."* |
-| **v0.9.1** | Memory hygiene — `/dream` consolidates the memory index (merge/rewrite/prune, dry-run by default). *"It keeps its own notes short and accurate."* |
-| **v0.10.0** ✅ | Compose groundwork — batch delegation on `invoke_parallel`, durable turns with `/resume`, file-defined workflows (`/flow`), and a three-stage plan→edits→review compose example; the full seven-stage set is v0.10.1. *"Give a spec, it designs, codes, reviews, and tests end-to-end."* |
-| **v0.11.0** ✅ | Ecosystem connections — MCP over stdio and HTTP with in-place `/mcp reload`, remote skill sources (`skill_sources`). OAuth deferred. *"Connect any MCP server; pull skills from URLs."* |
-| **v0.10.1** ✅ | Seven-stage compose — built-in `compose-seven` flow (plan → execute → review → tdd → debug → verify → merge) and `/flow run <id> <spec>`. Shipped inside v0.14.0. *"Give a spec, it designs, codes, reviews and tests end-to-end."* |
-| ~~v0.12.0~~ | ~~Code intelligence — LSP integration~~ **Dropped 2026-11-17**: an agent already gets authoritative diagnostics from the build and tests, and `find`/`grep` covers navigation; per-language servers are a maintenance burden for marginal gain (see `docs/DECISIONS.md`). |
-| **v0.13.0** ✅ | Safe & reversible — permission ruleset (allow/ask/deny) + whole-workspace snapshots with `/undo`. *"It asks before destructive ops; changes can be undone."* |
-| **v0.14.0** ✅ | Polished terminal app — full-screen TUI, status bar, modal approvals, scrollback and paste (i18n deferred to post-1.0). *"A real terminal application."* |
-| **v1.0.0** | **Core-parity milestone** — v0.2–v0.14 capabilities complete and stabilized. |
+[`CHANGES.md`](CHANGES.md) is the authoritative release log;
+[`docs/DECISIONS.md`](docs/DECISIONS.md) records the reasoning behind each
+design change.
 
-Post-1.0 (extended, on demand): voice input/control, plugin system, codesearch,
-notebook editing, apply_patch, LSP rename.
+## 中文速览
+
+`par-code` 是一个开源的终端 AI 编码助手：在命令行里用自然语言描述需求，它会读代码、
+改文件、跑命令并自己验证结果。全屏终端界面、按项目保存的长期记忆、计划模式、目标模式、
+MCP 支持，整个程序是一个自包含的二进制（macOS/Linux，无需安装 OCaml）。
+
+```sh
+curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.sh | bash
+par config   # 配置一个 chat-completions 兼容的模型端点
+par          # 进入界面
+```
+
+## Contributing
+
+Issues and pull requests are welcome. `make dev-deps` installs dependencies,
+`dune build` and `dune runtest` are the gates CI runs, and
+`bash test/integration/run.sh` runs the end-to-end harness on Linux. Each
+subdirectory carries an `AGENTS.md` describing its conventions.
 
 ## License
 
