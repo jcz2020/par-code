@@ -25,6 +25,9 @@ val feed : t -> string -> unit
 val end_line : t -> unit
 (** Commit the streamed line to the transcript. *)
 
+val set_partial : t -> string -> unit
+(** The half line being streamed, shown after the transcript; empty clears it. *)
+
 val set_status : t -> string -> unit
 
 val set_busy : t -> string -> unit(** Transient text (a spinner, elapsed time) shown before the status line while

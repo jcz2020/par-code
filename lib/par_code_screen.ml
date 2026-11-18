@@ -336,8 +336,13 @@ let append_truncated (t : t) (img : Par_code_ui.image) =
 let append_text (t : t) (s : string) =
   append t (Par_code_ui.text s)
 
+(* v0.15.1: the streamed half line, replaced wholesale by the REPL on every
+   chunk so the frame shows text as it arrives. *)
+let set_partial (t : t) (s : string) = t.partial <- s
+
 (* Streaming: [feed] extends the partial line, [end_line] commits it. *)
 let feed (t : t) (s : string) = t.partial <- t.partial ^ s
+
 let end_line (t : t) =
   if t.partial <> "" then begin
     append_text t t.partial;
@@ -1035,10 +1040,13 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
         match String.trim line with
         | "" -> ()
         | _ ->
-          append t (Par_code_ui.text " ");
+          (* v0.15.1 visual pass: a blank line separates the end of one turn
+             from the next, and the echo is bold so it reads as the start of a
+             turn rather than as more output. *)
+          append t (Par_code_ui.text "");
           append t
             (Par_code_ui.textf "\xe2\x80\xba %s" line
-               ~style:(Par_code_ui.style ~fg:Par_code_ui.Green ()))
+               ~style:(Par_code_ui.style ~fg:Par_code_ui.Green ~bold:true ()))
       end
     | `Escape ->
       (* Hold the decision until the next key: a lone ESC is a key press, but

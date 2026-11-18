@@ -402,7 +402,7 @@ let tool_call_starts_on_a_fresh_line () =
     render_llm_chunk b
       (Par.Types.Tool_call_start { tool_call_id = "call-1"; name = "bash" })) in
   Alcotest.(check string) "buffered text is flushed before the tool line"
-    "now.\n→ bash...\n" out
+    "now.\n  → bash\n" out
 
 (* ── Test runner ─────────────────────────────────────────────────────── *)
 
