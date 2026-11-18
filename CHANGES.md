@@ -11,6 +11,17 @@
   bar down the left edge, a corner at the bottom.
 - **Composer placeholder**: an empty input line says `Ask anything · /help for
   commands` in muted grey instead of showing a bare prompt.
+- **Scrolling while a turn runs**: the busy-state poll used to drain every event
+  and only look for Esc, so PgUp/PgDn, the wheel and shift-arrows did nothing
+  exactly when the transcript was long enough to want them; they scroll now, and
+  the position is the first thing on the status bar.
+- **Working directory in the status bar**, with the git branch as the first field
+  to be dropped when the width runs out.
+- **Fixed scroll bar drift**: the indicator column followed the widest line of
+  the current view, so it slid left as content arrived; the body is snapped to
+  the last column so it stays put.
+- **Readable measure**: the transcript is capped at 110 columns and centred on
+  wide terminals instead of running the full width.
 - **Status bar segments**: fields are separated by a rule glyph, and while a turn
   runs the right edge shows `esc interrupt`.
 
