@@ -118,6 +118,10 @@ type t = {
   mutable activity : string;
   mutable status : string;
   mutable scroll : int;                   (* lines up from the bottom *)
+  (* v0.15.2: last pointer position while dragging, so a swipe scrolls.
+     Termux reports a touch drag as a mouse drag once motion tracking is on,
+     which notty enables with 1002/1006 in its mouse mode. *)
+  mutable drag_y : int option;
   mutable running : bool;
   mutable last_key : string;
   (* v0.14.0 S2: the input line. *)
@@ -173,6 +177,7 @@ let create () : t =
     activity = "";
     status = "";
     scroll = 0;
+    drag_y = None;
     running = true;
     last_key = "";
     escape_at = None;
@@ -1330,6 +1335,21 @@ let render (t : t) = Notty_unix.Term.image t.term (frame t)
 (** During a turn the REPL's own reader is not running. This drains pending
     events and reports an interrupt key (Esc, or Ctrl-C) without touching the
     input line; every other key is ignored. Modals keep their own reader. *)
+(* One place for pointer scrolling: the wheel steps by three lines, a drag
+   scrolls by however far the finger moved (content follows the finger). *)
+let handle_mouse (t : t) (m : Notty.Unescape.mouse) =
+  match m with
+  | `Press (`Scroll `Up), _, _ -> t.scroll <- t.scroll + 3
+  | `Press (`Scroll `Down), _, _ -> t.scroll <- max 0 (t.scroll - 3)
+  | (`Press _ | `Drag), (_, y), _ ->
+    (match t.drag_y with
+     | Some last ->
+       let delta = y - last in
+       if delta <> 0 then t.scroll <- max 0 (t.scroll + delta)
+     | None -> ());
+    t.drag_y <- Some y
+  | `Release, _, _ -> t.drag_y <- None
+
 let poll_interrupt (t : t) : bool =
   if t.modal <> None then false
   else begin
@@ -1352,9 +1372,7 @@ let poll_interrupt (t : t) : bool =
          t.scroll <- t.scroll + 1
        | `Key (`Arrow `Down, mods) when List.mem `Shift mods ->
          t.scroll <- max 0 (t.scroll - 1)
-       | `Mouse (`Press (`Scroll `Up), _, _) -> t.scroll <- t.scroll + 3
-       | `Mouse (`Press (`Scroll `Down), _, _) ->
-         t.scroll <- max 0 (t.scroll - 3)
+       | `Mouse m -> handle_mouse t m
        | _ -> ())
     done;
     !hit
@@ -1407,11 +1425,8 @@ let pump (t : t) ~(tick : t -> unit) =
          let _, h = Notty_unix.Term.size t.term in
          handle_key t ~page:(max 1 (h / 2)) (k, mods);
          refresh_menu t)
-    | `Mouse (`Press (`Scroll `Up), _, _) -> t.scroll <- t.scroll + 3
-    | `Mouse (`Press (`Scroll `Down), _, _) ->
-      t.scroll <- max 0 (t.scroll - 3)
+    | `Mouse m -> handle_mouse t m
     | `Paste _ -> ()
-    | _ -> ()
   done;
   if t.running then begin
     tick t;

@@ -11,6 +11,10 @@
   bar down the left edge, a corner at the bottom.
 - **Composer placeholder**: an empty input line says `Ask anything · /help for
   commands` in muted grey instead of showing a bare prompt.
+- **Finger scrolling**: notty already enables motion reporting (1002/1006), so a
+  touch drag arrives as a mouse drag event; it used to be dropped. Dragging now
+  scrolls by however far the finger moved, in the same handler as the wheel, so
+  it works during a turn too.
 - **Scrolling while a turn runs**: the busy-state poll used to drain every event
   and only look for Esc, so PgUp/PgDn, the wheel and shift-arrows did nothing
   exactly when the transcript was long enough to want them; they scroll now, and
