@@ -575,10 +575,21 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
   if t.editing then
     match k with
     | `Enter ->
-      t.submitted <- Some t.input;
+      let line = t.input in
+      t.submitted <- Some line;
       t.input <- "";
       t.cursor <- 0;
-      t.editing <- false
+      t.editing <- false;
+      (* The frame owns the screen: once the input line clears, the message the
+         user just sent would be gone. Keep it in the transcript, the way a
+         shell keeps the command line it echoed. *)
+      (match String.trim line with
+       | "" -> ()
+       | _ ->
+         append t (Par_code_ui.text " ");
+         append t
+           (Par_code_ui.textf "\xe2\x80\xba %s" line
+              ~style:(Par_code_ui.style ~fg:Par_code_ui.Green ())))
     | `Escape ->
       (* Hold the decision until the next key: a lone ESC is a key press, but
          the same byte starts every CSI sequence, and a terminal may write the
