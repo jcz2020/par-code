@@ -1,19 +1,6 @@
 # CHANGES
 
-## v0.15.2 — Update check (unreleased)
-
-> **Status**: In progress on `main`. No version bump yet.
-
-- The startup notice compared the fetched tag with the running version for
-  *inequality*, so a stale cache entry (or any older release) printed
-  `info: par v0.13.0 is available (current: 0.15.0)`. Versions are now
-  compared numerically and the notice fires only when the fetched tag is
-  strictly newer; `par upgrade --check` uses the same comparison for its exit
-  code.
-
-## v0.15.1 — Conversational input (unreleased)
-
-> **Status**: In progress on `main`. No version bump yet.
+## v0.15.1 — Conversational input (released 2026-11-18)
 
 - **Live progress**: while a turn runs, the status bar animates a spinner and
   the elapsed seconds (a fiber keeps repainting when the provider is quiet), so
@@ -81,6 +68,13 @@
   `.git`/`_build`/`.par`/`node_modules`); Tab or Enter completes the token
   wherever it sits in the sentence. On submit each referenced file is attached
   to the turn as a `<file path=…>` section (text only, 200 KiB per file).
+
+- The startup notice compared the fetched tag with the running version for
+  *inequality*, so a stale cache entry (or any older release) printed
+  `info: par v0.13.0 is available (current: 0.15.0)`. Versions are now
+  compared numerically and the notice fires only when the fetched tag is
+  strictly newer; `par upgrade --check` uses the same comparison for its exit
+  code.
 
 ## v0.15.0 — One interface (released 2026-11-18)
 
