@@ -1,5 +1,13 @@
 # CHANGES
 
+## v0.14.2 — Full-screen by default (unreleased)
+
+> **Status**: In progress on `main`. No version bump yet.
+
+- `ui` defaults to `"tui"`: a terminal gets the framed interface on start, and
+  a pipe, CI run or redirected stdout still gets the line interface. An explicit
+  `"ui": "line"` in a config file keeps the line interface for that user.
+
 ## v0.14.1 — Fixes from the phone (released 2026-11-18)
 
 > **Status**: Released as tag `v0.14.1`. No new capability — the full-screen

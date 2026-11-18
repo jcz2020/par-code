@@ -34,7 +34,7 @@ Flat directory — no subdirs; the module set IS the architecture. All modules a
   - `Par_code_screen` 用 notty 画整帧（转写区 + 状态栏 + 输入行），`pump` 用 `Unix.select` 带 50ms 超时——按键即时唤醒，空闲时每 50ms 一次唤醒而不是自旋。
   - **任何进入帧的字符串都要过 `sanitize_text`**：notty 的 `I.string` 遇到控制字符直接 raise（模型输出必带 `\n`，曾把界面打崩）；行要按 `\n` 拆开，宽度按显示列算（`I.hsnap`）。
   - 审批/确认优先走 `Par_code_ui.set_modal_hook`（帧内模态）；未装 hook 时回退 /dev/tty，并由 `set_suspend_hooks` 先释放终端。
-  - `ui` 默认仍是 `"line"`；非 TTY 一律走行模式。
+  - `ui` 默认 `"tui"`（v0.14.2 起）；非 TTY（管道/CI）一律走行模式。
 - v0.13.0 W1 权限规则：`~/.par/permissions.json` + `./.par/permissions.json` 的 `rules`，按顺序**第一条命中生效**；`tool` 可为 `*`，`match` 是 bash 命令 / 文件工具路径的大小写不敏感子串。`deny` 走 tool_call_hook 对所有工具生效，`allow`/`ask` 对 bash 在审批决策里生效。用户级规则先读，项目级后读（运维 deny 压过仓库 allow）。Yojson 的 `member` 对非对象会抛，取字段一律防御式（工具入参可能是 null）。
 - v0.10.0 并发：`delegate_batch` 直接走 SDK 的 `Runtime.invoke_parallel`（`~parallel_limit:4 ~failure_policy:Continue_on_failure`），成功/失败两个列表各自保序，用 `merge_batch_results` 按 `spec.input` 双指针归并回输入序；**不要比较 spec 结构**——含 approval handler（函数字段），`(=)` 会抛。并行子任务必须只读（`delegate_batch` 只收 `explore`）。max-mode 仍走自己的 `Eio.Fiber.all`：它需要 usage，而 `invoke_parallel` 的 step 结果只回 text/tool_calls。
 - v0.10.0 工作流：流程定义放 `.par/flows/<id>.json`（内容就是 `workflow_def` 的 yojson），`/flow run` 用 **同步** `submit_workflow`（REPL 输入是 linenoise，`submit_workflow_async` 的 fiber 在提示符等待时不会被调度），并起一个后台 fiber 每 5 秒打 `[flow] still running (Ns)`；定义里出现 `planner`/`par`/`general` 这类可能停下的 agent 时先警告 —— **但审批提示仍会送到终端，用户看得到也能回答**，不要把它当成挂死。格式由 `[@@deriving yojson]` 决定：step 是 `["Agent_call", {...}]`，空构造子如 `["Continue_on_failure"]`，`variables` 是 `[[name, value]]`。

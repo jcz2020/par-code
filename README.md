@@ -9,8 +9,10 @@ CLI conventions and drives the **core** PAR surface — ReAct loop, tool dispatc
 type-safe bash, skills, streaming, persistence, MCP reload, workflows — to both
 ship a useful agent and prove out the PAR SDK in anger.
 
-**Status:** `v0.14.1` — polished terminal, plus the repairs the phone
-session asked for. v0.14.1 keeps the message you sent in the transcript, wraps
+**Status:** `v0.14.1` — polished terminal, now the default. A terminal opens
+the framed interface; a pipe or CI run still gets the line one, and
+`par config set ui line` switches back. v0.14.1 keeps the message you sent in
+the transcript, wraps
 long lines instead of clipping them, stops a split mouse report from leaking
 into the input line, renders a non-streamed answer as markdown, exits cleanly
 on Ctrl-C at the prompt, and makes `par config set ui tui|line` work; PAR SDK

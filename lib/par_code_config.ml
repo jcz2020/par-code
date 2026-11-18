@@ -55,7 +55,7 @@ type config = {
   skill_sources : string list;
   (* v0.13.0: whole-workspace snapshots before each user turn. *)
   snapshot_enabled : bool;
-  (* v0.14.0: "line" (default) or "tui" for the full-screen interface. *)
+  (* v0.14.2: "tui" (default) or "line" for the full-screen interface. *)
   ui : string;
 }
 
@@ -165,7 +165,9 @@ let default = {
   mcp_servers = [];
   skill_sources = [];
   snapshot_enabled = true;
-  ui = "line";
+  (* v0.14.2: "tui" (default) or "line". A non-TTY run always takes the line
+     interface, so pipes and CI are unaffected. *)
+  ui = "tui";
 }
 
 let config_dir () =
@@ -315,7 +317,10 @@ let of_json (json : Yojson.Safe.t) : (config, string) result =
          | _ -> []);
       snapshot_enabled = get_b "snapshot_enabled" default.snapshot_enabled;
       ui =
-        (match get_s "ui" with "tui" -> "tui" | _ -> default.ui);
+        (match get_s "ui" with
+         | "tui" -> "tui"
+         | "line" -> "line"
+         | _ -> default.ui);
       skill_sources =
         (match json |> member "skill_sources" with
          | `List items -> List.filter_map Yojson.Safe.Util.to_string_option items
