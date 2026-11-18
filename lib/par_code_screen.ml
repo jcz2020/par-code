@@ -106,6 +106,12 @@ type t = {
   (* v0.15.1: slash-command menu while the input starts with a command. *)
   mutable menu : (string * string) list;
   mutable menu_index : int;
+  mutable files : string list option;
+  (* Byte span of the @token the file menu is completing. *)
+  mutable menu_token : (int * int) option;
+  (* Set after accepting or dismissing the menu, so the refresh at the end of
+     the same keypress does not reopen it. *)
+  mutable menu_suppress : bool;
   (* Terminal attributes as they were before notty took the tty. A signal
      handler cannot safely call into notty (it can deadlock on a lock the
      interrupted code holds), so the cleanup path restores from here. *)
@@ -138,7 +144,10 @@ let create () : t =
     modal_answer = None;
     busy = "";
     menu = [];
-    menu_index = 0 }
+    menu_index = 0;
+    files = None;
+    menu_token = None;
+    menu_suppress = false }
 
 (* Notty rejects control characters inside [I.string] (it raises on "\n"),
    and model output is full of them. Split runs on newlines into separate lines
@@ -394,7 +403,104 @@ let starts_with ~prefix s =
 (* v0.15.1: the menu opencode shows while a command is being typed. It lists
    commands and custom skills, is driven by Up/Down, and Enter completes the
    highlighted one unless the typed text already is it. *)
+(* v0.15.1: @file references. The workspace is walked once per session (skipping
+   the usual build/vendor directories) and the paths are fuzzy-matched against
+   the token being typed, the way opencode does. *)
+let index_files () : string list =
+  let skip =
+    [ ".git"; "_build"; ".par"; "node_modules"; ".omo"; ".opencode"; "_opam";
+      ".cache" ]
+  in
+  let out = ref [] in
+  let count = ref 0 in
+  let rec walk dir depth =
+    if depth > 8 || !count > 4000 then ()
+    else
+      match Sys.readdir dir with
+      | exception Sys_error _ -> ()
+      | entries ->
+        Array.iter
+          (fun name ->
+             if !count > 4000 then ()
+             else if name = "" || name.[0] = '.' then ()
+             else if List.mem name skip then ()
+             else
+               let path = Filename.concat dir name in
+               match (try Some (Sys.is_directory path) with Sys_error _ -> None) with
+               | Some true -> walk path (depth + 1)
+               | Some false ->
+                 incr count;
+                 let rel =
+                   if String.length path > 2 && String.sub path 0 2 = "./" then
+                     String.sub path 2 (String.length path - 2)
+                   else path
+                 in
+                 out := rel :: !out
+               | None -> ())
+          entries
+  in
+  walk "." 0;
+  List.rev !out
+
+let fuzzy_match ~(needle : string) (hay : string) : bool =
+  let needle = String.lowercase_ascii needle in
+  let hay = String.lowercase_ascii hay in
+  let n = ref 0 in
+  let ok = ref true in
+  String.iter
+    (fun c ->
+       if !n < String.length needle && c = needle.[!n] then incr n)
+    hay;
+  if !n < String.length needle then ok := false;
+  !ok
+
 let refresh_menu (t : t) =
+  if t.menu_suppress then begin
+    t.menu <- [];
+    t.menu_token <- None;
+    t.menu_suppress <- false
+  end else
+  let file_items () =
+    (* opencode matches the @token under the cursor; take the last @word so a
+       reference can sit anywhere in the sentence. *)
+    let words =
+      let out = ref [] in
+      let start = ref 0 in
+      String.iteri
+        (fun i c ->
+           if c = ' ' then begin
+             out := (String.sub t.input !start (i - !start), !start) :: !out;
+             start := i + 1
+           end)
+        t.input;
+      out := (String.sub t.input !start (String.length t.input - !start), !start) :: !out;
+      List.rev !out
+    in
+    match
+      List.fold_left
+        (fun acc (w, pos) ->
+           if String.length w > 0 && w.[0] = '@' then Some (w, pos) else acc)
+        None words
+    with
+    | None ->
+      t.menu_token <- None;
+      []
+    | Some (token, pos) ->
+      let needle = String.sub token 1 (String.length token - 1) in
+      t.menu_token <- Some (pos, String.length token);
+      let files =
+        match t.files with
+        | Some f -> f
+        | None ->
+          let f = index_files () in
+          t.files <- Some f;
+          f
+      in
+      files
+      |> List.filter (fun p -> fuzzy_match ~needle p)
+      |> List.filteri (fun i _ -> i < 50)
+      |> List.map (fun p -> ("@" ^ p, ""))
+  in
   let items =
     match String.split_on_char ' ' t.input with
     | [ partial ] when partial <> "" && partial.[0] = '/' ->
@@ -406,13 +512,28 @@ let refresh_menu (t : t) =
             (Par_code_skills.list_custom ())
       in
       List.filter (fun (cmd, _) -> starts_with ~prefix:partial cmd) all
-    | _ -> []
+    | _ -> file_items ()
   in
   t.menu <- items;
   t.menu_index <- min t.menu_index (max 0 (List.length items - 1))
 
-let complete (t : t) =
-  let text = t.input in
+(* [value] is either a slash command or an "@path" reference; for the latter
+   replace only the trailing token so earlier words survive. *)
+let accept_menu (t : t) (value : string) =
+  (if value <> "" && value.[0] = '@' then
+     match t.menu_token with
+     | Some (pos, len) when pos + len <= String.length t.input ->
+       t.input <-
+         String.sub t.input 0 pos ^ value
+         ^ String.sub t.input (pos + len) (String.length t.input - pos - len)
+     | _ -> t.input <- value
+   else t.input <- value);
+  t.cursor <- String.length t.input;
+  t.menu <- [];
+  t.menu_token <- None;
+  t.menu_suppress <- true
+
+let complete (t : t) =  let text = t.input in
   let starts_with ~prefix s =
     String.length s >= String.length prefix
     && String.sub s 0 (String.length prefix) = prefix
@@ -700,17 +821,19 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
       t.menu_index <- min (List.length t.menu - 1) (t.menu_index + 1)
     | `Tab when t.menu <> [] ->
       (match List.nth_opt t.menu t.menu_index with
-       | Some (cmd, _) -> t.input <- cmd; t.cursor <- String.length cmd
+       | Some (value, _) -> accept_menu t value
        | None -> complete t)
     | `Enter when t.menu <> []
                    && (match List.nth_opt t.menu t.menu_index with
-                       | Some (cmd, _) -> cmd <> String.trim t.input
+                       | Some (value, _) -> value <> String.trim t.input
                        | None -> false) ->
-      (* Completes the highlighted command; a second Enter runs it. *)
+      (* Completes the highlighted entry; a second Enter runs/sends it. *)
       (match List.nth_opt t.menu t.menu_index with
-       | Some (cmd, _) -> t.input <- cmd; t.cursor <- String.length cmd; t.menu <- []
+       | Some (value, _) -> accept_menu t value
        | None -> ())
-    | `Escape when t.menu <> [] -> t.menu <- []
+    | `Escape when t.menu <> [] ->
+      t.menu <- [];
+      t.menu_suppress <- true
     | `Enter when List.mem `Meta mods ->
       (* Alt+Enter: compose a multi-line message; Enter still submits. *)
       put_back t "\n"

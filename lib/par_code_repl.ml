@@ -774,7 +774,40 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
    (* v0.7.3 W6: the chaining driver — feeds execute_turn's continuation
       back in as the next user message; no user input, no history entries.
       Tail-recursive, bounded by execute_turn's stop conditions. *)
-   let rec run_chain (message : string) : unit =
+   (* v0.15.1: @path references pull the file into the turn. The transcript keeps
+     the message as typed; the model receives the text plus <file> sections. *)
+  let expand_file_refs (message : string) : string =
+    let max_bytes = 200 * 1024 in
+    let words = String.split_on_char ' ' message in
+    let seen = Hashtbl.create 8 in
+    List.fold_left
+      (fun acc w ->
+         if String.length w <= 1 || w.[0] <> '@' then acc
+         else
+           let path = String.sub w 1 (String.length w - 1) in
+           if Hashtbl.mem seen path then acc
+           else begin
+             Hashtbl.add seen path ();
+             match (try Some (open_in_bin path) with Sys_error _ -> None) with
+             | None -> acc
+             | Some ic ->
+               Fun.protect
+                 ~finally:(fun () -> close_in_noerr ic)
+                 (fun () ->
+                    let len = in_channel_length ic in
+                    if len > max_bytes then acc
+                    else begin
+                      let body = really_input_string ic len in
+                      if String.contains body '\000' then acc
+                      else
+                        acc
+                        ^ Printf.sprintf "\n\n<file path=\"%s\">\n%s\n</file>"
+                            path body
+                    end)
+           end)
+      message words
+  in
+  let rec run_chain (message : string) : unit =
      (match with_progress (fun () -> execute_turn ~chained:true message) with
       | Par_code_chain.Chain_stop -> ()
       | Par_code_chain.Chain_continue next -> run_chain next)
@@ -1410,7 +1443,8 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
        end else begin
             (* Oracle R3(a): user turn may chain; prompt resumes after. *)
             (match
-               with_progress (fun () -> execute_turn ~chained:false trimmed)
+               with_progress (fun () ->
+                 execute_turn ~chained:false (expand_file_refs trimmed))
              with
              | Par_code_chain.Chain_stop -> ()
              | Par_code_chain.Chain_continue next -> run_chain next);

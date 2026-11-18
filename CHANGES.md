@@ -28,6 +28,10 @@
 - **Esc interrupts a running turn**: while the model is working, Esc (or
   Ctrl-C) cancels it and the transcript records `[cancelled by user]`. Only the
   interrupt key is read during a turn; approval modals keep their own reader.
+- **`@file` references**: typing `@` lists workspace files (fuzzy, skipping
+  `.git`/`_build`/`.par`/`node_modules`); Tab or Enter completes the token
+  wherever it sits in the sentence. On submit each referenced file is attached
+  to the turn as a `<file path=…>` section (text only, 200 KiB per file).
 
 ## v0.15.0 — One interface (released 2026-11-18)
 
