@@ -4,6 +4,10 @@
 (** Return the current version string. *)
 val current_version : unit -> string
 
+(** [is_newer ~latest ~current] is true only when [latest] is strictly newer,
+    comparing dotted numbers and ignoring a pre-release suffix. *)
+val is_newer : latest:string -> current:string -> bool
+
 (** Fetch the latest release tag from GitHub.
     Honors [PAR_MIRROR], [PAR_NO_UPDATE_CHECK], and cache at
     [~/.par/.latest-cache.json] with 24h TTL.

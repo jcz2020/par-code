@@ -50,10 +50,22 @@ let test_mask_api_key () =
   Alcotest.(check string) "long key" "sk-t****1234"
     (Par_code_config.mask_api_key "sk-test-1234")
 
+let test_version_compare () =
+  let newer ~latest ~current =
+    Par_code_upgrade.is_newer ~latest ~current
+  in
+  Alcotest.(check bool) "0.15.1 > 0.15.0" true (newer ~latest:"v0.15.1" ~current:"0.15.0");
+  Alcotest.(check bool) "0.10.0 < 0.15.0" false (newer ~latest:"v0.10.0" ~current:"0.15.0");
+  Alcotest.(check bool) "0.13.0 < 0.15.0" false (newer ~latest:"0.13.0" ~current:"0.15.0");
+  Alcotest.(check bool) "equal is not newer" false (newer ~latest:"v0.15.0" ~current:"0.15.0");
+  Alcotest.(check bool) "pre-release suffix ignored" false
+    (newer ~latest:"v0.15.0-beta.1" ~current:"0.15.0")
+
 let () =
   Alcotest.run "par"
     [ "version", [ Alcotest.test_case "version" `Quick test_version;
-                   Alcotest.test_case "version_info prefix" `Quick test_version_info_prefix ];
+                   Alcotest.test_case "version_info prefix" `Quick test_version_info_prefix;
+                   Alcotest.test_case "compare" `Quick test_version_compare ];
       "identity", [ Alcotest.test_case "agent_id" `Quick test_agent_id ];
       "config", [ Alcotest.test_case "paths are ~/.par" `Quick test_config_paths;
                   Alcotest.test_case "JSON round-trip" `Quick test_config_roundtrip;
