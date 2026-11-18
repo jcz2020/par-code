@@ -63,7 +63,13 @@ let attr_of_style (s : Par_code_ui.style) : Notty.A.t =
     let acc = if s.Par_code_ui.reverse then acc ++ st reverse else acc in
     acc
   in
-  fg_attr ++ bg_attr ++ style_attr
+  (* v0.15.1: notty has no dim attribute, so a muted style used to render as
+     ordinary text and tool lines lost their layer. Map it to a grey
+     foreground instead: readable on light and dark terminals alike. *)
+  let dim_attr =
+    if s.Par_code_ui.dim && s.Par_code_ui.fg = None then fg lightblack else empty
+  in
+  fg_attr ++ bg_attr ++ dim_attr ++ style_attr
 
 (* ------------------------------------------------------------------ *)
 (* Screen state                                                        *)

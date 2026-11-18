@@ -32,6 +32,9 @@
   `models` list in the config — the OpenAI provider cannot enumerate yet,
   jcz2020/par#42), Up/Down/Enter/Esc, and re-registers the main agent with the
   chosen model so the next turn uses it; the choice is saved to the config.
+- **Visual pass 7**: muted text was being rendered as ordinary text because
+  notty has no dim attribute; it now maps to grey, so tool lines and thinking
+  lines sit on their own layer on both light and dark terminals.
 - **Visual pass 6**: the running line names the tool in flight (`⠹ find 3s`)
   instead of showing a bare spinner, so a long turn says what it is doing.
 - **Visual pass 5**: a cancelled turn has its own terminal signature (`⊘`, the
