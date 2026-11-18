@@ -144,14 +144,10 @@ let make_llm_service (tag : Par_code_config.provider_tag) api_key api_base
       exit 1
     | Ok t ->
       Openai_provider.set_network t net_gen;
-      { complete_fn = (fun mc tools conv -> Openai_provider.complete t mc tools conv);
-        stream_fn = (fun mc tools conv sc cb -> Openai_provider.stream t mc tools conv sc cb);
-        close_fn = (fun () -> Openai_provider.close t);
-        complete_structured_fn = Some (fun mc tools conv schema -> Openai_provider.complete_structured t mc tools conv schema);
-        list_models_fn = None;
-        supports_native_tools_fn = None;
-        context_window_fn = None;
-        cache_control_fn = None; }
+      (* v0.15.3: the provider builds its own complete service now, which is the
+         only way to_pick up list_models (par#42). Hand-building the record is
+         what silently dropped the capability. *)
+      Openai_provider.to_llm_service t
   in
   match tag with
   | `Openai -> wrap_openai ()
@@ -170,14 +166,8 @@ let make_llm_service (tag : Par_code_config.provider_tag) api_key api_base
        exit 1
      | Ok t ->
        Anthropic_provider.set_network t net_gen;
-       { complete_fn = (fun mc tools conv -> Anthropic_provider.complete t mc tools conv);
-         stream_fn = (fun mc tools conv sc cb -> Anthropic_provider.stream t mc tools conv sc cb);
-         close_fn = (fun () -> Anthropic_provider.close t);
-         complete_structured_fn = Some (fun mc tools conv schema -> Anthropic_provider.complete_structured t mc tools conv schema);
-         list_models_fn = None;
-         supports_native_tools_fn = None;
-         context_window_fn = None;
-         cache_control_fn = None; })
+       (* As above: the provider's own service carries list_models. *)
+       Anthropic_provider.to_llm_service t)
 
 let make_embedding_service (tag : Par_code_config.provider_tag) api_key api_base
     ?embedding_base_url ?embedding_model

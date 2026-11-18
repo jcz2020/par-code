@@ -949,10 +949,12 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
         (match cmd with
          | "/help" -> print_help ui ()
          | "/model" ->
-           (* Provider list first; the SDK cannot list OpenAI models yet (par#42),
-              so fall back to the models named in the config. *)
+           (* v0.15.3: the SDK lists models itself now (par#42 fixed in PAR
+              0.17.3), so the config list is only a fallback for endpoints that
+              do not implement the listing route. *)
+           let listed = with_progress (fun () -> Runtime.list_models rt ()) in
            let models =
-             match with_progress (fun () -> Runtime.list_models rt ()) with
+             match listed with
              | Ok (_ :: _ as l) -> l
              | _ ->
                (match loaded_cfg with
@@ -961,8 +963,15 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
            in
            (match models with
             | [] ->
+              let why =
+                match listed with
+                | Error e -> Types.string_of_error_category e
+                | Ok _ -> "the endpoint returned no models"
+              in
               Par_code_ui.render_warning ui
-                "[model] no list available: the provider does not expose its models (par#42); add \"models\": [\"…\"] to ~/.par/config.json"
+                (Printf.sprintf
+                   "[model] no list available (%s); add \"models\": [\"…\"] to ~/.par/config.json"
+                   why)
             | models ->
               (match
                  Par_code_screen.pick screen ~title:"Model" ~items:models

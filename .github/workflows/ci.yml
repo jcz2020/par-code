@@ -42,7 +42,7 @@ jobs:
       # installed and usable). Intermittent on fresh runners without cache.
       - name: Pin PAR SDK
         run: |
-          opam pin add par https://github.com/jcz2020/par.git#v0.17.2-beta.20261118 -y || rc=$?
+          opam pin add par https://github.com/jcz2020/par.git#v0.17.3-beta.20261118 -y || rc=$?
           if [ -n "${rc:-}" ] && [ "$rc" -ne 31 ]; then exit "$rc"; fi
       - name: Install dependencies
         run: opam install . --deps-only --with-test
