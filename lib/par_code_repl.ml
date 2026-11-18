@@ -156,10 +156,14 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                      cancel_pending := true;
                      Par.Cancellation.request_cancel tok Types.User_cancelled
                    | None -> ());
+                let elapsed = Unix.gettimeofday () -. start in
+                (* v0.15.1: the clock only appears once a turn actually takes
+                   time; a fast turn should not flash "0s"/"1s". *)
                 Par_code_screen.set_busy screen
-                  (Printf.sprintf "%s %.0fs"
-                     frames.(!i mod Array.length frames)
-                     (Unix.gettimeofday () -. start));
+                  (if elapsed < 2.0 then frames.(!i mod Array.length frames)
+                   else
+                     Printf.sprintf "%s %.0fs" frames.(!i mod Array.length frames)
+                       elapsed);
                 (try Par_code_screen.render screen with _ -> ())
               end
             done)

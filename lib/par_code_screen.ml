@@ -936,21 +936,28 @@ let frame (t : t) : Notty.image =
     let box ~title ~rows ~footer =
       let inner_w = min (max 32 (w - 12)) 84 in
       let border l r =
-        I.string A.empty (l ^ String.concat "" (List.init inner_w (fun _ -> "─")) ^ r)
+        I.string A.(fg lightblack)
+          (l ^ String.concat "" (List.init inner_w (fun _ -> "─")) ^ r)
       in
-      let row s =
+      (* v0.15.1: one visual language for every box — the title carries the
+         accent and the weight, body rows are plain, the key legend is dim. *)
+      let row0 attr s =
         I.hcat
-          [ I.string A.empty "│"
-            ; I.hsnap ~align:`Left inner_w (I.string A.(st bold) (sanitize_text s))
-            ; I.string A.empty "│" ]
+          [ I.string A.(fg lightblack) "│"
+            ; I.hsnap ~align:`Left inner_w (I.string attr (sanitize_text s))
+            ; I.string A.(fg lightblack) "│" ]
       in
+      let row = row0 A.(st bold) in
+      let title_row = row0 A.(fg cyan ++ st bold) in
+      let footer_row = row0 A.(fg lightblack) in
       let content =
         I.vcat
           (border "┌" "┐"
-           :: List.map row title
+           :: List.map title_row title
            @ [ border "├" "┤" ]
            @ List.map row rows
-           @ List.map row footer @ [ border "└" "┘" ])
+           @ List.map footer_row footer
+           @ [ border "└" "┘" ])
       in
       I.vsnap ~align:`Middle body_h (I.hsnap ~align:`Middle w content)
     in
