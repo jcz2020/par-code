@@ -1,5 +1,20 @@
 # CHANGES
 
+## v0.15.2 — Visual overhaul (unreleased)
+
+> **Status**: In progress on `main`. No version bump yet.
+
+- **Syntax highlighting**: code blocks are highlighted (comments, strings,
+  numbers, keywords) for OCaml, JavaScript/TypeScript, Python, Rust, Go, shell
+  and JSON, using the terminal's own eight-colour palette.
+- **Boxed code blocks**: a block is a box — the language on the top border, a
+  bar down the left edge, a corner at the bottom.
+- **Composer placeholder**: an empty input line says `Ask anything · /help for
+  commands` in muted grey instead of showing a bare prompt.
+- **Status bar segments**: fields are separated by a rule glyph, and while a turn
+  runs the right edge shows `esc interrupt`.
+
+
 ## v0.15.1 — Conversational input (released 2026-11-18)
 
 - **Live progress**: while a turn runs, the status bar animates a spinner and

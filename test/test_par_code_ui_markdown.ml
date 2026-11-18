@@ -73,14 +73,20 @@ let code_block () =
   let input = "```ocaml\nlet x = 1\n```" in
   let s, out = Par_code_ui_markdown.push Par_code_ui_markdown.initial input in
   let out = out ^ Par_code_ui_markdown.flush s in
-  Alcotest.(check bool) "contains dim for code" true (string_contains out "\027[2m");
-  Alcotest.(check bool) "contains 'let x = 1'" true (string_contains out "let x = 1")
+  (* v0.15.1: a block is a box with its language on the top border, a bar down
+     the left edge and highlighted code inside. *)
+  Alcotest.(check bool) "top border names the language" true
+    (string_contains out "ocaml");
+  Alcotest.(check bool) "code carries the left bar" true
+    (string_contains out "  │ ");
+  Alcotest.(check bool) "keywords are coloured" true
+    (string_contains out "\027[36mlet")
 
 let unclosed_code_block () =
   let s, out = Par_code_ui_markdown.push Par_code_ui_markdown.initial "```ocaml" in
   let out = out ^ Par_code_ui_markdown.flush s in
-  Alcotest.(check bool) "contains dim" true (string_contains out "\027[2m");
-  Alcotest.(check bool) "contains '```ocaml'" true (string_contains out "```ocaml")
+  Alcotest.(check bool) "top border names the language" true
+    (string_contains out "ocaml")
 
 let code_block_content_not_parsed () =
   let s, out = Par_code_ui_markdown.push Par_code_ui_markdown.initial
@@ -107,7 +113,7 @@ let enter_code_block_on_fence () =
   let s2, out2 = Par_code_ui_markdown.push s1 "code line\n" in
   let _s3, out3 = Par_code_ui_markdown.push s2 "```\n" in
   Alcotest.(check bool) "code line carries the left bar" true
-    (string_contains out2 "  ¦ ");
+    (string_contains out2 "  │ ");
   Alcotest.(check bool) "closing fence has dim" true (string_contains out3 "\027[2m")
 
 let back_to_normal_after_close () =
@@ -132,8 +138,10 @@ let partial_code_block () =
   let s2, _ = Par_code_ui_markdown.push s1 "aml\nlet x" in
   let s3, out = Par_code_ui_markdown.push s2 " = 1\n```" in
   let out = out ^ Par_code_ui_markdown.flush s3 in
-  Alcotest.(check bool) "contains dim" true (string_contains out "\027[2m");
-  Alcotest.(check bool) "contains 'let x = 1'" true (string_contains out "let x = 1")
+  Alcotest.(check bool) "code carries the left bar" true
+    (string_contains out "  │ ");
+  Alcotest.(check bool) "keywords are coloured" true
+    (string_contains out "\027[36mlet")
 
 let partial_heading () =
   let s1, _ = Par_code_ui_markdown.push Par_code_ui_markdown.initial "# Hel" in

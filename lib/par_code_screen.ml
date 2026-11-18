@@ -240,6 +240,17 @@ let split_runs (runs : (string * Par_code_ui.style) list) :
 let display_width (u : Uchar.t) =
   match Uucp.Break.tty_width_hint u with w when w > 0 -> w | _ -> 1
 
+(* Display columns of a UTF-8 string, for laying out two-part rows. *)
+let text_width (s : string) : int =
+  let w = ref 0 in
+  let folder () _u (v : [ `Malformed of string | `Uchar of Uchar.t ]) =
+    match v with
+    | `Malformed _ -> ()
+    | `Uchar u -> w := !w + display_width u
+  in
+  ignore (Uutf.String.fold_utf_8 folder () s);
+  !w
+
 let wrap_runs ~(cols : int) (runs : (string * Par_code_ui.style) list) :
     (string * Par_code_ui.style) list list =
   let cols = max 8 cols in
@@ -946,6 +957,18 @@ let frame (t : t) : Notty.image =
     | None ->
     let indent = " " ^ t.prompt in
     let cont_indent = String.make (String.length indent) ' ' in
+    (* v0.15.1: an empty composer says what it is for instead of showing a bare
+       prompt; the hint disappears the moment a key arrives. *)
+    let placeholder =
+      t.input = "" && t.editing && t.modal = None && t.picker = None
+    in
+    if placeholder then
+      I.hsnap ~align:`Left w
+        (I.hcat
+           [ I.string A.(fg green ++ st bold) (sanitize_text indent)
+             ; I.string A.(fg lightblack)
+                 (sanitize_text "Ask anything · /help for commands") ])
+    else
     let rows =
       List.filteri
         (fun i _ -> i >= first_line && i < first_line + input_h)
@@ -986,9 +1009,15 @@ let frame (t : t) : Notty.image =
       | b, "" -> b
       | b, s -> b ^ " · " ^ s
     in
+    let left = " " ^ text ^ scroll_hint ^ hint in
+    (* v0.15.1: while a turn runs, the right edge says how to stop it. *)
+    let right = if t.busy = "" then "" else "esc interrupt " in
+    let gap = max 1 (w - text_width left - text_width right) in
     I.hsnap ~align:`Left w
-      (I.string A.(fg lightblack)
-         (sanitize_text (" " ^ text ^ scroll_hint ^ hint)))
+      (I.hcat
+         [ I.string A.(fg lightblack) (sanitize_text left)
+           ; I.string A.empty (String.make gap ' ')
+           ; I.string A.(fg lightblack) (sanitize_text right) ])
   in
   let rule =
     I.string A.(fg lightblack) (String.concat "" (List.init w (fun _ -> "─")))

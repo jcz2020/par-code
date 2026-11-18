@@ -31,9 +31,18 @@ let wrap_italic s = ansi_italic ^ s ^ reset
 let wrap_inline_code s = ansi_dim ^ ansi_reverse ^ s ^ reset
 (* v0.15.1 visual pass: code is grouped by a left bar instead of being dimmed
    (dim made long code hard to read on a phone and collided with tool lines). *)
-let code_bar = "  ¦ "
-let wrap_code_line s = code_bar ^ s
-let wrap_code_fence s = ansi_dim ^ ("  " ^ s) ^ reset
+let code_bar = "  │ "
+let wrap_code_line ?(lang = "") s =
+  code_bar ^ Par_code_syntax.highlight_line ~lang s
+
+(* v0.15.1 visual pass: a code block is a box with its language on the top
+   border and a corner on the bottom one, so it reads as one object instead of
+   a run of indented lines. *)
+let wrap_code_top (lang : string) =
+  let label = if String.trim lang = "" then "" else " " ^ String.trim lang ^ " " in
+  ansi_dim ^ ("  ╭─" ^ label) ^ reset
+
+let wrap_code_bottom = ansi_dim ^ "  ╰─" ^ reset
 let wrap_heading s = ansi_bold ^ ansi_cyan ^ s ^ reset
 let wrap_link_text s = ansi_underline ^ s ^ reset
 let wrap_link_url s = ansi_dim ^ s ^ reset
@@ -261,7 +270,7 @@ let render_normal_line line =
   | Some (_level, content) -> wrap_heading content
   | None ->
     (match try_code_fence line with
-     | Some _ -> wrap_code_line line
+     | Some lang -> wrap_code_top lang
      | None ->
        (match try_list_item line with
         | Some (prefix, content) -> prefix ^ parse_inline content
@@ -281,15 +290,15 @@ let has_pending (st : state) : bool = st.line_buf <> ""
    arrives instead of in whole-line bursts. *)
 let render_pending_line (st : state) (line : string) =
   match st.ctx with
-  | InCodeBlock _ ->
-    (* A fence that arrives without its newline is still a fence. *)
+  | InCodeBlock { lang } ->
+    (* Inside a block a fence without its newline is the closing one. *)
     (match try_code_fence line with
-     | Some _ -> wrap_code_fence line
-     | None -> wrap_code_line line)
+     | Some _ -> wrap_code_bottom
+     | None -> wrap_code_line ~lang line)
   | Normal ->
-    (* A fence that has not received its newline yet is still a fence. *)
+    (* A fence that has not received its newline yet still opens a block. *)
     (match try_code_fence line with
-     | Some _ -> wrap_code_fence line
+     | Some lang -> wrap_code_top lang
      | None -> render_normal_line line)
 
 let pending_text (st : state) : string =
@@ -308,15 +317,15 @@ let push (st : state) (chunk : string) : state * string =
       | Some nl_pos ->
         let line = String.sub buf_content pos (nl_pos - pos) in
         (match !new_ctx with
-         | InCodeBlock _ ->
+         | InCodeBlock { lang } ->
            if try_code_fence line <> None then begin
              (* Closing fence *)
-             Buffer.add_string out_buf (wrap_code_fence line);
+             Buffer.add_string out_buf wrap_code_bottom;
              Buffer.add_char out_buf '\n';
              new_ctx := Normal
            end else begin
-             (* Code content line — render raw, no inline parsing *)
-             Buffer.add_string out_buf (wrap_code_line line);
+             (* Code content line — highlighted, no inline parsing *)
+             Buffer.add_string out_buf (wrap_code_line ~lang line);
              Buffer.add_char out_buf '\n'
            end
          | Normal ->
@@ -324,7 +333,7 @@ let push (st : state) (chunk : string) : state * string =
             | Some lang ->
               (* Opening fence — enter code block *)
               new_ctx := InCodeBlock { lang };
-              Buffer.add_string out_buf (wrap_code_fence line);
+              Buffer.add_string out_buf (wrap_code_top lang);
               Buffer.add_char out_buf '\n'
             | None ->
               Buffer.add_string out_buf (render_normal_line line);
