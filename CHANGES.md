@@ -32,6 +32,9 @@
   `models` list in the config — the OpenAI provider cannot enumerate yet,
   jcz2020/par#42), Up/Down/Enter/Esc, and re-registers the main agent with the
   chosen model so the next turn uses it; the choice is saved to the config.
+- **Visual pass 4**: every box (approval modal, model and session pickers) now
+  shares one frame language — dim border, accent title on its own row, dim key
+  legend; the running-turn clock only appears after two seconds.
 - **Visual pass 3**: one turn's tool lines are collected and folded into a single
   block (head and tail kept, the middle becomes a count) instead of scrolling
   the answer away.
