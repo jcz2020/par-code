@@ -2,6 +2,25 @@ let (let*) = Result.bind
 
 let current_version () = Par_code_version.version
 
+(* v0.15.1: the update notice compared for inequality, so a stale cached tag
+   (or any older release) printed "is available" while the running version was
+   already newer. Compare numerically instead. *)
+let version_components (s : string) : int list =
+  let s = String.trim s in
+  let s = if s <> "" && s.[0] = 'v' then String.sub s 1 (String.length s - 1) else s in
+  let s = match String.index_opt s '-' with Some i -> String.sub s 0 i | None -> s in
+  String.split_on_char '.' s |> List.filter_map int_of_string_opt
+
+let is_newer ~(latest : string) ~(current : string) : bool =
+  let rec cmp a b =
+    match a, b with
+    | x :: xs, y :: ys -> if x <> y then compare x y else cmp xs ys
+    | x :: _, [] -> compare x 0
+    | [], y :: _ -> compare 0 y
+    | [], [] -> 0
+  in
+  cmp (version_components latest) (version_components current) > 0
+
 let cache_path () =
   Filename.concat (Par_code_config.config_dir ()) ".latest-cache.json"
 

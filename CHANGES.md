@@ -1,5 +1,16 @@
 # CHANGES
 
+## v0.15.2 — Update check (unreleased)
+
+> **Status**: In progress on `main`. No version bump yet.
+
+- The startup notice compared the fetched tag with the running version for
+  *inequality*, so a stale cache entry (or any older release) printed
+  `info: par v0.13.0 is available (current: 0.15.0)`. Versions are now
+  compared numerically and the notice fires only when the fetched tag is
+  strictly newer; `par upgrade --check` uses the same comparison for its exit
+  code.
+
 ## v0.15.1 — Conversational input (unreleased)
 
 > **Status**: In progress on `main`. No version bump yet.
@@ -8,7 +19,7 @@
   the elapsed seconds (a fiber keeps repainting when the provider is quiet), so
   a slow model no longer looks frozen.
 - **Multi-line input**: Alt+Enter adds a line, and so does finishing a line with
-  `\` (phone keyboards have no Alt). The composer grows to six rows and scrolls
+  `` (phone keyboards have no Alt). The composer grows to six rows and scrolls
   with the cursor.
 - `/help` now lists the input keys next to the commands.
 - **Command menu**: typing `/` shows the matching commands and custom skills
