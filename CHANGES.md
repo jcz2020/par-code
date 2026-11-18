@@ -13,6 +13,10 @@
   resumed session with "Tool result call_... has no matching call".
 - **Doom-loop messages describe what happened**: they said "aborting goal" on
   turns with no goal, and the marker was printed twice.
+- **The frame looks like an application**: a title line names the build and the
+  project, and the input sits inside a composer box whose top border carries the
+  mode (`╭─ build ───`). The startup banner moved into that title line instead
+  of repeating it in the transcript.
 - **Tool calls describe themselves**: a call is one transcript line that says
   what was asked and what came back — `✓ read lib/dune · 12 lines · 3.0ms`,
   `✓ grep TODO in lib · 9 matches`, `✓ bash make · ok · 2.5s` — instead of
