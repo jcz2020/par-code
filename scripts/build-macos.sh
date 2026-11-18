@@ -138,7 +138,7 @@ if opam pin list 2>/dev/null | grep -q '^par\.0\.12\.0-beta'; then
     info "PAR SDK already pinned at v0.17.1-beta; skipping"
 else
     info "pinning PAR SDK (v0.17.1-beta tag) ..."
-    opam pin add par https://github.com/jcz2020/par.git#v0.17.1-beta.20261117 -y \
+    opam pin add par https://github.com/jcz2020/par.git#v0.17.2-beta.20261118 -y \
         || { rc=$?; [ "$rc" -eq 31 ] \
              || die "opam pin failed with exit $rc"; \
              warn "opam pin returned 31 (out of sync) — continuing"; }
