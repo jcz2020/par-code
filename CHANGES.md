@@ -32,6 +32,9 @@
   `models` list in the config — the OpenAI provider cannot enumerate yet,
   jcz2020/par#42), Up/Down/Enter/Esc, and re-registers the main agent with the
   chosen model so the next turn uses it; the choice is saved to the config.
+- **Prompt history survives restarts** again: entries are loaded from and saved
+  to `~/.par/history` (newest 200), so Up recalls the previous session too. The
+  status bar also shows how full the context is (`ctx 7%`).
 - **Word-wise editing**: Ctrl/Alt+Left and Ctrl/Alt+Right move by word, and
   Alt/Ctrl+Backspace (or Delete) removes one; a path counts as a single word.
 - **`/sessions`**: lists the saved sessions (id prefix, age, event count) in the

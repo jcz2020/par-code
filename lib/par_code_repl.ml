@@ -54,6 +54,9 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
        | Some c -> c.Par_code_config.model
        | None -> "")
   in
+  (* v0.15.1: "ctx N%" in the status bar, refreshed with every prompt; the
+     updater lives after [conv] is declared. *)
+  let ctx_part = ref "" in
   let refresh_status (s : Par_code_screen.t) ~tokens =
     let mode =
       match !Par_code_mode.current with
@@ -63,6 +66,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
     let parts =
       [ !model_name; mode;
         Printf.sprintf "%d tok" tokens;
+        !ctx_part;
         git_branch ]
       |> List.filter (fun x -> x <> "")
     in
@@ -71,6 +75,8 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
   let screen =
     let s = Par_code_screen.create () in
     Par_code_screen.install_cleanup s;
+    Par_code_screen.load_history s
+      ~path:(Filename.concat (Par_code_config.config_dir ()) "history");
     Par_code_ui.set_modal_hook
       (Some (fun ~title ~body ~options ->
            Par_code_screen.ask s ~title ~body ~options));
@@ -145,6 +151,19 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
    | None -> ());
   let turn_count = ref 0 in
   let session_id = ref None in
+  let update_ctx () =
+    let window =
+      match Par_code_config.load () with
+      | Some c -> Stdlib.max 1 c.Par_code_config.context_window_tokens
+      | None -> 128000
+    in
+    ctx_part :=
+      (match !conv with
+       | Some c ->
+         let used = Par_code_context.token_estimate c in
+         Printf.sprintf "ctx %d%%" (Stdlib.min 100 (used * 100 / window))
+       | None -> "")
+  in
   let is_first_turn = ref true in
   let first_turn_appendix = ref None in
   (* v0.4.1 Pillar A: throttle flag — set true while a checkpoint fiber is in
@@ -823,6 +842,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
        outside the screen loop, and Cmdliner would print it as an internal
        error, so it exits like a normal quit. *)
     let read_input () =
+      update_ctx ();
       refresh_status screen ~tokens:!cost.Par_code_repl_io.total_tokens;
       (* The mode lives in the status bar; keep the input line quiet. *)
       Par_code_screen.read_line screen ~prompt:"\xe2\x80\xba "

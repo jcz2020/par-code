@@ -96,6 +96,8 @@ type t = {
   mutable cursor : int;                   (* byte offset into [input] *)
   mutable prompt : string;
   mutable history : string list;          (* newest first *)
+  (* v0.15.1: where the history is persisted (set by [load_history]). *)
+  mutable history_path : string option;
   mutable hist_pos : int option;
   mutable submitted : string option;
   mutable editing : bool;          (* keys go to the input line *)
@@ -146,6 +148,7 @@ let create () : t =
     cursor = 0;
     prompt = "> ";
     history = [];
+    history_path = None;
     hist_pos = None;
     submitted = None;
     editing = false;
@@ -618,10 +621,43 @@ let complete (t : t) =  let text = t.input in
       t.cursor <- String.length prefix
     end
 
+(* v0.15.1: prompt history survives restarts again (dropping the line
+   interface took the old ~/.par/history loader with it). Newest first in
+   memory, oldest first on disk. *)
+let save_history (t : t) =
+  match t.history_path with
+  | None -> ()
+  | Some path ->
+    (try
+       let tmp = path ^ ".tmp" in
+       let oc = open_out tmp in
+       List.iter
+         (fun l -> output_string oc l; output_char oc '\n')
+         (List.rev (List.filteri (fun i _ -> i < 200) t.history));
+       close_out oc;
+       Sys.rename tmp path
+     with _ -> ())
+
+let load_history (t : t) ~(path : string) =
+  t.history_path <- Some path;
+  try
+    let ic = open_in path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+         try
+           while true do
+             let l = input_line ic in
+             if String.trim l <> "" then t.history <- l :: t.history
+           done
+         with End_of_file -> ())
+  with Sys_error _ -> ()
+
 let history_push (t : t) (line : string) =
   if String.trim line <> "" then begin
     t.history <- line :: List.filter (fun h -> h <> line) t.history;
-    t.history <- List.filteri (fun i _ -> i < 200) t.history
+    t.history <- List.filteri (fun i _ -> i < 200) t.history;
+    save_history t
   end;
   t.hist_pos <- None
 
