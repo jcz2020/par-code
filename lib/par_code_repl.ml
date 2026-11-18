@@ -657,7 +657,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                         Par_code_goal.pause_goal ();
                         Par_code_ui.render_notice ui
                           "[goal paused \xe2\x80\x94 /goal resume to continue]"
-                      | _ -> Par_code_ui.render_notice ui "[cancelled by user]")
+                      | _ -> Par_code_ui.render_cancel ui "[cancelled by user]")
                    | Par_code_chain.Abort_goal r ->
                      (match !Par_code_goal.current with
                       | Some g when g.Par_code_goal.status = Par_code_goal.Active ->
@@ -688,7 +688,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                   turn_errored := true;
                   if !stream_cancelled then begin
                     turn_cancelled := true;
-                    Par_code_ui.render_notice ui "[cancelled by user]"
+                    Par_code_ui.render_cancel ui "[cancelled by user]"
                   end else
                     Par_code_ui.render_error ui (Par_code_setup.error_to_string e);
                  let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in ()
@@ -697,7 +697,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                  if !stream_cancelled then begin
                    turn_cancelled := true;
                    Par_code_ui.flush_markdown ui;
-                   Par_code_ui.render_notice ui "[cancelled by user]"
+                   Par_code_ui.render_cancel ui "[cancelled by user]"
                  end else begin
                    Par_code_ui.flush_markdown ui;
                   if not !streamed_text then begin
@@ -764,7 +764,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                  (match !conv with
                   | Some c -> ignore (Runtime.save_conversation rt ~conversation:c ~scope ())
                   | None -> ());
-                 Par_code_ui.render_notice ui "\n[cancelled by user]"
+                 Par_code_ui.render_cancel ui "[cancelled by user]"
                | _ ->
                  Par_code_ui.render_error ui
                    (Printf.sprintf "\n[error] %s" (Printexc.to_string ex))));

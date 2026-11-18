@@ -160,6 +160,9 @@ val render_warning : backend -> string -> unit
 val render_notice : backend -> string -> unit
 val render_success : backend -> string -> unit
 
+val render_cancel : backend -> string -> unit
+(** The stopped-by-user state. *)
+
 (** Render [msg], flush, then read one line from /dev/tty (stdin fallback).
     Returns [Some trimmed_input] on success, [None] on EOF/error.
     The flush is load-bearing — without it the prompt stays block-buffered. *)
