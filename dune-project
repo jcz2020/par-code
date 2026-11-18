@@ -46,12 +46,6 @@
    tls-eio
     ;; SHA256 verification of downloaded release artifacts.
     digestif
-    ;; UTF-8/wcwidth-aware line editing for the REPL prompt. The kernel tty
-    ;; line discipline erases CJK wide characters one byte/column at a time
-    ;; (even with IUTF8 set), garbling the display on backspace. linenoise
-    ;; takes over input editing in raw mode with proper wide-char handling.
-    ;; Self-contained: bundled C source, no system lib.
-    (linenoise (>= 1.3))
     ;; Full-screen terminal (v0.14): the OCaml 5 fork of notty. The upstream
     ;; notty package requires ocaml < 4.14; notty-community.unix provides
     ;; Notty_unix used by lib/par_code_screen.ml.

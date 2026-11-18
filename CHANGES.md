@@ -1,12 +1,16 @@
 # CHANGES
 
-## v0.14.2 — Full-screen by default (unreleased)
+## v0.15.0 — One interface (unreleased)
 
 > **Status**: In progress on `main`. No version bump yet.
 
-- `ui` defaults to `"tui"`: a terminal gets the framed interface on start, and
-  a pipe, CI run or redirected stdout still gets the line interface. An explicit
-  `"ui": "line"` in a config file keeps the line interface for that user.
+- The line interface is gone: `par` always runs the full-screen REPL, and a
+  non-TTY run exits with a message pointing at `par ask` instead of silently
+  switching to a second UI. `par ask`, the config wizard and the CLI commands
+  are unchanged.
+- The `ui` config key is gone with it (an old `"ui": "line"` in a config file
+  is ignored), as are the `linenoise` dependency, the `/dev/tty` modal fallback
+  for the REPL, and the duplicate history/completion wiring.
 
 ## v0.14.1 — Fixes from the phone (released 2026-11-18)
 

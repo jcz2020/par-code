@@ -135,16 +135,6 @@ let test_show_custom_system_prompt () =
 
 (* ── default_mode ────────────────────────────────────────────────────── *)
 
-let test_ui_default_is_tui () =
-  Alcotest.(check string) "a terminal gets the framed interface by default"
-    "tui" default.ui
-
-let test_ui_roundtrip_line () =
-  let cfg = { default with ui = "line" } in
-  match of_json (to_json cfg) with
-  | Ok loaded -> Alcotest.(check string) "explicit line survives" "line" loaded.ui
-  | Error e -> Alcotest.fail e
-
 let test_default_mode_is_build () =
   Alcotest.(check bool) "default mode is Build" true
     (default.default_mode = Par_code_mode.Build)
@@ -705,9 +695,5 @@ let () =
         Alcotest.test_case "update_candidates"          `Quick test_update_max_candidates;
         Alcotest.test_case "candidates_out_of_range"    `Quick test_update_max_candidates_out_of_range;
         Alcotest.test_case "show_output"                `Quick test_show_max_mode;
-      ];
-      "ui", [
-        Alcotest.test_case "default_is_tui"             `Quick test_ui_default_is_tui;
-        Alcotest.test_case "roundtrip_line"             `Quick test_ui_roundtrip_line;
       ];
     ]

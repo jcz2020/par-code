@@ -303,25 +303,17 @@ let render_line b img =
      output_char b.out '\n';
      flush b.out)
 
-let read_line _b ~prompt =
-  (* linenoise owns prompt display + input editing (raw mode, UTF-8/wide-char-
-     aware backspace). On non-tty stdin it auto-falls-back to a plain fgetc
-     loop. The prompt must be PLAIN TEXT: linenoise sizes the cursor with
-     strlen(prompt), so ANSI escape codes would misposition it. *)
-  let prompt_str = flatten ~color:false prompt in
-  (* linenoise writes the prompt directly to fd 1, bypassing OCaml's stdout
-     buffer — flush first so any pending rendered output (e.g. a slash command
-     via render, which doesn't flush) reaches the terminal before the prompt. *)
+let read_line b ~prompt =
+  (* CLI flows outside the REPL (the config wizard, upgrade prompts) still ask
+     one question on stdin; the interactive REPL itself runs inside the screen. *)
+  render b prompt;
   flush stdout;
-  match LNoise.linenoise prompt_str with
-  (* Ctrl+C: linenoise raises Sys.Break. Cmdliner's Cmd.eval swallows uncaught
-     term exceptions with an "internal error" message, so this must be caught
-     HERE, not at the top level. exit 130 (SIGINT convention) aborts the
-     config wizard / upgrade-confirm — correct: the user wants out, not to
-     continue with defaults. linenoise has already restored the terminal. *)
-  | exception Sys.Break -> exit 130
-  | None -> None
-  | Some line -> Some line
+  try
+    match input_line stdin with
+    | line -> Some (String.trim line)
+  with
+  | End_of_file -> None
+  | Sys.Break -> exit 130
 
 let get_size b = size_of b
 let supports_color b = color_of b
@@ -905,15 +897,8 @@ let render_prompt backend mode =
    cursor with strlen(prompt), so color codes would misposition it.
    [render_prompt] above still produces the colored version for tests/non-
    linenoise contexts. *)
-let prompt_string mode =
-  let prefix = match mode with
-    | Par_code_mode.Plan -> "(plan) "
-    | Par_code_mode.Build -> "(build) "
-  in
-  prefix ^ "par> "
-
-(* v0.14.0 W2: one list feeds the help screen, Tab completion and the grey
-   hint under the prompt, so they cannot drift apart. *)
+(* v0.14.2: the REPL prompt is drawn by [Par_code_screen]; the line interface
+   and its prompt string are gone. *)
 let commands : (string * string) list =
   [ ("/help", "Show this help");
     ("/session", "Show session info");
