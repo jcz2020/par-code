@@ -107,6 +107,11 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
         let text = render parts in
         if String.length text <= budget then text else pick rest
     in
+    (* v0.15.3: the frame is a window now — a title line names the build and the
+       project, and the composer carries the mode on its top border. *)
+    Par_code_screen.set_header s
+      (Printf.sprintf "par %s \xc2\xb7 %s" Par_code_version.version dir);
+    Par_code_screen.set_composer_label s mode;
     Par_code_screen.set_status s (pick options)
   in
   let screen =
@@ -197,7 +202,9 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
      `par session list` / `par -r` / `par --continue <prefix>` filter
      correctly. PAR SDK 0.8.3 surfaced ?scope through Runtime.save_conversation. *)
   let scope = Par_code_memory.resolve_project_id () in
-  Par_code_ui.render_banner ui ~version:Par_code_version.version;
+  (* v0.15.3: the frame header names the build, so the transcript
+     no longer opens with a banner line. *)
+  ();
   let conv : Types.conversation option ref = ref (load_initial_conv ui rt resume) in
   let orphans = ref (Runtime.list_orphaned_invokes rt) in
   let last_flow : string option ref = ref None in

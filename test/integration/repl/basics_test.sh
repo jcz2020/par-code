@@ -8,7 +8,7 @@ test_startup_banner() {
   tmux_spawn
   tmux_wait_for '›' 8
   tmux_assert_contains 'par'
-  tmux_assert_contains 'type a message|/help'
+  tmux_assert_contains 'par [0-9]+\.[0-9]+'
   tmux_kill
 }
 

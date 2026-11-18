@@ -239,7 +239,6 @@ val render_delegation_tool_event : backend -> agent_type:string -> Par.Types.eve
 val render_delegation_result : backend -> agent_type:string -> text:string -> unit
 val render_delegation_error : backend -> agent_type:string -> error:string -> unit
 
-val render_banner : backend -> version:string -> unit
 val render_prompt : backend -> Par_code_mode.mode -> unit
 val commands : (string * string) list
 (** Slash commands and their one-line descriptions: the single source for help,

@@ -46,6 +46,12 @@ val set_partial : t -> string -> unit
 val width : t -> int
 (** Current terminal width in columns. *)
 
+val set_header : t -> string -> unit
+(** Title line at the top of the frame; "" hides it. *)
+
+val set_composer_label : t -> string -> unit
+(** Label on the composer's top border (the mode); "" hides the border. *)
+
 val set_status : t -> string -> unit
 
 val set_busy : t -> string -> unit(** Transient text (a spinner, elapsed time) shown before the status line while

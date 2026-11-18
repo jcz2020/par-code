@@ -116,6 +116,12 @@ type t = {
   mutable tool_block : Notty.image list;
   (* Name of the tool currently running, for the activity line. *)
   mutable activity : string;
+
+  (* v0.15.3: the frame gains a title line and a composer that says which mode
+     it is in. Both are set by the REPL; an empty string keeps the row out, so a
+     tiny terminal loses no space. *)
+  mutable header : string;
+  mutable composer_label : string;
   mutable status : string;
   mutable scroll : int;                   (* lines up from the bottom *)
   (* v0.15.2: last pointer position while dragging, so a swipe scrolls.
@@ -175,6 +181,8 @@ let create () : t =
     partial = "";
     tool_block = [];
     activity = "";
+    header = "";
+    composer_label = "";
     status = "";
     scroll = 0;
     drag_y = None;
@@ -468,6 +476,9 @@ let end_line (t : t) =
   end
 
 let set_status (t : t) (s : string) = t.status <- s
+
+let set_header (t : t) (s : string) = t.header <- s
+let set_composer_label (t : t) (s : string) = t.composer_label <- s
 
 (** A transient line shown before the status text while a turn runs. *)
 let set_busy (t : t) (s : string) = t.busy <- s
@@ -938,7 +949,11 @@ let frame (t : t) : Notty.image =
                     ^ desc))))
   in
   let menu_h = List.length menu_rows in
-  let body_h = max 1 (h - input_h - status_h - 1 - menu_h) in
+  let header_h = if t.header = "" then 0 else 2 in
+  let composer_h = if t.composer_label = "" then 0 else 1 in
+  let body_h =
+    max 1 (h - input_h - status_h - 1 - menu_h - header_h - composer_h)
+  in
   let body =
     I.vcat (visible_lines t ~height:body_h)
     |> fun img ->
@@ -1120,8 +1135,34 @@ let frame (t : t) : Notty.image =
       box ~title:(wrapped m.title) ~rows:(List.concat_map wrapped m.body)
         ~footer:(wrapped legend)
   in
-  I.vsnap ~align:`Top body_h body <-> I.vcat menu_rows <-> rule <-> input_line
-  <-> status
+  let header =
+    if header_h = 0 then I.empty
+    else
+      I.vcat
+        [ I.hsnap ~align:`Left w
+            (I.string A.(fg lightblack) (sanitize_text (" " ^ t.header)))
+        ; rule ]
+  in
+  let composer =
+    if composer_h = 0 then I.empty
+    else
+      let top = "╭─ " ^ t.composer_label ^ " " in
+      let pad = Stdlib.max 0 (w - text_width top) in
+      I.hsnap ~align:`Left w
+        (I.string A.(fg lightblack)
+           (sanitize_text (top ^ String.concat "" (List.init pad (fun _ -> "─")))))
+  in
+  (* The composer's top border opens the box; the rule below the input closes
+     it, so the input sits inside the frame instead of floating under a rule. *)
+  let bottom_rule =
+    if composer_h = 0 then rule
+    else
+      I.hsnap ~align:`Left w
+        (I.string A.(fg lightblack)
+           ("\xe2\x95\xb0" ^ String.concat "" (List.init w (fun _ -> "\xe2\x94\x80"))))
+  in
+  header <-> I.vsnap ~align:`Top body_h body <-> composer <-> I.vcat menu_rows
+  <-> input_line <-> bottom_rule <-> status
 
 (** v0.14.0 S2: Ctrl-C follows Claude Code — with input it clears the line, with
     an empty line a second press within two seconds exits. Ctrl-D exits from an
