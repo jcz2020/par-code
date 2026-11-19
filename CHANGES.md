@@ -1,5 +1,44 @@
 # CHANGES
 
+## v0.15.4 — A frame that survives the terminal (released 2026-11-19)
+
+- **A research turn is not a loop**: consecutive `web_search` / `fetch_url` calls
+  (and other read-only tools — read, grep, find, ls, glob, search, fetch,
+  browse, lookup, query) reset the doom-loop streak instead of counting as
+  "other actions". Twelve searches used to abort the whole turn.
+- **One row per tool call**: the streamed call start and the invocation event
+  each drew a start line, so every call showed two rows. A call is one line
+  again, and a failed call uses that same row instead of the old
+  `→ name ✗ (0.0ms)` line.
+- **Parallel calls replace their own row**: rows carry the task id of the call
+  that produced them, and each call is handed its own arguments in order, so a
+  batch of four no longer collapses onto the last row or shows one query four
+  times.
+- **The transcript keeps arrival order**: anything appended (your message, a
+  warning, an error, a notice) first commits the pending half line and tool
+  block, so a new message can no longer appear above the tail of the previous
+  answer. The doom-loop abort is reported once, and a turn's tool block is
+  committed when the turn ends (abort included).
+- **Resizing no longer kills the session**: a font-size change sends SIGWINCH,
+  which interrupted `select` with `EINTR` and escaped as an uncaught exception
+  (exit 125). Signals now mean "look at the terminal again"; a write cut short
+  is a lost frame, not a dead process.
+- **No idle flicker**: the loop repainted the whole frame every ~50ms even when
+  nothing had changed. It now repaints only when the frame changed.
+- **Font-size changes re-flow the transcript**: entries keep their source image
+  and render at the width in use, so existing answers wrap to the new width
+  instead of being clipped.
+- **Full-width transcript**: the 110-column readable measure is gone; the body
+  uses the window minus the gutter and the scroll bar.
+- **Short terminals keep the composer**: rows are budgeted — input line and
+  status bar first, then title, composer border, menu, body — so a large font
+  or a split window no longer pushes the input line off screen; the scroll
+  position is clamped instead of drifting past the top.
+- **Terminal input hardening**: a mouse report split across writes no longer
+  types its tail into the composer, invalid UTF-8 and control characters are
+  dropped before they reach notty, and a frame-building fault is a lost frame
+  rather than a crash.
+
 ## v0.15.3 — Readable tool calls and an installer that works (released 2026-11-18)
 
 - **PAR SDK `v0.17.3-beta.20261118`** (three hardcoded pin points; the two
