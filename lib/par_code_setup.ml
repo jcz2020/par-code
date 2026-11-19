@@ -702,14 +702,8 @@ This is the LAST thing you do. The user will be asked to confirm.
     Runtime.register_tool_call_hook rt
       (Par_code_permissions.hook (Par_code_permissions.load ()));
     (* v0.15.3: tool events carry no arguments, so the transcript would only
-       ever say "read (1.2ms)". Remember the last call's input per tool name and
-       let the renderer describe what was asked for. *)
-    (* v0.15.3: tool events carry no arguments, so the transcript would only
-       ever say "read (1.2ms)". Remember the last call's input per tool name and
-       let the renderer describe what was asked for. *)
-    (* v0.15.3: tool events carry no arguments, so the transcript would only
-       ever say "read (1.2ms)". Remember the last call's input per tool name and
-       let the renderer describe what was asked for. *)
+       ever say "read (1.2ms)". Remember each call's input so the renderer can
+       describe what was asked for; the queue is per tool, in call order. *)
     Runtime.register_tool_call_hook rt (fun (ctx : Hook.tool_call_context) ->
         Par_code_ui.note_tool_arguments ctx.tool_name ctx.input;
         Hook.Allow);

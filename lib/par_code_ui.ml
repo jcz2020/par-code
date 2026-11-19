@@ -597,10 +597,14 @@ let set_partial_sink backend f = backend.partial <- Some f
    the screen and folded into a single block, so a 20-call turn does not push
    the answer off the frame. When no hook is installed (plain output) they are
    rendered one per line as before. *)
-let tool_line_hook : (string -> image -> unit) option ref = ref None
+let tool_line_hook : (string -> string -> image -> unit) option ref = ref None
 let tool_flush_hook : (unit -> unit) option ref = ref None
 
-let tool_replace_hook : (image -> unit) option ref = ref None
+(* v0.15.4: the result replaces the row of its own call. Parallel tool calls
+   (one batch, several invocations) used to all append, and each result then
+   overwrote the *last* row — leaving stale "→ name" rows and check marks on
+   the wrong call — so every row carries the task id that produced it. *)
+let tool_replace_hook : (string -> image -> unit) option ref = ref None
 
 let set_tool_hooks ~line ~replace ~flush =
   tool_line_hook := Some line;
@@ -611,15 +615,41 @@ let flush_tool_block () =
   match !tool_flush_hook with Some f -> f () | None -> ()
 
 (* v0.15.3: one line per tool call. The start line names what was asked for,
-   and the result replaces that same line instead of adding a second one. The
-   events carry no arguments, so the tool_call_hook records them by tool name. *)
-let tool_args : (string, Yojson.Safe.t) Hashtbl.t = Hashtbl.create 8
+   and the result replaces that same line instead of adding a second one.
+   v0.15.4: the engine fires [Tool_invoked] *before* it runs the tool-call hook,
+   so the arguments are not there yet when the row is drawn. The call parks its
+   task id on a per-tool queue, the hook hands the input to the oldest waiting
+   call, and the finished row reads it back by task id — that is what keeps a
+   parallel batch (b1..b4) from showing the last call's arguments on every row. *)
+let awaiting : (string, string list) Hashtbl.t = Hashtbl.create 8
+let pending_args : (string, Yojson.Safe.t list) Hashtbl.t = Hashtbl.create 8
+let call_args : (string, Yojson.Safe.t) Hashtbl.t = Hashtbl.create 8
+
+let queue_push tbl k v =
+  let q = match Hashtbl.find_opt tbl k with Some q -> q | None -> [] in
+  let q = q @ [ v ] in
+  (* A call that is denied before it runs leaves its entry behind; keep the
+     queue short so a long session cannot grow it without bound. *)
+  let n = List.length q in
+  Hashtbl.replace tbl k (if n > 8 then List.filteri (fun i _ -> i >= n - 8) q else q)
 
 let note_tool_arguments (name : string) (json : Yojson.Safe.t) =
-  Hashtbl.replace tool_args (String.lowercase_ascii name) json
+  let k = String.lowercase_ascii name in
+  match Hashtbl.find_opt awaiting k with
+  | Some (key :: rest) ->
+    Hashtbl.replace awaiting k rest;
+    Hashtbl.replace call_args key json
+  | _ -> queue_push pending_args k json
 
-let arguments_of (name : string) =
-  Hashtbl.find_opt tool_args (String.lowercase_ascii name)
+(* Called when a call is announced: either the input is already queued (the
+   hook ran first) or this task id waits for it. *)
+let register_call ~(key : string) ~(name : string) =
+  let k = String.lowercase_ascii name in
+  match Hashtbl.find_opt pending_args k with
+  | Some (json :: rest) ->
+    Hashtbl.replace pending_args k rest;
+    Hashtbl.replace call_args key json
+  | _ -> queue_push awaiting k key
 
 let emit_markdown backend s =
   (* Only real answer text ends a tool block. A flushed half line emits "\n",
@@ -683,22 +713,22 @@ let flush_pending_line backend =
 
 (** A tool line: the frame folds these per turn and shows [name] as the current
     activity, so the running line can say what is happening. *)
-let render_tool_line backend ~name img =
+let render_tool_line ?(key = "") backend ~name img =
   (* A rendering fault must never turn a healthy tool call into a failed one:
      the engine reports an exception from this path as a 0.0ms tool failure. *)
   try
     flush_pending_line backend;
     match !tool_line_hook with
-    | Some f -> f name img
+    | Some f -> f name key img
     | None -> render_line backend img
   with _ -> ()
 
-let replace_tool_line backend ~name img =
+let replace_tool_line ?(key = "") backend img =
   try
     flush_pending_line backend;
     match !tool_replace_hook with
-    | Some f -> f img
-    | None -> render_tool_line backend ~name img
+    | Some f -> f key img
+    | None -> render_line backend img
   with _ -> ()
 
 
@@ -731,10 +761,14 @@ let render_llm_chunk backend (chunk : Par.Types.llm_response_chunk) =
       backend.markdown_state <- new_state;
       emit_markdown backend output;
     end
-  | Tool_call_start { tool_call_id = _; name } ->
+  | Tool_call_start { tool_call_id = _; name = _ } ->
     close_thinking_window ();
-    render_tool_line backend ~name
-      (textf "  → %s" name ~style:(style ~dim:true ()))
+    (* v0.15.4: [Tool_invoked] draws the one start line, now that the tool-call
+       hook hands it the arguments. Drawing a second, argless "→ name" line
+       here made every call show two rows, because the result replaces only
+       the last one. The streamed start still flushes the half-rendered
+       markdown line so the text keeps its order. *)
+    flush_pending_line backend
   | Tool_call_delta _ ->
     close_thinking_window ()
   | Usage_update _ ->
@@ -747,36 +781,44 @@ let render_llm_chunk backend (chunk : Par.Types.llm_response_chunk) =
 
 let render_tool_event backend (evt : Par.Types.event) =
   match evt with
-  | Tool_invoked { tool_name; _ } ->
+  | Tool_invoked { task_id; tool_name; _ } ->
     (* v0.15.3: the start line says what was asked for; the result replaces it,
        so one call is one line instead of two. *)
+    let key = Par.Types.Task_id.to_string task_id in
+    register_call ~key ~name:tool_name;
     let asked =
-      Par_code_tool_summary.of_arguments ~name:tool_name
-        (Option.value (arguments_of tool_name) ~default:`Null)
+      match Hashtbl.find_opt call_args key with
+      | Some json -> Par_code_tool_summary.of_arguments ~name:tool_name json
+      | None -> ""
     in
     let label = if asked = "" then tool_name else tool_name ^ " " ^ asked in
-    render_tool_line backend ~name:tool_name
+    render_tool_line ~key backend ~name:tool_name
       (textf "  → %s" label ~style:(style ~dim:true ()))
-  | Tool_completed { tool_name; duration_ms; result_preview; _ } ->
+  | Tool_completed { task_id; tool_name; duration_ms; result_preview; _ } ->
+    let key = Par.Types.Task_id.to_string task_id in
+    let args = Hashtbl.find_opt call_args key in
+    Hashtbl.remove call_args key;
     let line =
-      Par_code_tool_summary.line ~name:tool_name
-        ~args:(arguments_of tool_name) ~preview:result_preview
-        ~duration_ms:(Some duration_ms) ~failed:false
+      Par_code_tool_summary.line ~name:tool_name ~args
+        ~preview:result_preview ~duration_ms:(Some duration_ms) ~failed:false
     in
-    replace_tool_line backend ~name:tool_name
+    replace_tool_line ~key backend
       (textf "  ✓ %s" line ~style:(style ~fg:Green ~dim:true ()))
-  | Tool_failed { tool_name; error; _ } ->
+  | Tool_failed { task_id; tool_name; error; _ } ->
+    let key = Par.Types.Task_id.to_string task_id in
+    let args = Hashtbl.find_opt call_args key in
+    Hashtbl.remove call_args key;
     let line =
-      Par_code_tool_summary.line ~name:tool_name
-        ~args:(arguments_of tool_name) ~preview:None ~duration_ms:None
-        ~failed:true
+      Par_code_tool_summary.line ~name:tool_name ~args ~preview:None
+        ~duration_ms:None ~failed:true
     in
-    replace_tool_line backend ~name:tool_name
+    replace_tool_line ~key backend
       (textf "  ✗ %s (%s)" line (Par.Types.string_of_error_category error)
          ~style:(style ~fg:Red ~bold:true ()))
-  | Tool_progress { tool_name; message; _ } ->
-    render_tool_line backend ~name:tool_name (textf "  → %s: %s" tool_name message
-      ~style:(style ~dim:true ()))
+  | Tool_progress { task_id; tool_name; message; _ } ->
+    render_tool_line ~key:(Par.Types.Task_id.to_string task_id) backend
+      ~name:tool_name
+      (textf "  → %s: %s" tool_name message ~style:(style ~dim:true ()))
   | Bash_invoked { argv; risk; _ } ->
     let cmd = String.concat " " argv in
     let risk_style = match risk with

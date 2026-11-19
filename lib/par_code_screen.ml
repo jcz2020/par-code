@@ -96,12 +96,18 @@ type search = {
   s_cursor : int;
 }
 
+(* v0.15.4: an entry keeps the SOURCE image and renders at the width in use,
+   so changing the font size re-flows the transcript instead of clipping it.
+   The rendered result is cached per column count. *)
+type render_cache = { mutable rc_cols : int; mutable rc_lines : Notty.image list }
+
 type entry =
-  | Line of Notty.image
+  | Line of Par_code_ui.image * render_cache
+  | Capped of Par_code_ui.image * render_cache
   | Tools of tool_block
 
 and tool_block = {
-  bx_lines : Notty.image list;
+  bx_imgs : Par_code_ui.image list;
   mutable bx_expanded : bool;
 }
 
@@ -112,8 +118,10 @@ type t = {
   mutable transcript : entry list;
   mutable partial : string;               (* line being streamed *)
   (* v0.15.1: tool lines of the current turn, folded into one block when the
-     answer arrives so a long tool sequence does not bury it. *)
-  mutable tool_block : Notty.image list;
+     answer arrives so a long tool sequence does not bury it. Each row carries
+     the task id of the call that produced it (v0.15.4), so a parallel batch
+     can replace its own row instead of the last one. *)
+  mutable tool_block : (string * Par_code_ui.image) list;
   (* Name of the tool currently running, for the activity line. *)
   mutable activity : string;
 
@@ -165,6 +173,10 @@ type t = {
   mutable menu_suppress : bool;
   (* v0.15.1: Ctrl-R reverse search over the prompt history. *)
   mutable search : search option;
+  (* v0.15.4: the last frame we actually painted. The idle loop wakes every
+     50ms; repainting an unchanged frame made the TUI flicker on a phone, so a
+     render only happens when this signature changes. *)
+  mutable last_sig : string;
   (* Terminal attributes as they were before notty took the tty. A signal
      handler cannot safely call into notty (it can deadlock on a lock the
      interrupted code holds), so the cleanup path restores from here. *)
@@ -208,7 +220,8 @@ let create () : t =
     files = None;
     menu_token = None;
     menu_suppress = false;
-    search = None }
+    search = None;
+    last_sig = "" }
 
 (* Notty rejects control characters inside [I.string] (it raises on "\n"),
    and model output is full of them. Split runs on newlines into separate lines
@@ -295,10 +308,12 @@ let wrap_runs ~(cols : int) (runs : (string * Par_code_ui.style) list) :
            break_if_needed (display_width u);
            Uutf.Buffer.add_utf_8 piece u;
            used := !used + display_width u
-         | `Malformed s ->
-           break_if_needed 1;
-           Buffer.add_string piece s;
-           incr used
+         | `Malformed _ ->
+           (* v0.15.4: bytes that are not valid UTF-8 used to be copied through
+              to [I.string], where notty reads a stray 0x80–0x9F byte as a
+              control character and raises — taking the whole session down.
+              Drop them, the same way [sanitize_text] drops C0 controls. *)
+           ()
        in
        ignore (Uutf.String.fold_utf_8 folder () txt);
        flush_piece ())
@@ -338,7 +353,11 @@ let to_notty_lines ~(cols : int) (img : Par_code_ui.image) : Notty.image list =
             | _ ->
               I.hcat
                 (List.map
-                   (fun (txt, sty) -> I.string (attr_of_style sty) txt)
+                   (fun (txt, sty) ->
+                      (* v0.15.4: last line of defence — every string that reaches
+                         notty is clean, or a control character takes the frame
+                         down. *)
+                      I.string (attr_of_style sty) (sanitize_text txt))
                    runs))
          (List.concat_map (wrap_runs ~cols) (split_runs runs)
           |> List.map trim_trailing_spaces))
@@ -364,17 +383,46 @@ let width (t : t) = fst (Notty_unix.Term.size t.term)
 (* v0.15.2: a 200-column tablet-wide terminal turns prose into unreadable long
    lines, so the transcript is capped at a comfortable measure and centred. On
    a phone the cap never applies. *)
-let max_content_cols = 110
+(* v0.15.4: no readable-measure cap. Prose wants short lines, but this is a
+   coding terminal: code, logs, diffs and tables were being wrapped and the
+   transcript sat in a narrow column in the middle of a wide screen while the
+   composer and status bar spanned the full width. The body now uses the whole
+   window minus the gutter and the scroll-bar column. *)
+let content_cols (t : t) = max 8 (width t - 2)
 
-let content_cols (t : t) = min (width t - 2) max_content_cols
-let content_margin (t : t) = max 0 ((width t - 2 - content_cols t) / 2)
+(* v0.15.4: entries keep the SOURCE image plus a render cache keyed by column
+   count, so changing the font size re-flows the transcript instead of
+   clipping it. *)
+let fresh_cache () : render_cache = { rc_cols = -1; rc_lines = [] }
 
-(* The transcript stores one entry per *line*, not per image: a multi-line
-   image used to count as a single entry, so pagination and scrolling were off
-   by however many lines it had. *)
+let append_raw (t : t) (img : Par_code_ui.image) =
+  t.transcript <- t.transcript @ [ Line (img, fresh_cache ()) ]
+
+let commit_tools (t : t) =
+  if t.tool_block <> [] then begin
+    let imgs = List.map snd t.tool_block in
+    t.tool_block <- [];
+    t.activity <- "";
+    t.transcript <-
+      t.transcript @ [ Tools { bx_imgs = imgs; bx_expanded = false } ]
+  end
+
+(* v0.15.4: anything appended to the transcript (a notice, a warning, an
+   error, the user's own line) must land after what is already on screen. The
+   streamed half line and the pending tool block render *after* the
+   transcript, so they are committed first — otherwise a message sent during
+   or right after a turn appeared above the answer it followed. *)
+let commit_pending (t : t) =
+  if t.partial <> "" then begin
+    let p = t.partial in
+    t.partial <- "";
+    append_raw t (Par_code_ui.text p)
+  end;
+  commit_tools t
+
 let append (t : t) (img : Par_code_ui.image) =
-  t.transcript <-
-    t.transcript @ List.map (fun l -> Line l) (to_notty_lines ~cols:(content_cols t) img)
+  commit_pending t;
+  append_raw t img
 
 (* v0.14.0 S1b: a frame is not a scroll buffer — one huge tool output must not
    push everything else out. Cap the lines taken from a single image and mark
@@ -382,20 +430,9 @@ let append (t : t) (img : Par_code_ui.image) =
 let max_lines_per_image = 60
 
 let append_truncated (t : t) (img : Par_code_ui.image) =
-  let lines = to_notty_lines ~cols:(content_cols t) img in
-  let n = List.length lines in
-  let kept =
-    if n <= max_lines_per_image then lines
-    else begin
-      let rec take k l =
-        if k <= 0 then [] else match l with [] -> [] | h :: tl -> h :: take (k - 1) tl
-      in
-      take max_lines_per_image lines
-      @ [ to_notty ~cols:(content_cols t)
-            (Par_code_ui.textf "… (%d more lines)" (n - max_lines_per_image)) ]
-    end
-  in
-  t.transcript <- t.transcript @ List.map (fun l -> Line l) kept
+  (* The cap is applied when the entry is drawn: line count depends on the
+     width in use, so trimming here would bake in one width. *)
+  t.transcript <- t.transcript @ [ Capped (img, fresh_cache ()) ]
 
 let append_text (t : t) (s : string) =
   append t (Par_code_ui.text s)
@@ -403,26 +440,25 @@ let append_text (t : t) (s : string) =
 (* v0.15.1: collect this turn's tool lines, then fold them on release. Up to
    eight lines survive intact; beyond that the head and tail stay and the
    middle collapses into a count, so the block keeps a size ceiling. *)
-let append_tool_line (t : t) ~(name : string) (img : Par_code_ui.image) =
+let append_tool_line (t : t) ~(name : string) ~(key : string)
+    (img : Par_code_ui.image) =
   t.activity <- name;
-  t.tool_block <-
-    t.tool_block @ to_notty_lines ~cols:(content_cols t) img
+  t.tool_block <- t.tool_block @ [ (key, img) ]
 
-(* The result of a tool call replaces its start line, so a call is one line. *)
-let replace_last_tool_line (t : t) (img : Par_code_ui.image) =
-  let lines = to_notty_lines ~cols:(content_cols t) img in
-  match List.rev t.tool_block with
-  | [] -> t.tool_block <- lines
-  | _ :: rest -> t.tool_block <- List.rev rest @ lines
+(* The result of a tool call replaces the row of that same call. Without the
+   key a parallel batch (four invocations, four results) overwrote the last row
+   each time and left stale start lines behind. *)
+let replace_tool_line (t : t) ~(key : string) (img : Par_code_ui.image) =
+  if key <> "" && List.exists (fun (k, _) -> k = key) t.tool_block then
+    t.tool_block <-
+      List.map (fun (k, old) -> if k = key then (k, img) else (k, old))
+        t.tool_block
+  else
+    match List.rev t.tool_block with
+    | [] -> t.tool_block <- [ (key, img) ]
+    | (k, _) :: rest -> t.tool_block <- List.rev ((k, img) :: rest)
 
-let flush_tools (t : t) =
-  let lines = t.tool_block in
-  t.tool_block <- [];
-  t.activity <- "";
-  if lines <> [] then
-    (* Kept whole: the fold is a view, so Ctrl-O can show what was hidden. *)
-    t.transcript <-
-      t.transcript @ [ Tools { bx_lines = lines; bx_expanded = false } ]
+let flush_tools (t : t) = commit_tools t
 
 (* v0.15.1: the fold. Up to eight lines show as they are; longer runs keep the
    head and the tail with a count in the middle. Ctrl-O flips [bx_expanded] on
@@ -435,8 +471,9 @@ let fold_plan (n : int) : int * int * int =
   if n <= max_block_lines then (n, 0, 0) else (4, n - 7, 3)
 
 let block_view ~cols (b : tool_block) : Notty.image list =
-  let n = List.length b.bx_lines in
-  if b.bx_expanded then b.bx_lines
+  let lines = List.concat_map (fun img -> to_notty_lines ~cols img) b.bx_imgs in
+  let n = List.length lines in
+  if b.bx_expanded then lines
   else begin
     let head, hidden, tail = fold_plan n in
     let rec take k l =
@@ -445,18 +482,18 @@ let block_view ~cols (b : tool_block) : Notty.image list =
     let rec drop k l =
       if k <= 0 then l else match l with [] -> [] | _ :: tl -> drop (k - 1) tl
     in
-    let head_lines = take head b.bx_lines in
+    let head_lines = take head lines in
     if hidden <= 0 then head_lines
     else
       head_lines
       @ [ to_notty ~cols
             (Par_code_ui.textf "  … %d more tool lines (Ctrl-O)" hidden) ]
-      @ drop (n - tail) b.bx_lines
+      @ drop (n - tail) lines
   end
 
 let toggle_last_block (t : t) =
   match
-    List.find_opt (function Tools _ -> true | Line _ -> false)
+    List.find_opt (function Tools _ -> true | Line _ | Capped _ -> false)
       (List.rev t.transcript)
   with
   | Some (Tools b) -> b.bx_expanded <- not b.bx_expanded
@@ -471,8 +508,9 @@ let feed (t : t) (s : string) = t.partial <- t.partial ^ s
 
 let end_line (t : t) =
   if t.partial <> "" then begin
-    append_text t t.partial;
-    t.partial <- ""
+    let p = t.partial in
+    t.partial <- "";
+    append_raw t (Par_code_ui.text p)
   end
 
 let set_status (t : t) (s : string) = t.status <- s
@@ -486,13 +524,43 @@ let set_busy (t : t) (s : string) = t.busy <- s
 let activity (t : t) = t.activity
 
 let entry_lines ~cols (e : entry) : Notty.image list =
-  match e with Line img -> [ img ] | Tools b -> block_view ~cols b
+  match e with
+  | Line (img, cache) ->
+    if cache.rc_cols <> cols then begin
+      cache.rc_lines <- to_notty_lines ~cols img;
+      cache.rc_cols <- cols
+    end;
+    cache.rc_lines
+  | Capped (img, cache) ->
+    if cache.rc_cols <> cols then begin
+      let lines = to_notty_lines ~cols img in
+      let n = List.length lines in
+      let kept =
+        if n <= max_lines_per_image then lines
+        else begin
+          let rec take k l =
+            if k <= 0 then []
+            else match l with [] -> [] | h :: tl -> h :: take (k - 1) tl
+          in
+          take max_lines_per_image lines
+          @ [ to_notty ~cols
+                (Par_code_ui.textf "… (%d more lines)"
+                   (n - max_lines_per_image)) ]
+        end
+      in
+      cache.rc_lines <- kept;
+      cache.rc_cols <- cols
+    end;
+    cache.rc_lines
+  | Tools b -> block_view ~cols b
 
 let line_count (t : t) =
   let cols = content_cols t in
   List.fold_left (fun acc e -> acc + List.length (entry_lines ~cols e)) 0
     t.transcript
-  + List.length t.tool_block
+  + List.fold_left
+      (fun acc (_, img) -> acc + List.length (to_notty_lines ~cols img))
+      0 t.tool_block
 
 (* ------------------------------------------------------------------ *)
 (* Input line                                                          *)
@@ -500,10 +568,35 @@ let line_count (t : t) =
 
 let set_prompt (t : t) (p : string) = t.prompt <- p
 
+(* v0.15.4: a terminal can deliver a mouse report split across writes. When
+   the leading ESC is lost (or the drag arrives while the app is not yet in
+   mouse mode) the tail "<35;12;4M" used to be typed into the input line —
+   the garbage that showed up in the bottom-left corner on a touch drag. *)
+let mouse_tail_re =
+  Str.regexp
+    "\\(\x1b\\[<\\|\x1b\\[M\\)?\\(\\[\\)?\\(<\\)?[0-9]+;[0-9]+;[0-9]+[Mm]"
+
+let drop_mouse_tail (s : string) : string =
+  let n = String.length s in
+  if n = 0 || (s.[n - 1] <> 'M' && s.[n - 1] <> 'm') then s
+  else begin
+    let rec scan i =
+      if i >= n then s
+      else if Str.string_match mouse_tail_re s i && Str.match_end () = n then
+        String.sub s 0 i
+      else scan (i + 1)
+    in
+    scan 0
+  end
+
 let put_back (t : t) (s : string) =
-  t.input <- String.sub t.input 0 t.cursor ^ s
-             ^ String.sub t.input t.cursor (String.length t.input - t.cursor);
-  t.cursor <- t.cursor + String.length s
+  let before = String.sub t.input 0 t.cursor in
+  let after = String.sub t.input t.cursor (String.length t.input - t.cursor) in
+  let merged = before ^ s ^ after in
+  let cleaned = drop_mouse_tail merged in
+  let removed = String.length merged - String.length cleaned in
+  t.input <- cleaned;
+  t.cursor <- t.cursor + String.length s - removed
 
 let delete_back (t : t) =
   if t.cursor > 0 then begin
@@ -896,7 +989,10 @@ let history_move (t : t) (delta : int) =
 let visible_lines (t : t) ~(height : int) : Notty.image list =
   let all =
     let cols = content_cols t in
-    let base = List.concat_map (entry_lines ~cols) t.transcript @ t.tool_block in
+    let base =
+      List.concat_map (entry_lines ~cols) t.transcript
+      @ List.concat_map (fun (_, img) -> to_notty_lines ~cols img) t.tool_block
+    in
     if t.partial = "" then base
     else base @ [ to_notty ~cols:(content_cols t) (Par_code_ui.text t.partial) ]
   in
@@ -925,14 +1021,31 @@ let frame (t : t) : Notty.image =
     (n - 1, String.length (List.nth ls (n - 1)))
   in
   let max_input_h = 6 in
-  let input_h = max 1 (min max_input_h n_lines) in
+  (* v0.15.4: a six-row composer must not squeeze the status bar off a short
+     terminal — keep at least one body row plus the status line and the rule. *)
+  let input_h =
+    max 1 (min (min max_input_h n_lines) (max 1 (h - 4)))
+  in
   let first_line = max 0 (min (cursor_line - input_h + 1) (n_lines - input_h)) in
+  (* v0.15.4: the frame must fit the window. On a short terminal (a phone with a
+     large font, a small split) the fixed rows used to push the input line and
+     the status bar off the bottom, so you could not see what you typed. Room
+     is handed out in order: input and status always, then header, composer,
+     menu, and whatever is left is the body. *)
+  let room = max 1 (h - input_h - status_h - 1) in
+  let header_h = if t.header = "" || room < 6 then 0 else 2 in
+  let composer_h =
+    if t.composer_label = "" || room - header_h < 4 then 0 else 1
+  in
+  let menu_cap = max 0 (room - header_h - composer_h - 1) in
   let menu_rows =
     let n = List.length t.menu in
-    let visible = min 6 n in
-    let first = max 0 (min (t.menu_index - visible + 1) (n - visible)) in
-    List.filteri (fun i _ -> i >= first && i < first + visible) t.menu
-    |> List.mapi (fun j (cmd, desc) ->
+    let visible = min 6 (min n menu_cap) in
+    if visible <= 0 then []
+    else begin
+      let first = max 0 (min (t.menu_index - visible + 1) (n - visible)) in
+      List.filteri (fun i _ -> i >= first && i < first + visible) t.menu
+      |> List.mapi (fun j (cmd, desc) ->
            let i = first + j in
            let selected = i = t.menu_index in
            let sty =
@@ -947,18 +1060,21 @@ let frame (t : t) : Notty.image =
                     ^ cmd
                     ^ String.make (max 1 (16 - String.length cmd)) ' '
                     ^ desc))))
+    end
   in
   let menu_h = List.length menu_rows in
-  let header_h = if t.header = "" then 0 else 2 in
-  let composer_h = if t.composer_label = "" then 0 else 1 in
-  let body_h =
-    max 1 (h - input_h - status_h - 1 - menu_h - header_h - composer_h)
-  in
+  let body_h = max 1 (room - header_h - composer_h - menu_h) in
+  (* v0.15.4: a drag keeps adding to [scroll]; without a ceiling, scrolling
+     past the top left a large value behind and the next drag down appeared
+     stuck. Clamp before drawing. *)
+  let total = line_count t in
+  let max_top = max 0 (total - body_h) in
+  if t.scroll > max_top then t.scroll <- max_top;
   let body =
     I.vcat (visible_lines t ~height:body_h)
     |> fun img ->
     I.vsnap ~align:`Top body_h
-      (I.pad ~l:(gutter + content_margin t) ~r:0 img)
+      (I.pad ~l:gutter ~r:0 img)
     (* The bar is pinned to the last column: without the snap its position
        followed the widest line of whatever was on screen, which made it drift
        left as new content arrived. *)
@@ -968,11 +1084,9 @@ let frame (t : t) : Notty.image =
      It only appears when the transcript is taller than the view, so the frame
      stays quiet in the common case. *)
   let body =
-    let total = line_count t in
     if total <= body_h then body
     else begin
       let thumb = max 1 (body_h * body_h / total) in
-      let max_top = total - body_h in
       let top =
         ((max_top - min t.scroll max_top) * (body_h - thumb)) / max 1 max_top
       in
@@ -1030,9 +1144,10 @@ let frame (t : t) : Notty.image =
                           (if after = "" then " "
                            else sanitize_text (String.sub after 0 1))
                       ; I.string A.empty
-                          (if String.length after > 1 then
-                             String.sub after 1 (String.length after - 1)
-                           else "") ])
+                          (sanitize_text
+                             (if String.length after > 1 then
+                                String.sub after 1 (String.length after - 1)
+                              else "")) ])
              end else
                I.hsnap ~align:`Left w
                  (I.string A.empty (sanitize_text (lead ^ line))))
@@ -1212,7 +1327,15 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
        ESC + "[<65;83;39M" when the terminal writes it in pieces). *)
     (match ascii with
      | Some c when (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c = '~' ->
-       t.csi_drop <- false
+       t.csi_drop <- false;
+       (* The '[' of "ESC[<" can be delivered as text when the report is split
+          inside that first fragment: take it back so a drag never leaves a
+          stray bracket in the input line. *)
+       let n = String.length t.input in
+       if n > 0 && t.input.[n - 1] = '[' && t.cursor = n then begin
+         t.input <- String.sub t.input 0 (n - 1);
+         t.cursor <- n - 1
+       end
      | _ -> ())
   end else begin
     (* ESC followed by "[" or "O" belongs to an escape sequence; ESC followed
@@ -1266,6 +1389,12 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
         t.input <- "";
         t.cursor <- 0;
         t.editing <- false;
+        (* v0.15.4: a previous turn can end with an unfinished streamed line or
+           an uncommitted tool block (interrupt, provider error). Those render
+           *after* the transcript, so without this the new message appeared
+           above the tail of the old answer. Commit them first. *)
+        (if t.partial <> "" then end_line t);
+        (if t.tool_block <> [] then flush_tools t);
         (* The frame owns the screen: once the input line clears, the message
            the user just sent would be gone. Keep it in the transcript, the way
            a shell keeps the command line it echoed. *)
@@ -1378,7 +1507,20 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
          | _ -> "special")
   end
 
-let render (t : t) = Notty_unix.Term.image t.term (frame t)
+let frame_sig (t : t) : string =
+  Printf.sprintf "%d|%d|%d|%d|%s|%d|%d|%s|%s|%s|%b|%b|%b"
+    (List.length t.transcript) (String.length t.partial) t.scroll
+    (List.length t.tool_block) t.status t.menu_index (List.length t.menu)
+    t.activity t.header t.composer_label (t.picker <> None)
+    (t.modal <> None) t.editing
+
+let render (t : t) =
+  t.last_sig <- frame_sig t;
+  (* v0.15.4: a SIGWINCH arriving mid-write interrupts the terminal write, and
+     any frame-building fault is just a lost frame. Neither is worth the
+     session: clear the signature so the next pass repaints and carry on. *)
+  try Notty_unix.Term.image t.term (frame t)
+  with _ -> t.last_sig <- ""
 
 (** During a turn the REPL's own reader is not running. This drains pending
     events and reports an interrupt key (Esc, or Ctrl-C) without touching the
@@ -1398,6 +1540,16 @@ let handle_mouse (t : t) (m : Notty.Unescape.mouse) =
     t.drag_y <- Some y
   | `Release, _, _ -> t.drag_y <- None
 
+(* v0.15.4: a font-size change makes the terminal send SIGWINCH, and an
+   interrupted [Unix.select] raises EINTR. That used to escape as an uncaught
+   exception and kill the session. A signal means "check the terminal again",
+   so report "no data" and let the caller re-check [Term.pending]. *)
+let select_ready (fd : Unix.file_descr) (timeout : float) : bool =
+  try
+    let r, _, _ = Unix.select [ fd ] [] [] timeout in
+    r <> []
+  with Unix.Unix_error (Unix.EINTR, _, _) -> false
+
 let poll_interrupt (t : t) : bool =
   if t.modal <> None then false
   else begin
@@ -1406,8 +1558,7 @@ let poll_interrupt (t : t) : bool =
     let page = 10 in
     while
       t.running
-      && (Notty_unix.Term.pending t.term
-          || (let r, _, _ = Unix.select [ read_fd ] [] [] 0.0 in r <> []))
+      && (Notty_unix.Term.pending t.term || select_ready read_fd 0.0)
     do
       (match Notty_unix.Term.event t.term with
        | `Key (`Escape, _) -> hit := true
@@ -1444,20 +1595,30 @@ let picker_key (p : picker) (k : Notty.Unescape.special)
 
 let pump (t : t) ~(tick : t -> unit) =
   let read_fd, _ = Notty_unix.Term.fds t.term in
+  let changed = ref false in
   let ready =
     if t.running && not (Notty_unix.Term.pending t.term) then
-      let r, _, _ = Unix.select [ read_fd ] [] [] 0.05 in
-      r <> []
+      select_ready read_fd 0.05
     else true
   in
   (* A terminal can deliver an escape sequence in several writes (Termux ships
      the ESC of a mouse report apart from the rest). Settling for a few
      milliseconds lets notty parse the whole sequence instead of reporting the
      bare ESC and typing the tail into the input line. *)
-  if ready && t.running then ignore (Unix.select [] [] [] 0.008);
-  while t.running && (Notty_unix.Term.pending t.term ||
-                      (let r, _, _ = Unix.select [ read_fd ] [] [] 0.0 in r <> [])) do
-    match Notty_unix.Term.event t.term with
+  (* v0.15.4: wait for the input to go quiet (up to 30ms) instead of a fixed
+     8ms. Termux splits a mouse report across writes; a half-read sequence used
+     to be reported as separate keys and typed into the input line. *)
+  if ready && t.running then begin
+    let quiet = ref false in
+    let deadline = Unix.gettimeofday () +. 0.03 in
+    while (not !quiet) && Unix.gettimeofday () < deadline do
+      if not (select_ready read_fd 0.004) then quiet := true
+    done
+  end;
+  while t.running && (Notty_unix.Term.pending t.term || select_ready read_fd 0.0) do
+    changed := true;
+    (try
+       match Notty_unix.Term.event t.term with
     | `End -> t.running <- false
     | `Resize _ -> ()
     | `Key (k, mods) ->
@@ -1475,10 +1636,14 @@ let pump (t : t) ~(tick : t -> unit) =
          refresh_menu t)
     | `Mouse m -> handle_mouse t m
     | `Paste _ -> ()
+     with Unix.Unix_error (Unix.EINTR, _, _) -> ())
   done;
   if t.running then begin
     tick t;
-    render t
+    (* v0.15.4: repaint only when the frame actually changed. The loop wakes
+       every 50ms, so an unconditional render redrew the same picture ~20 times
+       a second — that is the flicker seen on a phone. *)
+    if !changed || frame_sig t <> t.last_sig then render t
   end
 
 let run (t : t) ~(tick : t -> unit) : unit =

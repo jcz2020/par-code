@@ -401,8 +401,38 @@ let tool_call_starts_on_a_fresh_line () =
     render_llm_chunk b (Par.Types.Text_delta { text = "now." });
     render_llm_chunk b
       (Par.Types.Tool_call_start { tool_call_id = "call-1"; name = "bash" })) in
-  Alcotest.(check string) "buffered text is flushed before the tool line"
-    "now.\n  → bash\n" out
+  (* v0.15.4: the streamed start no longer draws a row of its own — Tool_invoked
+     draws it with the arguments — but it still commits the buffered text. *)
+  Alcotest.(check string) "buffered text is flushed, no tool row drawn"
+    "now.\n" out
+
+let tool_call_draws_one_row () =
+  let drawn = ref 0 and replaced = ref [] in
+  let id1 = Par.Types.Task_id.create () in
+  let id2 = Par.Types.Task_id.create () in
+  ignore (with_backend_output (fun b ->
+    set_tool_hooks
+      ~line:(fun _ _ _ -> incr drawn)
+      ~replace:(fun key _ -> replaced := key :: !replaced)
+      ~flush:(fun () -> ());
+    render_llm_chunk b
+      (Par.Types.Tool_call_start { tool_call_id = "call-1"; name = "web_search" });
+    (* Two parallel calls: each result must name its own call, not "the last
+       row on screen". *)
+    render_tool_event b
+      (Par.Types.Tool_invoked { task_id = id1; tool_name = "web_search" });
+    render_tool_event b
+      (Par.Types.Tool_invoked { task_id = id2; tool_name = "web_search" });
+    render_tool_event b
+      (Par.Types.Tool_completed
+         { task_id = id1; tool_name = "web_search";
+           duration_ms = 12.0; result_preview = Some "ok" });
+    (* Leave no hooks behind: the suite runs in one process. *)
+    set_tool_hooks ~line:(fun _ _ _ -> ()) ~replace:(fun _ _ -> ())
+      ~flush:(fun () -> ())));
+  Alcotest.(check int) "each call draws one start row" 2 !drawn;
+  Alcotest.(check (list string)) "the result replaces its own row"
+    [ Par.Types.Task_id.to_string id1 ] !replaced
 
 (* ── Test runner ─────────────────────────────────────────────────────── *)
 
@@ -491,6 +521,7 @@ let () =
       "render_edges", [
         Alcotest.test_case "table_single_spaced" `Quick render_table_is_single_spaced;
         Alcotest.test_case "tool_boundary_newline" `Quick tool_call_starts_on_a_fresh_line;
+        Alcotest.test_case "tool_call_one_row" `Quick tool_call_draws_one_row;
         Alcotest.test_case "help_lists_each_command_once" `Quick
           help_lists_each_command_once;
       ];

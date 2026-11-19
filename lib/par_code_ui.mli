@@ -126,14 +126,15 @@ val create_screen_backend : sink:(image -> unit) -> backend
     the frame without changing. *)
 
 val set_tool_hooks :
-  line:(string -> image -> unit) ->
-  replace:(image -> unit) ->
+  line:(string -> string -> image -> unit) ->
+  replace:(string -> image -> unit) ->
   flush:(unit -> unit) ->
   unit
 
 (** v0.15.1: route tool lines to the screen so one turn's calls fold into a
     block; [replace] swaps a start line for its result and [flush] commits the
-    block. *)
+    block. v0.15.4: [line] carries the tool name and the task id, [replace] the
+    task id, so parallel calls replace their own row instead of the last one. *)
 
 val note_tool_arguments : string -> Yojson.Safe.t -> unit
 (** Remember a call's arguments so the transcript can say what was asked for. *)
@@ -210,7 +211,8 @@ val prompt_confirm : ?backend:backend -> ?style:style -> string -> string option
 
 (** Render a PAR SDK LLM response chunk.  Handles all 5 variants:
     - [Text_delta]: feeds through markdown state machine
-    - [Tool_call_start]: shows "calling X..." indicator
+    - [Tool_call_start]: flushes the pending markdown line; the tool row
+      itself is drawn when [Tool_invoked] arrives, so a call is one line
     - [Tool_call_delta]: no-op (could show spinner)
     - [Usage_update]: no-op (could update live counter)
     - [Done]: flushes markdown state *)

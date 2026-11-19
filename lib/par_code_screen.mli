@@ -19,8 +19,14 @@ val append_truncated : t -> Par_code_ui.image -> unit
 
 val append_text : t -> string -> unit
 
-val append_tool_line : t -> name:string -> Par_code_ui.image -> unit
-(** Collect a tool line for the current turn; folded into one block on flush. *)
+val drop_mouse_tail : string -> string
+(** Remove a trailing mouse-report fragment (["<35;12;4M"]) that arrived
+    without its escape sequence; such a tail used to be typed into the input
+    line when a terminal delivered the report in pieces. *)
+
+val append_tool_line : t -> name:string -> key:string -> Par_code_ui.image -> unit
+(** Collect a tool line for the current turn; folded into one block on flush.
+    [key] is the call's task id, so its result can replace this exact row. *)
 
 val fold_plan : int -> int * int * int
 (** How a block of [n] tool lines is folded: (head, hidden, tail). *)
@@ -28,8 +34,9 @@ val fold_plan : int -> int * int * int
 val activity : t -> string
 (** Name of the tool running right now ("" when none). *)
 
-val replace_last_tool_line : t -> Par_code_ui.image -> unit
-(** Swap the pending start line for the finished one. *)
+val replace_tool_line : t -> key:string -> Par_code_ui.image -> unit
+(** Swap the start row of that call for its result (falls back to the last row
+    when no row carries the key). *)
 
 val flush_tools : t -> unit
 (** Commit the collected tool lines to the transcript, folding long runs. *)

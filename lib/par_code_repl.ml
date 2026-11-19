@@ -139,8 +139,8 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
   (* v0.15.1: tool lines for one turn collect in the screen and fold when the
      answer starts, so a long tool sequence cannot bury the reply. *)
   Par_code_ui.set_tool_hooks
-    ~line:(fun name img -> Par_code_screen.append_tool_line screen ~name img)
-    ~replace:(fun img -> Par_code_screen.replace_last_tool_line screen img)
+    ~line:(fun name key img -> Par_code_screen.append_tool_line screen ~name ~key img)
+    ~replace:(fun key img -> Par_code_screen.replace_tool_line screen ~key img)
     ~flush:(fun () -> Par_code_screen.flush_tools screen);
   (* v0.7.3 W5: per-invoke cancellation state. turn_token_ref holds the
      current turn's token while Runtime.invoke is in flight (cleared in a
@@ -319,10 +319,6 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
   let doom_abort = ref false in
   let make_tool_event ?rt () =
     make_tool_event_callback ui ?rt ~doom:(Some doom_detector)
-      ~goal_active:(fun () ->
-        match !Par_code_goal.current with
-        | Some g when g.Par_code_goal.status = Par_code_goal.Active -> true
-        | _ -> false)
       ~on_doom_action:(fun act ->
         match act with
         | Par_code_doom_loop.Abort msg ->
@@ -672,6 +668,10 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                       end)
                in
                last_plan_path := None;
+                (* v0.15.4: a turn that ends on tool calls (or is aborted mid-tool)
+                   must commit its tool block, otherwise the rows stay unfolded
+                   on screen until the next message. *)
+                Par_code_ui.flush_tool_block ();
                 (match invoke_result with
                 | Error (Types.Cancelled reason, recovered_conv) ->
                    turn_cancelled := true;

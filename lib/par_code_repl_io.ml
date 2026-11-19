@@ -34,9 +34,7 @@ let make_stream_cb ?(cancelled = fun () -> false) ui =
 
 let make_tool_event_callback (ui : Par_code_ui.backend) ?(doom = None)
     ?(on_doom_action : Par_code_doom_loop.action -> unit = fun _ -> ())
-    ?(goal_active : unit -> bool = fun () -> false)
     ?rt () =
-  let start_times : (string, float) Hashtbl.t = Hashtbl.create 8 in
   let tool_args_buf : (string, string) Hashtbl.t = Hashtbl.create 8 in
   fun (evt : Types.event) ->
     (* PAR 0.12-beta defines Metrics.incr_tool_invocations but never calls it,
@@ -69,10 +67,9 @@ let make_tool_event_callback (ui : Par_code_ui.backend) ?(doom = None)
         | Par_code_doom_loop.Nudge msg -> Par_code_ui.render_warning ui msg
         | Force_judge msg -> on_doom_action (Force_judge msg); Par_code_ui.render_warning ui msg
         | Abort msg ->
-          on_doom_action (Abort msg);
-           let label = if goal_active () then "goal aborted" else "turn aborted" in
-           Par_code_ui.render_error ui
-             (Printf.sprintf "\xe2\x9c\x97 %s (doom loop) \xe2\x80\x94 cancelling this turn: %s" label msg)
+          (* v0.15.4: the REPL's cancel path prints the one abort line; the
+             same abort rendered here too and appeared twice. *)
+          on_doom_action (Abort msg)
         | Continue -> ())
      | Types.Tool_failed { task_id; tool_name; _ }, Some d ->
        let tid = Types.Task_id.to_string task_id in
@@ -86,30 +83,14 @@ let make_tool_event_callback (ui : Par_code_ui.backend) ?(doom = None)
         | Par_code_doom_loop.Nudge msg -> Par_code_ui.render_warning ui msg
         | Force_judge msg -> on_doom_action (Force_judge msg); Par_code_ui.render_warning ui msg
         | Abort msg ->
-          on_doom_action (Abort msg);
-           let label = if goal_active () then "goal aborted" else "turn aborted" in
-           Par_code_ui.render_error ui
-             (Printf.sprintf "\xe2\x9c\x97 %s (doom loop) \xe2\x80\x94 cancelling this turn: %s" label msg)
+          (* v0.15.4: same as [Tool_completed] — the REPL reports the abort. *)
+          on_doom_action (Abort msg)
         | Continue -> ())
      | _ -> ());
-    match evt with
-    | Types.Tool_invoked { task_id; _ } ->
-      Hashtbl.replace start_times (Types.Task_id.to_string task_id) (Unix.gettimeofday ());
-      Par_code_ui.render_tool_event ui evt
-    | Types.Tool_completed { task_id; _ } ->
-      Hashtbl.remove start_times (Types.Task_id.to_string task_id);
-      Par_code_ui.render_tool_event ui evt
-    | Types.Tool_failed { task_id; tool_name; _ } ->
-      let tid = Types.Task_id.to_string task_id in
-      let elapsed = match Hashtbl.find_opt start_times tid with
-        | Some t -> (Unix.gettimeofday () -. t) *. 1000.0
-        | None -> 0.0
-      in
-      Hashtbl.remove start_times tid;
-      Par_code_ui.render_line ui
-        (Par_code_ui.textf ~style:(Par_code_ui.style ~fg:Red ~bold:true ())
-           "  \xe2\x86\x92 %s \xe2\x9c\x97 (%.1fms)" tool_name elapsed)
-    | _ -> Par_code_ui.render_tool_event ui evt
+    (* Every tool event renders through [render_tool_event]: a failed call is
+       one row like a successful one, instead of the legacy bare
+       "-> name x (0.0ms)" line that duplicated the row. *)
+    Par_code_ui.render_tool_event ui evt
 
 let print_help (ui : Par_code_ui.backend) () =
   Par_code_ui.render_help ui

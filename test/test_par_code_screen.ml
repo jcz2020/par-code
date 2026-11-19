@@ -38,6 +38,19 @@ let fold_adds_up () =
        Alcotest.(check int) (Printf.sprintf "sum for %d" n) n (h + hidden + t))
     [ 9; 10; 17; 40; 200 ]
 
+(* v0.15.4: the tail of a split mouse report must never become typed text. *)
+let mouse_tail_is_dropped () =
+  let check name expected input =
+    Alcotest.(check string) name expected (Par_code_screen.drop_mouse_tail input)
+  in
+  check "bare sgr body" "" "<35;12;4M";
+  check "after text" "abc" "abc<35;12;4M";
+  check "with escape" "" "\x1b[<35;12;4M";
+  check "bracket prefix" "" "[<35;12;4M";
+  check "release marker" "hi" "hi<0;3;1m";
+  check "ordinary text" "a1;b2;c3x" "a1;b2;c3x";
+  check "plain word" "hello" "hello"
+
 let () =
   Alcotest.run "par_screen"
     [ ( "fold",
@@ -54,4 +67,6 @@ let () =
             ascii_wraps_without_losing_characters
         ; Alcotest.test_case "text_that_fits_stays_one_line" `Quick
             text_that_fits_stays_one_line
-        ] ) ]
+        ] )
+    ; ( "mouse",
+        [ Alcotest.test_case "tail_is_dropped" `Quick mouse_tail_is_dropped ] ) ]
