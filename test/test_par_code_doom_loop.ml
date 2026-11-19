@@ -121,6 +121,19 @@ let test_action_streak_ignores_edits () =
   Alcotest.(check bool) "distinct edits never trip action streak" true
     (!r = Continue)
 
+let test_research_tools_never_trip_streak () =
+  (* A research turn runs many distinct searches and fetches. They read data
+     like read/grep do, so they must not accumulate as "other actions" —
+     twelve of them used to abort a legitimate turn. *)
+  let d = create ~bash_retries:100 ~edit_matches:100 ~action_streak:2 () in
+  let r = ref Continue in
+  for _ = 1 to 12 do
+    r := record d (make_evt "web_search");
+    r := record d (make_evt "fetch_url")
+  done;
+  Alcotest.(check bool) "searches and fetches never trip action streak" true
+    (!r = Continue)
+
 let test_custom_thresholds () =
   let d = create ~bash_retries:2 ~edit_matches:1 ~action_streak:3 () in
   let _ = record d (make_bash_evt "pytest") in
@@ -199,7 +212,9 @@ let () =
       [ Alcotest.test_case "4 same-kind nudges" `Quick test_action_streak_nudge;
         Alcotest.test_case "info resets streak" `Quick test_info_resets_action_streak;
         Alcotest.test_case "bash is exempt" `Quick test_action_streak_ignores_bash;
-        Alcotest.test_case "edits are exempt" `Quick test_action_streak_ignores_edits ];
+        Alcotest.test_case "edits are exempt" `Quick test_action_streak_ignores_edits;
+        Alcotest.test_case "research tools are exempt" `Quick
+          test_research_tools_never_trip_streak ];
       "config_and_state",
       [ Alcotest.test_case "custom thresholds" `Quick test_custom_thresholds;
         Alcotest.test_case "action count tracks" `Quick test_action_count_tracks ];

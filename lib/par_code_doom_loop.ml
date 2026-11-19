@@ -82,6 +82,22 @@ let verify_re = Str.regexp "\\(pytest\\|make test\\|cargo test\\|go test\\|npm t
 let is_edit_tool name =
   name = "edit" || name = "write" || name = "apply_patch"
 
+(* Read-only lookups are the point of a research turn, not a loop. The
+   hard-coded four covered the file tools; MCP brings its own (web_search,
+   fetch_url, …), and a dozen distinct searches used to abort a legitimate
+   turn with "12 consecutive other actions". A name that carries a read verb
+   resets the streak instead of feeding it. *)
+let info_tool_re =
+  Str.regexp_case_fold
+    "\\(^\\|_\\)\\(read\\|grep\\|find\\|ls\\|glob\\|search\\|fetch\\|browse\\|lookup\\|query\\)\\(_\\|$\\)"
+
+let is_info_tool name =
+  name = "read" || name = "grep" || name = "find" || name = "ls"
+  || (try
+        ignore (Str.search_forward info_tool_re name 0);
+        true
+      with Not_found -> false)
+
 let classify_tool ~tool_name ~args_json ~is_bash =
   if is_edit_tool tool_name then "edit"
   else if is_bash then
@@ -94,8 +110,7 @@ let classify_tool ~tool_name ~args_json ~is_bash =
     let normalized = normalize_bash_cmd cmd in
     if Str.string_match verify_re normalized 0 then "verify"
     else "other"
-  else if tool_name = "read" || tool_name = "grep" || tool_name = "find"
-       || tool_name = "ls" then "info"
+  else if is_info_tool tool_name then "info"
   else "other"
 
 let create ?(bash_retries = 3) ?(edit_matches = 2) ?(action_streak = 4) () = {
