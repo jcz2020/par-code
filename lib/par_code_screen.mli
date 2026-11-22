@@ -117,3 +117,10 @@ val install_cleanup : t -> unit
 val wrap_text : cols:int -> string -> string list
 (** Wrap one string to [cols] display columns (CJK/emoji count two) and return
     the resulting lines. *)
+
+val wrap_runs :
+  cols:int ->
+  (string * Par_code_ui.style) list ->
+  (string * Par_code_ui.style) list list
+(** Wrap one logical line of styled runs to [cols] display columns, on word
+    boundaries, keeping a list item's hang indent. *)

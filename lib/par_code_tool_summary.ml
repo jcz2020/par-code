@@ -71,21 +71,198 @@ let count_lines (s : string) : int =
     String.iter (fun c -> if c = '\n' then incr n) s;
     if s.[String.length s - 1] = '\n' then !n - 1 else !n
 
+(* The SDK hands the preview over as [Yojson.Safe.to_string output], not as the
+   text the tool returned. Newlines arrive as the two characters \\n, so the
+   old line count said "1 lines" for every read, and bash showed the raw
+   {"stdout":…} blob. Decode the payload before summarising it. *)
+let preview_json (p : string) : Yojson.Safe.t option =
+  match Yojson.Safe.from_string p with
+  | json -> Some json
+  | exception _ -> None
+
+let string_field (fields : (string * Yojson.Safe.t) list) (keys : string list) :
+    string option =
+  List.find_map
+    (fun k ->
+       match List.assoc_opt k fields with
+       | Some (`String s) when String.trim s <> "" -> Some s
+       | _ -> None)
+    keys
+
+(** The text a structured result carries, whichever field holds it. *)
+let text_of_json (json : Yojson.Safe.t) : string =
+  match json with
+  | `String s -> s
+  | `List l ->
+    String.concat "\n"
+      (List.filter_map (function `String s -> Some s | _ -> None) l)
+  | `Assoc fields ->
+    (match
+       string_field fields
+         [ "content"; "stdout"; "stderr"; "text"; "output"; "message";
+           "result" ]
+     with
+     | Some s -> s
+     | None ->
+       String.concat "\n"
+         (List.filter_map (function _, `String s -> Some s | _ -> None) fields))
+  | _ -> ""
+
+(* A preview longer than 500 bytes is cut mid-string by the engine and gets
+   "... (N bytes total)" appended, so it no longer parses. Pull the first
+   string field out by hand in that case; escapes are still recoverable. *)
+let json_unescape (s : string) : string =
+  let b = Buffer.create (String.length s) in
+  let i = ref 0 in
+  let n = String.length s in
+  while !i < n do
+    (match s.[!i] with
+     | '\\' when !i + 1 < n ->
+       incr i;
+       (match s.[!i] with
+        | 'n' -> Buffer.add_char b '\n'
+        | 't' -> Buffer.add_char b '\t'
+        | 'r' -> Buffer.add_char b '\r'
+        | c -> Buffer.add_char b c)
+     | c -> Buffer.add_char b c);
+    incr i
+  done;
+  Buffer.contents b
+
+let find_sub (needle : string) (hay : string) : int option =
+  let nl = String.length needle and hl = String.length hay in
+  if nl = 0 then Some 0
+  else begin
+    let rec go i =
+      if i + nl > hl then None
+      else if String.sub hay i nl = needle then Some i
+      else go (i + 1)
+    in
+    go 0
+  end
+
+let lenient_text (p : string) : string option =
+  let keys = [ "content"; "stdout"; "stderr"; "text"; "output"; "message"; "result" ] in
+  let find key =
+    let pat = "\"" ^ key ^ "\":\"" in
+    match find_sub pat p with
+    | None -> None
+    | Some i ->
+      let start = i + String.length pat in
+      (* read to the next unescaped quote *)
+      let j = ref start in
+      let n = String.length p in
+      while
+        !j < n
+        && not (p.[!j] = '"' && (!j = start || p.[!j - 1] <> '\\'))
+      do
+        incr j
+      done;
+      if !j > start then Some (String.sub p start (!j - start)) else None
+  in
+  List.find_map find keys |> Option.map json_unescape
+
+let escaped_newline_count (s : string) : int =
+  let n = String.length s in
+  let count = ref 0 in
+  let i = ref 0 in
+  while !i < n - 1 do
+    if s.[!i] = '\\' && s.[!i + 1] = 'n' then begin
+      incr count;
+      i := !i + 2
+    end else incr i
+  done;
+  !count
+
 (** What came back, from the result preview. *)
 let of_result ~(name : string) (preview : string option) : string =
   match preview with
   | None -> ""
   | Some p when String.trim p = "" -> ""
   | Some p ->
-    let n = count_lines p in
-    (match String.lowercase_ascii name with
-     | "read" | "read_file" -> Printf.sprintf "%d lines" n
-     | "grep" -> Printf.sprintf "%d matches" n
-     | "find" | "glob" -> Printf.sprintf "%d results" n
-     | "ls" | "list" -> Printf.sprintf "%d entries" n
-     | "bash" -> clip p
-     | "write" | "write_file" | "edit" | "str_replace" | "apply_patch" -> clip p
-     | _ -> if n > 1 then Printf.sprintf "%d lines" n else "")
+    let lower = String.lowercase_ascii name in
+    let json = preview_json p in
+    let decoded =
+      match json with
+      | Some j ->
+        let t = text_of_json j in
+        if t = "" then None else Some t
+      | None -> lenient_text p
+    in
+    let n =
+      match decoded with
+      | Some t -> count_lines t
+      | None -> max (count_lines p) (escaped_newline_count p + 1)
+    in
+    let text = match decoded with Some t -> t | None -> p in
+    (* The engine cuts a preview at 500 bytes and appends "... (N bytes total)".
+       The count then describes only what fits, so say so instead of reporting a
+       file's full line count as if it were measured. *)
+    let cut = find_sub " bytes total)" p <> None in
+    let plural k one many =
+      if cut then Printf.sprintf "%d+ %s" k many
+      else Printf.sprintf "%d %s" k (if k = 1 then one else many)
+    in
+    if lower = "bash" then begin
+      let head s =
+        let s = String.trim s in
+        match String.index_opt s '\n' with
+        | Some i -> clip (String.sub s 0 i)
+        | None -> clip s
+      in
+      match json with
+      | Some (`Assoc fields) ->
+        let str k =
+          match List.assoc_opt k fields with Some (`String s) -> s | _ -> ""
+        in
+        let code =
+          match List.assoc_opt "exit_code" fields with
+          | Some (`Int i) -> Some i
+          | _ -> None
+        in
+        let out = str "stdout" and err = str "stderr" in
+        let body =
+          if String.trim out <> "" then head out
+          else if String.trim err <> "" then head err
+          else ""
+        in
+        let status =
+          match code with
+          | Some 0 | None -> ""
+          | Some c -> Printf.sprintf "exit %d" c
+        in
+        String.concat " · " (List.filter (fun s -> s <> "") [ status; body ])
+      | _ -> head text
+    end
+    else
+      match lower with
+      | "read" | "read_file" -> plural n "line" "lines"
+      | "grep" -> plural n "match" "matches"
+      | "find" | "glob" -> plural n "result" "results"
+      | "ls" | "list" ->
+        (match json with
+         | Some (`Assoc fields) ->
+           (match List.assoc_opt "entries" fields with
+            | Some (`List l) -> plural (List.length l) "entry" "entries"
+            | _ -> plural n "entry" "entries")
+         | Some (`List l) -> plural (List.length l) "entry" "entries"
+         | _ -> plural n "entry" "entries")
+      | "apply_patch" ->
+        (match json with
+         | Some (`Assoc fields) ->
+           let i k =
+             match List.assoc_opt k fields with Some (`Int v) -> v | _ -> 0
+           in
+           let files = i "files_changed" in
+           let ins = i "insertions" and del = i "deletions" in
+           if files = 0 && ins = 0 && del = 0 then ""
+           else
+             Printf.sprintf "%d %s · +%d/-%d" files
+               (if files = 1 then "file" else "files")
+               ins del
+         | _ -> "")
+      | "write" | "write_file" | "edit" | "str_replace" -> clip text
+      | _ -> if n > 1 then plural n "line" "lines" else ""
 
 (** The whole line: name, what it touched, result size, duration. *)
 let line ~(name : string) ~(args : Yojson.Safe.t option) ~(preview : string option)

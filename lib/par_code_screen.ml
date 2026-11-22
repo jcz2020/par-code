@@ -277,49 +277,224 @@ let text_width (s : string) : int =
   ignore (Uutf.String.fold_utf_8 folder () s);
   !w
 
+(* v0.15.5: wrap on word boundaries. The old folder broke at whichever
+   codepoint crossed the limit, so an English word lost its tail to the next
+   row, and a list item's continuation row started back at the gutter instead
+   of under its text. Tokens are whitespace / non-whitespace runs; a row breaks
+   before a token that does not fit, and a token longer than the row (a path, a
+   URL, a run of CJK with no spaces) is hard-split as before. *)
+let is_wrap_space c = c = ' ' || c = '\t'
+
+(* A run that STARTS in CJK can break between any two characters, so it may
+   fill the rest of the current row. A Latin word may not: it moves whole to
+   the next row unless it is longer than a row by itself. Checking the first
+   character (not "contains CJK") keeps mixed tokens like "x86_64/arm64"
+   intact — they are words with a closing punctuation mark on the end. *)
+let starts_with_cjk (s : string) : bool =
+  if s = "" then false
+  else
+    let d = Uutf.decoder ~encoding:`UTF_8 (`String s) in
+    match Uutf.decode d with
+    | `Uchar u ->
+      let c = Uchar.to_int u in
+      (c >= 0x2E80 && c <= 0x9FFF) || (c >= 0xF900 && c <= 0xFAFF)
+      || (c >= 0xFE30 && c <= 0xFE4F) || (c >= 0xFF00 && c <= 0xFFEF)
+    | `Malformed _ | `End | `Await -> false
+
+(* Closing punctuation that must not open a row (Chinese typesetting keeps it
+   with the character before it; the ASCII set catches the same shape inside a
+   long URL or path). *)
+let is_no_start_char (u : Uchar.t) : bool =
+  match Uchar.to_int u with
+  | 0x3002 | 0xFF0C | 0x3001 | 0xFF1B | 0xFF1A | 0xFF1F | 0xFF01 | 0xFF09
+  | 0x3011 | 0x300B | 0x300D | 0x300F | 0x201D | 0x2019 -> true
+  | c -> c = 0x2C || c = 0x2E || c = 0x3B || c = 0x3A || c = 0x3F || c = 0x21
+         || c = 0x29 || c = 0x5D || c = 0x7D || c = 0x25
+
+let space_run (s : string) : bool =
+  s <> "" && String.for_all is_wrap_space s
+
+(* Where a list item's text starts ("  - ", "  1. "), so wrapped rows line up
+   under it. Only a real list marker counts; tool and code rows keep a plain
+   wrap. *)
+let hanging_indent (line : string) : int =
+  let n = String.length line in
+  let i = ref 0 in
+  while !i < n && is_wrap_space line.[!i] do incr i done;
+  if !i >= n then 0
+  else begin
+    let j = ref !i in
+    (if line.[!j] = '-' || line.[!j] = '*' || line.[!j] = '+' then incr j
+     else begin
+       while !j < n && line.[!j] >= '0' && line.[!j] <= '9' do incr j done;
+       if !j < n && line.[!j] = '.' then incr j
+     end);
+    if !j > !i && !j < n && is_wrap_space line.[!j] then begin
+      while !j < n && is_wrap_space line.[!j] do incr j done;
+      text_width (String.sub line 0 !j)
+    end else 0
+  end
+
+let tokenize_run ((txt, sty) : string * Par_code_ui.style) :
+    (string * Par_code_ui.style) list =
+  let out = ref [] in
+  let buf = Buffer.create 16 in
+  let state = ref None in
+  let flush () =
+    if Buffer.length buf > 0 then begin
+      out := (Buffer.contents buf, sty) :: !out;
+      Buffer.clear buf
+    end
+  in
+  String.iter
+    (fun c ->
+       let sp = is_wrap_space c in
+       (match !state with
+        | Some prev when prev <> sp -> flush (); state := Some sp
+        | None -> state := Some sp
+        | Some _ -> ());
+       Buffer.add_char buf c)
+    txt;
+  flush ();
+  List.rev !out
+
 let wrap_runs ~(cols : int) (runs : (string * Par_code_ui.style) list) :
     (string * Par_code_ui.style) list list =
   let cols = max 8 cols in
-  let out = ref [] in
-  let cur = ref [] in
-  let used = ref 0 in
-  let flush_line () =
-    out := List.rev !cur :: !out;
-    cur := [];
-    used := 0
+  let wrap_line (runs : (string * Par_code_ui.style) list) =
+    let tokens = List.concat_map tokenize_run runs in
+    let hang = hanging_indent (String.concat "" (List.map fst runs)) in
+    let out = ref [] in
+    let cur = ref [] in
+    let used = ref 0 in
+    let wrapped = ref false in
+    let trim_row (runs : (string * Par_code_ui.style) list) =
+      (* Only the LAST run can carry the break space; trimming every run ate
+         the space between a list marker and the bold text that followed it
+         ("1. **product**"). *)
+      let rec go = function
+        | [] -> []
+        | (s, sty) :: tl ->
+          let n = ref (String.length s) in
+          while !n > 0 && is_wrap_space s.[!n - 1] do decr n done;
+          if !n = 0 then go tl
+          else
+            let s' = if !n = String.length s then s else String.sub s 0 !n in
+            (s', sty) :: tl
+      in
+      List.rev (go (List.rev runs))
+    in
+    let add ((s, sty) as tok) =
+      (match !cur with
+       | (prev, psty) :: tl when psty = sty -> cur := (prev ^ s, psty) :: tl
+       | _ -> cur := tok :: !cur);
+      used := !used + text_width s
+    in
+    let flush_wrapped () =
+      out := trim_row (List.rev !cur) :: !out;
+      cur := [];
+      used := 0;
+      wrapped := true
+    in
+    let start_row () =
+      if !used = 0 && !wrapped && hang > 0 then
+        add (String.make hang ' ', Par_code_ui.no_style)
+    in
+    let hard_split (s, sty) =
+      let piece = Buffer.create (String.length s) in
+      let pw = ref 0 in
+      let last_cp = ref "" and last_w = ref 0 in
+      let utf8_of u =
+        let b = Buffer.create 4 in
+        Uutf.Buffer.add_utf_8 b u;
+        Buffer.contents b
+      in
+      let flush_piece () =
+        if Buffer.length piece > 0 then begin
+          cur := (Buffer.contents piece, sty) :: !cur;
+          used := !used + !pw;
+          Buffer.clear piece;
+          pw := 0;
+          last_cp := "";
+          last_w := 0;
+          flush_wrapped ();
+          start_row ()
+        end
+      in
+      start_row ();
+      ignore
+        (Uutf.String.fold_utf_8
+           (fun () _ v ->
+              match v with
+              | `Malformed _ ->
+                (* v0.15.4: bytes that are not valid UTF-8 used to be copied
+                   through to [I.string], where notty reads a stray 0x80–0x9F
+                   byte as a control character and raises — taking the whole
+                   session down. Drop them, as [sanitize_text] drops C0. *)
+                ()
+              | `Uchar u ->
+                let w = display_width u in
+                if !pw > 0 && !used + !pw + w > cols then begin
+                  if is_no_start_char u && !last_cp <> "" then begin
+                    (* Move the last character down with the punctuation so
+                       the new row does not open with "。" / "：" / ")". *)
+                    let carry = !last_cp and cw = !last_w in
+                    Buffer.truncate piece
+                      (Buffer.length piece - String.length carry);
+                    pw := !pw - cw;
+                    flush_piece ();
+                    Buffer.add_string piece carry;
+                    pw := cw;
+                    last_cp := carry;
+                    last_w := cw
+                  end else flush_piece ()
+                end;
+                Uutf.Buffer.add_utf_8 piece u;
+                pw := !pw + w;
+                last_cp := utf8_of u;
+                last_w := w)
+           () s);
+      if Buffer.length piece > 0 then begin
+        cur := (Buffer.contents piece, sty) :: !cur;
+        used := !used + !pw
+      end
+    in
+    List.iter
+      (fun ((s, _) as tok) ->
+         let w = text_width s in
+         if space_run s then begin
+           if !used = 0 then begin
+             (* Leading spaces are the first row's own layout; a continuation
+                row gets [hang] instead below. *)
+             if not !wrapped then add tok
+           end else if !used + w > cols then flush_wrapped ()
+           else add tok
+         end else begin
+           let fits = !used + w <= cols in
+           if fits then begin
+             start_row ();
+             add tok
+           end else if w > cols || (starts_with_cjk s && !used > 0) then begin
+             (* A token that cannot start a row of its own (a URL, a path) or a
+                CJK run fills the rest of the current row instead of leaving
+                it half empty and starting over. *)
+             start_row ();
+             hard_split tok
+           end else begin
+             flush_wrapped ();
+             start_row ();
+             add tok
+           end
+         end)
+      tokens;
+    if !cur <> [] || !out = [] then begin
+      out := trim_row (List.rev !cur) :: !out;
+      cur := [];
+      used := 0
+    end;
+    List.rev !out
   in
-  List.iter
-    (fun (txt, sty) ->
-       let piece = Buffer.create (String.length txt) in
-       let flush_piece () =
-         if Buffer.length piece > 0 then begin
-           cur := (Buffer.contents piece, sty) :: !cur;
-           Buffer.clear piece
-         end
-       in
-       let break_if_needed w =
-         if !used > 0 && !used + w > cols then begin
-           flush_piece ();
-           flush_line ()
-         end
-       in
-       let folder () _i = function
-         | `Uchar u ->
-           break_if_needed (display_width u);
-           Uutf.Buffer.add_utf_8 piece u;
-           used := !used + display_width u
-         | `Malformed _ ->
-           (* v0.15.4: bytes that are not valid UTF-8 used to be copied through
-              to [I.string], where notty reads a stray 0x80–0x9F byte as a
-              control character and raises — taking the whole session down.
-              Drop them, the same way [sanitize_text] drops C0 controls. *)
-           ()
-       in
-       ignore (Uutf.String.fold_utf_8 folder () txt);
-       flush_piece ())
-    runs;
-  if !cur <> [] || !out = [] then flush_line ();
-  List.rev !out
+  List.concat_map wrap_line (split_runs runs)
 
 (* vcat pads every line to the image's width with a run of spaces; when such a
    line is wrapped to the frame width the padding spills onto a second line and
