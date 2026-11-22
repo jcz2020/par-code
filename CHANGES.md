@@ -1,5 +1,23 @@
 # CHANGES
 
+## v0.15.5 — A transcript that reads like text (released 2026-11-22)
+
+- **Tool lines tell the truth**: the runtime hands a tool's result preview over
+  as JSON, so the one-line summary said `1 lines` for every file read and
+  printed the raw `{"stdout":…}` blob for a command. The preview is decoded
+  now: a read reports its real line count (`1 line`, or `8+ lines` when the
+  preview was cut at 500 bytes), grep / find / ls report their hit counts,
+  bash reports a non-zero exit code and the first line of output, and
+  apply_patch reports `N files · +X/-Y`.
+- **Rows wrap between words**: the transcript used to break at whichever
+  character crossed the edge, so an English word lost its tail to the next
+  row and a list item's continuation restarted at the gutter. Rows now break
+  between words; a Latin word moves whole to the next row, a run that starts
+  in CJK fills the rest of the row, closing punctuation (`。，、；：！？`)
+  never opens a row, and a list item's continuation hangs under its text.
+- **Checked in the real interface**: 60, 90 and 120 columns with a live
+  provider, plus the unit suites.
+
 ## v0.15.4 — A frame that survives the terminal (released 2026-11-19)
 
 - **A research turn is not a loop**: consecutive `web_search` / `fetch_url` calls
