@@ -334,6 +334,20 @@ let test_update_event_retention_days () =
     let r = update_field ~field:"event_retention_days" ~value:"14.5" in
     Alcotest.(check (float 0.001)) "event_retention_days set" 14.5 r.event_retention_days)
 
+let test_update_tool_output () =
+  setup_test_home (fun _ ->
+    let r = update_field ~field:"tool_output_chars" ~value:"65536" in
+    Alcotest.(check int) "tool_output_chars set" 65536 r.tool_output_chars;
+    let r2 =
+      update_field ~field:"tool_output_retention_days" ~value:"3.5"
+    in
+    Alcotest.(check (float 0.001)) "retention set" 3.5 r2.tool_output_retention_days)
+
+let test_tool_output_defaults () =
+  Alcotest.(check int) "default cap" 32_768 default.tool_output_chars;
+  Alcotest.(check (float 0.001)) "default retention" 7.0
+    default.tool_output_retention_days
+
 let test_update_embedding_base_url () =
   setup_test_home (fun _ ->
     let r = update_field ~field:"embedding_base_url" ~value:"https://embed.api.com" in
@@ -671,6 +685,8 @@ let () =
         Alcotest.test_case "embedding_dimension"        `Quick test_update_embedding_dimension;
         Alcotest.test_case "db_uri"                     `Quick test_update_db_uri;
         Alcotest.test_case "event_retention_days"       `Quick test_update_event_retention_days;
+        Alcotest.test_case "tool_output"                `Quick test_update_tool_output;
+        Alcotest.test_case "tool_output_defaults"       `Quick test_tool_output_defaults;
         Alcotest.test_case "embedding_base_url"         `Quick test_update_embedding_base_url;
         Alcotest.test_case "saves_to_disk"              `Quick test_update_saves_to_disk;
         Alcotest.test_case "unknown_field"              `Quick test_update_unknown_field;

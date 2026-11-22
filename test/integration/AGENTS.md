@@ -2,7 +2,7 @@
 
 **Score 12** — 16 files (15 bash + README), 4 subdirs. Earned its file: distinct domain (bespoke harness sharing zero code with the Alcotest suite).
 
-`run.sh` (34 LOC) cds to the project root, discovers `cli/*_test.sh` + `repl/*_test.sh` via `find | sort`, runs each with `bash`, prints a per-file tally, exits non-zero on any failure. No LLM, no network: CLI tests exec the built binary; REPL tests point the dummy config at the dead endpoint `http://127.0.0.1:9`.
+`run.sh` (34 LOC) cds to the project root, discovers `cli/*_test.sh` + `repl/*_test.sh` via `find | sort`, runs each with `bash`, prints a per-file tally, exits non-zero on any failure. No LLM and no external network: CLI tests exec the built binary; REPL tests point the dummy config at the dead endpoint `http://127.0.0.1:9`. The one exception is a loopback-only fault-injection server (`lib/silent_provider.py`, used by `repl/silent_provider_test.sh`), which binds 127.0.0.1 and never leaves the machine.
 
 ## WHERE TO LOOK
 
@@ -28,6 +28,6 @@
 
 - NEVER `sleep` as a readiness signal — use `tmux_wait_for <pattern> [timeout]`. Known offender: `repl/cjk_input_test.sh` (10 raw sleeps) is the main flake risk in the suite.
 - NEVER `echo | grep -q` in assertions — use the temp-file `assert_contains`.
-- NEVER point a test at a live provider — dead endpoint or dummy config only.
+- NEVER point a test at a live provider — dead endpoint, dummy config, or the loopback fault-injection server only.
 - NEVER run a REPL test without `setup_home` + trap (leaks a temp HOME and a tmux session).
 - plan/session tests `cd` into a temp project (with `git init`) — never the repo's real `.par/`.

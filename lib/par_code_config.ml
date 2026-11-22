@@ -52,6 +52,10 @@ type config = {
   (* v0.15.6: whether a file-changing tool asks before it writes. Same values
      as bash_approval: ask / auto_project / always. *)
   edit_approval : string;
+  (* v0.15.7: one tool result is capped at this many characters; the full
+     payload goes to .par/tool-results/ and is kept for the retention window. *)
+  tool_output_chars : int;
+  tool_output_retention_days : float;
   max_mode : bool;
   max_candidates : int;
   (* v0.11.0: MCP servers to start with the runtime. Parsed straight into the
@@ -166,6 +170,8 @@ let default = {
   doom_action_streak = 4;
   bash_approval = "ask";
   edit_approval = "ask";
+  tool_output_chars = 32_768;
+  tool_output_retention_days = 7.0;
   max_mode = false;
   max_candidates = 3;
   mcp_servers = [];
@@ -226,6 +232,8 @@ let to_json (cfg : config) : Yojson.Safe.t =
     ("doom_action_streak", `Int cfg.doom_action_streak);
     ("bash_approval", `String cfg.bash_approval);
     ("edit_approval", `String cfg.edit_approval);
+    ("tool_output_chars", `Int cfg.tool_output_chars);
+    ("tool_output_retention_days", `Float cfg.tool_output_retention_days);
     ("max_mode", `Bool cfg.max_mode);
     ("max_candidates", `Int cfg.max_candidates);
     ( "mcp_servers"
@@ -315,6 +323,12 @@ let of_json (json : Yojson.Safe.t) : (config, string) result =
         (match json |> member "edit_approval" |> to_string_option with
          | Some s when s = "ask" || s = "auto_project" || s = "always" -> s
          | _ -> default.edit_approval);
+      tool_output_chars =
+        Stdlib.max 1024 (get_i "tool_output_chars" default.tool_output_chars);
+      tool_output_retention_days =
+        Stdlib.max 0.
+          (get_f "tool_output_retention_days"
+             default.tool_output_retention_days);
       max_mode = get_b "max_mode" default.max_mode;
       max_candidates = get_i "max_candidates" default.max_candidates;
       mcp_servers =
@@ -402,7 +416,8 @@ let merge
     ?(checkpoint_enabled = None) ?(checkpoint_interval = None)
     ?(context_budget_tokens = None)
     ?(context_window_tokens = None)
-    ?(default_mode = None) ?(bash_approval = None) () =
+    ?(default_mode = None) ?(bash_approval = None)
+    ?(tool_output_chars = None) ?(tool_output_retention_days = None) () =
   {
     provider = Option.value provider ~default:cfg.provider;
     api_key = Option.value api_key ~default:cfg.api_key;
@@ -442,6 +457,11 @@ let merge
     doom_action_streak = cfg.doom_action_streak;
     bash_approval = Option.value bash_approval ~default:cfg.bash_approval;
     edit_approval = cfg.edit_approval;
+    tool_output_chars =
+      Option.value tool_output_chars ~default:cfg.tool_output_chars;
+    tool_output_retention_days =
+      Option.value tool_output_retention_days
+        ~default:cfg.tool_output_retention_days;
     max_mode = cfg.max_mode;
     max_candidates = cfg.max_candidates;
     mcp_servers = cfg.mcp_servers;
@@ -675,6 +695,24 @@ let update_field ~field ~value =
        | other ->
          Printf.eprintf "Invalid edit_approval '%s'. Use 'ask', 'auto_project', or 'always'.\n" other;
          exit 1)
+    | "tool_output_chars" ->
+      (match int_of_string_opt (String.trim value) with
+       | Some n when n >= 1024 && n <= 1_000_000 -> { cfg with tool_output_chars = n }
+       | Some _ ->
+         Printf.eprintf "Invalid value for tool_output_chars: must be 1024..1000000, got '%s'\n" value;
+         exit 1
+       | None ->
+         Printf.eprintf "Invalid value for tool_output_chars: expected int, got '%s'\n" value;
+         exit 1)
+    | "tool_output_retention_days" ->
+      (match float_of_string_opt (String.trim value) with
+       | Some f when f >= 0. -> { cfg with tool_output_retention_days = f }
+       | Some _ ->
+         Printf.eprintf "Invalid value for tool_output_retention_days: must be >= 0, got '%s'\n" value;
+         exit 1
+       | None ->
+         Printf.eprintf "Invalid value for tool_output_retention_days: expected float, got '%s'\n" value;
+         exit 1)
     | "max_mode" -> { cfg with max_mode = parse_bool value }
     | "snapshot_enabled" -> { cfg with snapshot_enabled = parse_bool value }    | "max_candidates" ->
       (match int_of_string_opt (String.trim value) with
@@ -697,6 +735,7 @@ let update_field ~field ~value =
         [ "api_base"; "api_key"; "auto_extract";
           "bash_approval";
           "edit_approval";
+          "tool_output_chars"; "tool_output_retention_days";
           "checkpoint_enabled"; "checkpoint_interval";
           "context_budget_tokens"; "context_window_tokens"; "db_uri"; "default_mode";
           "doom_action_streak"; "doom_bash_retries"; "doom_edit_matches";
@@ -756,6 +795,9 @@ let show ?(ui=Par_code_ui.create_backend ()) (cfg : config) =
     line "doom_action_streak:" (string_of_int cfg.doom_action_streak);
     line "bash_approval:" cfg.bash_approval;
     line "edit_approval:" cfg.edit_approval;
+    line "tool_output_chars:" (string_of_int cfg.tool_output_chars);
+    line "tool_output_retention_days:"
+      (Printf.sprintf "%.1f" cfg.tool_output_retention_days);
     line "max_mode:" (string_of_bool cfg.max_mode);
     line "max_candidates:" (string_of_int cfg.max_candidates);
     line "snapshot_enabled:" (string_of_bool cfg.snapshot_enabled);

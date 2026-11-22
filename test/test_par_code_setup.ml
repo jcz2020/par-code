@@ -56,7 +56,9 @@ let with_test_runtime f =
           parallel_tool_execution = false;
           bash_confirm = Runtime.default_bash_confirm;
           event_retention_seconds = 0.0;
-          max_tool_schema_tokens = None }
+          max_tool_schema_tokens = None;
+          max_tool_result_chars = 32_768;
+          mcp_sampling = Par.Types.Disabled }
       in
       match Runtime.create ~config sw with
       | Error _ -> Alcotest.fail "Runtime.create failed"
@@ -296,6 +298,16 @@ let test_apply_patch_multi_file () =
           | Par.Types.Handoff _ | Par.Types.Approval_required _ | Par.Types.Success_content _ ->
             Alcotest.fail "apply_patch must neither hand off nor require approval"))
 
+let test_runtime_config_wiring () =
+  let cfg =
+    { Par_code_config.default with Par_code_config.tool_output_chars = 12_345 }
+  in
+  let rc : Par.Types.runtime_config = Par_code_setup.make_runtime_config cfg in
+  Alcotest.(check int) "SDK result cap follows the config" 12_345
+    rc.Par.Types.max_tool_result_chars;
+  Alcotest.(check bool) "MCP sampling stays off" true
+    (rc.Par.Types.mcp_sampling = Par.Types.Disabled)
+
 let () =
   Alcotest.run "par_setup"
     [ "planner_registration", [
@@ -308,4 +320,5 @@ let () =
         Alcotest.test_case "builtin inventory matches prompt" `Quick test_sdk_builtin_tool_inventory;
         Alcotest.test_case "apply_patch edits a workspace file" `Quick test_apply_patch_edits_workspace_file;
         Alcotest.test_case "apply_patch applies a multi-file patch" `Quick test_apply_patch_multi_file;
+        Alcotest.test_case "runtime config wiring" `Quick test_runtime_config_wiring;
       ] ]

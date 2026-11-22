@@ -3357,3 +3357,48 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 - **reason**：两个问题都在 SDK 层：宿主无法用令牌打断阻塞读，也无法给 SDK 自己注册的 MCP 工具结果加帽；继续在宿主加替代实现只会掩盖缺陷。
 - **scope**：只记录与报告，不修改 `/root/dev/PAR` 或任何 PAR 产物。
 - **rollback**：无代码变更；关闭 issue 即可。
+
+## 2026-11-22 · 工具结果落盘与 MCP 统一包装（v0.15.7）
+
+- **tag**：v0.15.7-result-spill-mcp
+- **before**：宿主只给内置工具结果封顶，MCP 工具由 SDK 注册、未经过包装；超限结果直接截掉，模型看不到被截掉的部分，只能重跑命令。MCP 工具还只在 `/mcp reload` 时才挂到主 agent。
+- **after**：新增 `tool_output_chars`（默认 32K）与 `tool_output_retention_days`（默认 7 天）配置；超限结果原子写入 `.par/tool-results/`（0600），对话里返回预览 + 文件路径，模型可用 `read` 分段读；启动与每次落盘清理旧文件。启动时把 `mcp_tool_bindings` 包一层并挂到主 agent，`/mcp reload` 复用同一 helper。修复了嵌套 JSON（MCP 的 `{"content":[{"text":…}]}`）只给外层截断、内部大字符串仍打进会话的缺陷。
+- **reason**：行业做法是统一入口封顶、超限内容落盘可恢复；只在每个工具旁打补丁会漏掉 MCP。
+- **scope**：只覆盖宿主注册和 MCP 工具；引擎内部请求体仍受上游 #44 控制。落盘文件可能含敏感内容，依赖 0600 + `.par/` 忽略 + 保留期。
+- **rollback**：`tool_output_chars` 调到 1000000 关闭截断；删除 `wrap_mcp_bindings` 与启动挂载。
+
+## 2026-11-22 · 强制取消前快照检查点（v0.15.7）
+
+- **tag**：v0.15.7-cancel-snapshot
+- **before**：强制取消拿不到引擎返回的会话；取消完成后引擎已删掉 durable 检查点，事后读取只能拿到空或回合前的会话，已完成的工具结果丢失。
+- **after**：invoke 传宿主生成的 `invoke_id`；取消标志置位时，在 `Eio.Fiber.first` 取消 invoke **之前**读取 `load_invoke_checkpoint_fn` 并保存到内存；恢复时优先用这份快照，没有检查点则保留用户消息。会话为空时不保存。
+- **reason**：检查点的生命周期与取消清理冲突；提前一拍读是唯一能保住已完成工具结果的位置。
+- **scope**：只覆盖主回合的强制取消；检查点只到最后一个完成的工具批次，正在执行的工具仍可能已产生副作用。
+- **rollback**：去掉 `~invoke_id` 与快照逻辑，回到只保存回合前会话。
+
+## 2026-11-22 · 弹窗按键语义与状态栏（v0.15.7）
+
+- **tag**：v0.15.7-modal-keys
+- **before**：弹窗打开时状态栏仍写 `esc interrupt`，但 Esc 实际只拒绝当前工具；Ctrl-C 在弹窗里被忽略，要取消整轮得先关弹窗再按。
+- **after**：状态栏按 `modal` 状态切换：弹窗内 `esc deny · ctrl-c cancel`，无弹窗运行中 `esc interrupt`；Ctrl-C 在弹窗内拒绝当前工具并置 `cancel_request`，ticker 消费后取消回合。
+- **reason**：提示与实际行为必须一致；两段式（Esc 拒绝一步、Ctrl-C 取消整轮）是成熟工具的共同语义。
+- **scope**：只改状态栏提示与弹窗按键；bash/edit 审批策略不变。
+- **rollback**：恢复旧提示与 modal 键分支，保留 `cancel_request` 字段不消费。
+
+## 2026-11-22 · 取消覆盖 max-mode、/distill 与 /flow（v0.15.7）
+
+- **tag**：v0.15.7-cancel-coverage
+- **before**：只有主回合与 max-mode 之外的 invoke 靠 token 标志，静默时不生效；`/distill`、`/flow run` 在空闲期阻塞，没有按键读取器，Esc 根本到不了它们。
+- **after**：抽出 `with_interrupt`（取消标志与 fiber 赛跑）；max-mode 候选、`/distill`、`/flow run` 都套这一层，且命令执行期间用 `with_progress` 的 ticker 读键；Esc 置 `cancel_pending` 后取消对应 fiber。
+- **reason**：用户看到的所有长运行都应当能被同一个键停掉，而不是只有回合内。
+- **scope**：后台 checkpoint/extractor/judge 不接用户取消；flow 取消只停本地执行，远端 run 记录沿用现有状态。
+- **rollback**：逐入口去掉 `with_progress`/`with_interrupt` 包装。
+
+## 2026-11-22 · 升级 PAR 0.18：取消与结果上限交回 SDK（v0.15.7）
+
+- **tag**：par-0.18-followup
+- **before**：PAR 0.17.3 的取消只是原子标志，静默 provider 不响应；宿主用 `Eio.Fiber.first` 强制取消并在取消前快照检查点，bash 的 handler 由 `install_bash_tool` 在 per-call registry 重建，绕过宿主封顶。
+- **after**：钉 `v0.18.0-beta.20261122`；`runtime_config.max_tool_result_chars` 接到 `tool_output_chars`（引擎在 registry 解析后封顶，bash/MCP 都覆盖）；删掉主回合、max-mode、`/distill` 的宿主强制取消与检查点快照，改用 SDK 的原生取消（`request_cancel` 现在会 shutdown socket）；`/flow run` 保留宿主 race，因为它没有取消 token；内置/MCP 的宿主包装与落盘保留（SDK 只截断，不落盘）。
+- **reason**：宿主强杀会抢在 SDK 优雅取消之前，丢掉引擎恢复的半轮流式文本；上游已修，继续保留反而降低行为质量。
+- **scope**：bash 现在受 SDK 32K 封顶但没有落盘；`/flow` 仍是宿主取消；MCP 结果由宿主落盘 + SDK 封顶双保险。
+- **rollback**：把 `dune-project`/三处 pin 改回 0.17.3，恢复主回合的 race/snapshot（历史实现），并去掉 `max_tool_result_chars` 接线。

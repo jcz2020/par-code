@@ -213,6 +213,11 @@ let make_runtime_config (cfg : Par_code_config.config) =
        register lands in the Always layer, so enabling the budget would hide
        nothing and save no tokens (see docs/v0.7.5-ROADMAP.md decision 5). *)
     max_tool_schema_tokens = None;
+    (* PAR 0.18: the engine caps every tool result after registry resolution,
+       which covers bash's rebuilt handler and MCP. Our host wrapper still
+       spills the full text for builtins/MCP; bash is capped here only. *)
+    max_tool_result_chars = cfg.Par_code_config.tool_output_chars;
+    mcp_sampling = Types.Disabled;
   }
 
 (* Planner tool allowlist: read-only investigation plus the plan-file tools.
@@ -241,10 +246,71 @@ let set_model (model : string) : (unit, string) result =
    hit can be a whole minified file or a binary blob; the SDK stores results
    verbatim, so one such result grew a session to 649 MB. *)
 let capped_handler (tb : Types.tool_binding) input tok =
-  Par_code_payload.cap_handler_result (tb.handler input tok)
+  Par_code_payload.cap_handler_result ~tool_name:tb.descriptor.Types.name
+    (tb.handler input tok)
+
+(* v0.15.7: MCP bindings come from the SDK un capped and only reach an agent
+   after [update_agent_tools]. Wrap them once here so both the startup attach
+   and /mcp reload use the same policy. *)
+let wrap_mcp_bindings (bindings : Types.tool_binding list) =
+  List.map
+    (fun (tb : Types.tool_binding) ->
+      { tb with
+        Types.handler =
+          (fun input tok ->
+            Par_code_payload.cap_handler_result
+              ~tool_name:tb.descriptor.Types.name
+              (tb.handler input tok)) })
+    bindings
+
+let agent_tool_names rt ~agent_id : string list =
+  Runtime.list_agents rt
+  |> List.find_opt (fun (a : Types.agent_config) -> a.Types.id = agent_id)
+  |> Option.map (fun (a : Types.agent_config) ->
+         List.map (fun (td : Types.tool_descriptor) -> td.Types.name) a.Types.tools)
+  |> Option.value ~default:[]
+
+let attach_mcp_tools rt ~agent_id : Types.tool_descriptor list =
+  let existing = agent_tool_names rt ~agent_id in
+  (* An MCP server must not shadow a builtin (or another agent tool) by name:
+     update_agent_tools would replace the handler and the model would call the
+     server instead of read/bash. *)
+  let all = Runtime.mcp_tool_bindings rt in
+  let skipped =
+    List.filter
+      (fun (b : Types.tool_binding) ->
+        List.mem b.Types.descriptor.Types.name existing)
+      all
+  in
+  if skipped <> [] then
+    ui_render_warning
+      (Printf.sprintf "Warning: ignoring MCP tools that shadow builtins: %s"
+         (String.concat ", "
+            (List.map (fun (b : Types.tool_binding) -> b.Types.descriptor.Types.name)
+               skipped)));
+  let bindings =
+    List.filter
+      (fun (b : Types.tool_binding) ->
+        not (List.mem b.Types.descriptor.Types.name existing))
+      all
+  in
+  if bindings = [] then []
+  else
+    let wrapped = wrap_mcp_bindings bindings in
+    match Runtime.update_agent_tools rt ~agent_id ~add:wrapped ~remove:[] with
+    | Ok () -> List.map (fun (b : Types.tool_binding) -> b.Types.descriptor) wrapped
+    | Error e ->
+      ui_render_warning
+        (Printf.sprintf "Warning: could not attach MCP tools: %s"
+           (error_to_string e));
+      []
 
 let setup_runtime (cfg : Par_code_config.config) ~f =
   ensure_rng ();
+  Par_code_payload.configure
+    ~max_chars:cfg.Par_code_config.tool_output_chars
+    ~retention_days:cfg.Par_code_config.tool_output_retention_days
+    ~spill_dir:(Some ".par/tool-results");
   let pers = make_persistence_service cfg in
   persistence_service := Some pers;
   let persistence_config = Par_code_config.to_persistence_config cfg in
@@ -441,7 +507,8 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
         | Error e ->
           ui_render_error (Printf.sprintf "Error registering agent: %s" (error_to_string e));
           exit 1
-         | Ok () -> ()));
+         | Ok () ->
+           ignore (attach_mcp_tools rt ~agent_id)));
     (* v0.15.1: let the model picker swap the main agent's model at runtime.
        Registration with the same id overwrites the entry, so tools, prompt,
        middleware and iteration budget stay exactly as configured. *)
@@ -458,7 +525,14 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
                ~context_strategy:None
                ~system_prompt:(Types.stable_prompt base_prompt)
                ~model:switched
-               ~tools:!descriptors
+               ~tools:
+                 (let base = !descriptors in
+                  let names = List.map (fun (td : Types.tool_descriptor) -> td.Types.name) base in
+                  List.filter
+                    (fun (td : Types.tool_descriptor) ->
+                      not (List.mem td.Types.name names))
+                    (Runtime.mcp_tool_descriptors rt)
+                  @ base)
                ~middleware:[ think_tag_strip_middleware ]
                ~max_iterations:cfg.Par_code_config.max_iterations
                ()

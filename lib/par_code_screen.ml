@@ -163,6 +163,9 @@ type t = {
   mutable csi_drop : bool;
   mutable modal : modal option;
   mutable modal_answer : string option;
+  (* v0.15.7: a Ctrl-C inside a modal denies the tool and asks the turn's
+     ticker to cancel the whole turn; the ticker consumes it. *)
+  mutable cancel_requested : bool;
   (* v0.15.1: a scrollable list picker (model selection). *)
   mutable picker : picker option;
   (* v0.15: a live "working" line while the model runs; set from the REPL's
@@ -232,6 +235,7 @@ let create () : t =
     last_ctrl_c = None;
     modal = None;
     modal_answer = None;
+    cancel_requested = false;
     picker = None;
     busy = "";
     menu = [];
@@ -301,6 +305,23 @@ let split_runs (runs : (string * Par_code_ui.style) list) :
    wrapper cannot disagree about where a column is. *)
 let display_width = Par_code_selection.width_of
 let text_width = Par_code_selection.text_width
+
+(** v0.15.7: the right edge of the status bar. A modal owns Esc, so the turn
+    hint must not promise that Esc interrupts the run. *)
+let status_right_hint ~modal_open ~busy ~turn_active ~has_input ~left_w ~width =
+  let rec pick = function
+    | [] -> ""
+    | s :: tl -> if left_w + text_width s + 2 <= width then s else pick tl
+  in
+  if modal_open then pick [ "esc deny \xc2\xb7 ctrl-c cancel "; "esc deny " ]
+  else if busy = "" then ""
+  else
+    let wanted =
+      if turn_active && has_input then
+        [ "enter queue \xc2\xb7 esc interrupt "; "esc interrupt " ]
+      else [ "esc interrupt " ]
+    in
+    pick wanted
 
 (* v0.15.5: wrap on word boundaries. The old folder broke at whichever
    codepoint crossed the limit, so an English word lost its tail to the next
@@ -741,6 +762,15 @@ let set_composer_label (t : t) (s : string) = t.composer_label <- s
 
 (** A transient line shown before the status text while a turn runs. *)
 let set_busy (t : t) (s : string) = t.busy <- s
+
+(** v0.15.7: Ctrl-C inside a modal asks the running turn to stop after
+    denying the modal's step. The REPL ticker consumes the flag. *)
+let take_cancel_request (t : t) : bool =
+  let v = t.cancel_requested in
+  t.cancel_requested <- false;
+  v
+
+let clear_cancel_request (t : t) = t.cancel_requested <- false
 
 let activity (t : t) = t.activity
 
@@ -1446,22 +1476,9 @@ let frame (t : t) : Notty.image =
     let left_w = text_width left in
     (* A long bar wins: the hint is dropped rather than clipping the facts. *)
     let right =
-      if t.busy = "" then ""
-      else begin
-        let wanted =
-          if t.turn_active && String.trim t.input <> "" then
-            [ "enter queue \xc2\xb7 esc interrupt "; "esc interrupt " ]
-          else [ "esc interrupt " ]
-        in
-        (* v0.15.6: the steer hint is longer; on a narrow bar the plain
-           interrupt hint is still better than nothing. *)
-        let rec pick = function
-          | [] -> ""
-          | s :: tl ->
-            if left_w + text_width s + 2 <= w then s else pick tl
-        in
-        pick wanted
-      end
+      status_right_hint ~modal_open:(t.modal <> None) ~busy:t.busy
+        ~turn_active:t.turn_active ~has_input:(String.trim t.input <> "")
+        ~left_w ~width:w
     in
     let gap = max 1 (w - left_w - text_width right) in
     I.hsnap ~align:`Left w
@@ -1639,22 +1656,32 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
   match t.modal, t.search with
   | Some modal, _ ->
     (* A modal owns the keyboard: only its keys, Esc, and Ctrl-C matter. *)
-    let key =
-      match k with
-      | `Escape -> Some ""
-      | `ASCII c ->
-        let c = if c >= 'A' && c <= 'Z' then Char.lowercase_ascii c else c in
-        Some (String.make 1 c)
-      | _ -> None
-    in
-    (match key with
-     | Some "" ->
+    (match k, mods with
+     | `ASCII c, mods
+       when List.mem `Ctrl mods
+            && (c = 'c' || c = 'C' || c = '\003') ->
+       (* Ctrl-C denies this step and cancels the active run (a turn, or a
+          command like /distill that raised the modal). *)
+       if t.turn_active || t.busy <> "" then t.cancel_requested <- true;
        t.modal_answer <- None;
        t.modal <- None
-     | Some k when List.mem_assoc k modal.options ->
-       t.modal_answer <- Some k;
-       t.modal <- None
-     | _ -> ignore ctrl)
+     | _ ->
+       let key =
+         match k with
+         | `Escape -> Some ""
+         | `ASCII c ->
+           let c = if c >= 'A' && c <= 'Z' then Char.lowercase_ascii c else c in
+           Some (String.make 1 c)
+         | _ -> None
+       in
+       (match key with
+        | Some "" ->
+          t.modal_answer <- None;
+          t.modal <- None
+        | Some k when List.mem_assoc k modal.options ->
+          t.modal_answer <- Some k;
+          t.modal <- None
+        | _ -> ignore ctrl))
   | None, Some _ -> search_handle t k ~ctrl
   | None, None ->
   let ascii = match k with `ASCII c -> Some c | _ -> None in
@@ -1976,7 +2003,7 @@ let select_ready (fd : Unix.file_descr) (timeout : float) : bool =
     r <> []
   with Unix.Unix_error (Unix.EINTR, _, _) -> false
 
-let poll_interrupt (t : t) : bool =
+let poll_interrupt ?(handle_keys = true) (t : t) : bool =
   if t.modal <> None then false
   else begin
     let read_fd, _ = Notty_unix.Term.fds t.term in
@@ -2001,9 +2028,11 @@ let poll_interrupt (t : t) : bool =
             hit := true
           | `Key k ->
             (* v0.15.6: typing is allowed during a turn; Enter hands the line to
-               the steer hook instead of the (idle) REPL reader. *)
-            handle_key t ~page k
-          | `Mouse m -> handle_mouse t m
+               the steer hook instead of the (idle) REPL reader. Commands that
+               are not turns pass [~handle_keys:false] so typing is not
+               swallowed into a submit nobody reads. *)
+            if handle_keys then handle_key t ~page k
+          | `Mouse m -> if handle_keys then handle_mouse t m
           | _ -> ())
        with exn ->
          failed := true;

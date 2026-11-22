@@ -126,6 +126,36 @@ let mouse_tail_is_dropped () =
   check "ordinary text" "a1;b2;c3x" "a1;b2;c3x";
   check "plain word" "hello" "hello"
 
+(* v0.15.7: the status bar must not promise Esc interrupts while a modal owns
+   the keyboard. *)
+let test_hint_modal () =
+  let h =
+    Par_code_screen.status_right_hint ~modal_open:true ~busy:"3s"
+      ~turn_active:true ~has_input:false ~left_w:10 ~width:80
+  in
+  Alcotest.(check string) "modal hint" "esc deny \xc2\xb7 ctrl-c cancel " h
+
+let test_hint_running () =
+  let h =
+    Par_code_screen.status_right_hint ~modal_open:false ~busy:"3s"
+      ~turn_active:true ~has_input:false ~left_w:10 ~width:80
+  in
+  Alcotest.(check string) "running hint" "esc interrupt " h
+
+let test_hint_queue () =
+  let h =
+    Par_code_screen.status_right_hint ~modal_open:false ~busy:"3s"
+      ~turn_active:true ~has_input:true ~left_w:10 ~width:80
+  in
+  Alcotest.(check string) "queue hint" "enter queue \xc2\xb7 esc interrupt " h
+
+let test_hint_idle () =
+  let h =
+    Par_code_screen.status_right_hint ~modal_open:false ~busy:""
+      ~turn_active:false ~has_input:false ~left_w:10 ~width:80
+  in
+  Alcotest.(check string) "no hint when idle" "" h
+
 let () =
   Alcotest.run "par_screen"
     [ ( "fold",
@@ -166,4 +196,10 @@ let () =
             styled_list_row_keeps_marker_space
         ] )
     ; ( "mouse",
-        [ Alcotest.test_case "tail_is_dropped" `Quick mouse_tail_is_dropped ] ) ]
+        [ Alcotest.test_case "tail_is_dropped" `Quick mouse_tail_is_dropped ] )
+    ; ( "status_hint",
+        [ Alcotest.test_case "modal" `Quick test_hint_modal
+        ; Alcotest.test_case "running" `Quick test_hint_running
+        ; Alcotest.test_case "queue" `Quick test_hint_queue
+        ; Alcotest.test_case "idle" `Quick test_hint_idle
+        ] ) ]

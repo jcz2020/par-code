@@ -81,6 +81,24 @@ val queued_count : t -> int
 val set_busy : t -> string -> unit(** Transient text (a spinner, elapsed time) shown before the status line while
     a turn runs. Empty clears it. *)
 
+val status_right_hint :
+  modal_open:bool ->
+  busy:string ->
+  turn_active:bool ->
+  has_input:bool ->
+  left_w:int ->
+  width:int ->
+  string
+(** The right edge of the status bar. A modal owns Esc, so it shows a deny hint
+    instead of the turn's interrupt hint. *)
+
+val take_cancel_request : t -> bool
+(** True once after Ctrl-C was pressed inside a modal during a turn; the REPL
+    ticker turns it into a turn cancellation. *)
+
+val clear_cancel_request : t -> unit
+(** Drop a stale request at the start of a turn. *)
+
 val line_count : t -> int
 (** Lines currently in the transcript (for tests and the status bar). *)
 
@@ -99,9 +117,11 @@ val pump : t -> tick:(t -> unit) -> unit
 
 val render : t -> unit
 
-val poll_interrupt : t -> bool(** While a turn runs (the REPL reader is idle), drain pending events and report
-    whether Esc or Ctrl-C was pressed. Other keys are discarded; a modal keeps
-    its own reader and is left alone. *)
+val poll_interrupt : ?handle_keys:bool -> t -> bool(** While a turn runs (the REPL reader is idle), drain pending events and report
+    whether Esc or Ctrl-C was pressed. Non-interrupt keys are handled only when
+    [handle_keys] is true (a turn); commands pass false so typed text is not
+    swallowed into a submit nobody reads. A modal keeps its own reader and is
+    left alone. *)
 
 
 val stop : t -> unit

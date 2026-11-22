@@ -160,7 +160,9 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
   (* A turn blocks the main fiber inside [invoke]; Eio keeps other fibers
      running, so a ticker can keep the status line moving (spinner + elapsed)
      even when the provider sends nothing for a while. *)
-  let with_progress f =
+  let with_progress ?(handle_keys = true) f =
+    Par_code_screen.clear_cancel_request screen;
+    cancel_pending := false;
     let finished = ref false in
     (match Par_code_setup.clock () with
      | Some clock ->
@@ -181,12 +183,17 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                    has. Log it and keep the loop alive. *)
                 (try
                    incr i;
-                   (if Par_code_screen.poll_interrupt screen then
+                   let cancel_now =
+                     Par_code_screen.take_cancel_request screen
+                     || Par_code_screen.poll_interrupt ~handle_keys screen
+                   in
+                   (if cancel_now then begin
+                      cancel_pending := true;
                       match !turn_token_ref with
                       | Some tok ->
-                        cancel_pending := true;
                         Par.Cancellation.request_cancel tok Types.User_cancelled
-                      | None -> ());
+                      | None -> ()
+                    end);
                    let elapsed = Unix.gettimeofday () -. start in
                    let activity = Par_code_screen.activity screen in
                    let label =
@@ -205,8 +212,24 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
     Fun.protect
       ~finally:(fun () ->
         finished := true;
-        Par_code_screen.set_busy screen "")
+        Par_code_screen.set_busy screen "";
+        cancel_pending := false)
       f
+  in
+  (* v0.18: provider requests cancel natively, so this race is only used for
+     the synchronous workflow start, which has no cancellation token. *)
+  let with_interrupt f =
+    match Par_code_setup.clock () with
+    | None -> Some (f ())
+    | Some clock ->
+      let result = ref None in
+      Eio.Fiber.first
+        (fun () -> result := Some (f ()))
+        (fun () ->
+           while not !cancel_pending do
+             Eio.Time.sleep clock 0.05
+           done);
+      !result
   in
   (* v0.5.5 P0 #2: tag every save with the current project scope so that
      `par session list` / `par -r` / `par --continue <prefix>` filter
@@ -450,9 +473,9 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
             | _ -> true)
       in
              cancel_pending := false;
+             Par_code_screen.clear_cancel_request screen;
              in_invoke := true;
              let turn_cancelled = ref false and turn_errored = ref false and turn_exn = ref false in
-             let forced_cancel = ref false in
              let stream_cancelled = ref false in
             (try
               (match !conv with
@@ -560,45 +583,18 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                      Par_code_screen.set_turn_active screen false)
                    (fun () ->
                       let single msg =
-                        let invoke () =
-                          Runtime.invoke rt
-                            ~agent_id:(Par_code_mode.agent_id_for !Par_code_mode.current)
-                            ~message:msg
-                            ?conversation:!conv
-                            ~on_tool_event
-                            ~on_chunk:(Some stream_cb)
-                            ~enable_handoff:true
-                            ?system_prompt_appendix:turn_appendix
-                            ?skills
-                            ~cancellation_token:turn_token
-                            ~durable:true
-                            ()
-                        in
-                        (* v0.15.7: the cancellation token is only a flag; a
-                           provider that goes silent (no bytes at all) never
-                           looks at it, so Esc used to do nothing until the
-                           socket returned. Racing the invoke against the
-                           interrupt flag lets Eio cancel the blocked read
-                           itself, which is what makes Esc immediate. *)
-                        match Par_code_setup.clock () with
-                        | None -> invoke ()
-                        | Some clock ->
-                          let result = ref None in
-                          Eio.Fiber.first
-                            (fun () -> result := Some (invoke ()))
-                            (fun () ->
-                               while not !cancel_pending do
-                                 Eio.Time.sleep clock 0.05
-                               done);
-                          (match !result with
-                           | Some r -> r
-                           | None ->
-                             forced_cancel := true;
-                             Error
-                               ( Types.Cancelled Types.User_cancelled
-                               , (match !conv with
-                                  | Some c -> c
-                                  | None -> { Types.messages = []; metadata = [] }) ))
+                        Runtime.invoke rt
+                          ~agent_id:(Par_code_mode.agent_id_for !Par_code_mode.current)
+                          ~message:msg
+                          ?conversation:!conv
+                          ~on_tool_event
+                          ~on_chunk:(Some stream_cb)
+                          ~enable_handoff:true
+                          ?system_prompt_appendix:turn_appendix
+                          ?skills
+                          ~cancellation_token:turn_token
+                          ~durable:true
+                          ()
                       in
                       if not max_turn then single message
                       else begin
@@ -613,8 +609,10 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                             ~cancellation_token:turn_token
                             ~on_candidate_done:(fun i ok ->
                               Par_code_ui.render_notice ui
-                                (Printf.sprintf "  candidate %d/%d \xc2\xb7 %s"
-                                   (i + 1) n (if ok then "done" else "failed")))
+                                (Printf.sprintf
+                                   "  candidate %d/%d \xc2\xb7 %s"
+                                   (i + 1) n
+                                   (if ok then "done" else "failed")))
                             ()
                         in
                         match outcome.Par_code_max_mode.candidates with
@@ -727,19 +725,17 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                 (match invoke_result with
                 | Error (Types.Cancelled reason, recovered_conv) ->
                    turn_cancelled := true;
-                   (* A forced cancel (Eio cancelling a silent provider read)
-                      has no engine-recovered conversation: [recovered_conv]
-                      is the pre-turn one. Saving it would mint an empty
-                      session, so keep the old state untouched. *)
-                   if not !forced_cancel then begin
-                     conv := Some (Par_code_payload.sanitize recovered_conv)
-                   end;
-                  Par_code_ui.flush_markdown ui;
-                  (if not !forced_cancel then
+                   (* v0.15.7: a forced cancel now recovers the checkpoint or
+                      keeps the user's message, so there is something to
+                      save. An empty conversation still mints no session. *)
+                   if recovered_conv.Types.messages <> [] then begin
+                     conv := Some (Par_code_payload.sanitize recovered_conv);
+                     Par_code_ui.flush_markdown ui;
                      let _ =
                        Runtime.save_conversation rt ?conversation:!conv ~scope ()
                      in
-                     incr turn_count);
+                     incr turn_count
+                   end else Par_code_ui.flush_markdown ui;
                   (match Par_code_chain.cancel_outcome reason with
                    | Par_code_chain.Pause_goal ->
                      (match !Par_code_goal.current with
@@ -1040,7 +1036,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
            (* v0.15.3: the SDK lists models itself now (par#42 fixed in PAR
               0.17.3), so the config list is only a fallback for endpoints that
               do not implement the listing route. *)
-           let listed = with_progress (fun () -> Runtime.list_models rt ()) in
+           let listed = with_progress ~handle_keys:false (fun () -> Runtime.list_models rt ()) in
            let models =
              match listed with
              | Ok (_ :: _ as l) -> l
@@ -1445,13 +1441,11 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                     registered. Only agents that already hold an MCP tool are
                     touched — `explore` stays read-only by construction — plus
                     the main agent, which is where a first server shows up. *)
-                 let bindings = Runtime.mcp_tool_bindings rt in
-                 let add =
-                   List.filter
-                     (fun (b : Par.Types.tool_binding) ->
-                        List.mem b.descriptor.name added)
-                     bindings
+                 let bindings =
+                   Par_code_setup.wrap_mcp_bindings
+                     (Runtime.mcp_tool_bindings rt)
                  in
+                 let add = bindings in
                  let holds_mcp (a : Par.Types.agent_config) =
                    List.exists
                      (fun (td : Par.Types.tool_descriptor) -> List.mem td.name before)
@@ -1460,16 +1454,33 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                  let touched = ref [] in
                  List.iter
                    (fun (a : Par.Types.agent_config) ->
-                      if holds_mcp a || a.id = Par_code_setup.agent_id then
+                      if holds_mcp a || a.id = Par_code_setup.agent_id then begin
+                        let held = names_of a.tools in
+                        let base_names =
+                          List.filter (fun n -> not (List.mem n before)) held
+                        in
+                        let remove =
+                          List.filter (fun n -> List.mem n held)
+                            (List.sort_uniq compare (before @ after))
+                        in
+                        let add_for_agent =
+                          List.filter
+                            (fun (b : Par.Types.tool_binding) ->
+                              not (List.mem b.descriptor.name base_names)
+                              && (List.mem b.descriptor.name held
+                                  || List.mem b.descriptor.name added))
+                            add
+                        in
                         match
-                          Runtime.update_agent_tools rt ~agent_id:a.id ~add
-                            ~remove:removed
+                          Runtime.update_agent_tools rt ~agent_id:a.id
+                            ~add:add_for_agent ~remove
                         with
                         | Ok () -> touched := a.id :: !touched
                         | Error e ->
                           Par_code_ui.render_warning ui
                             (Printf.sprintf "[mcp] %s: tools not updated: %s" a.id
-                               (Par_code_setup.error_to_string e)))
+                               (Par_code_setup.error_to_string e))
+                      end)
                    (Runtime.list_agents rt);
                  Par_code_ui.render_notice ui
                    (Printf.sprintf
@@ -1591,18 +1602,22 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                                    (Unix.gettimeofday () -. start))
                           done)
                    | None -> ());
-                  Fun.protect
-                    ~finally:(fun () -> finished := true)
-                    (fun () ->
+                  with_progress ~handle_keys:false (fun () ->
+                    Fun.protect
+                      ~finally:(fun () -> finished := true)
+                      (fun () ->
                        match
-                         Runtime.submit_workflow rt
-                           (Par_code_flow.workflow_of def)
+                         with_interrupt (fun () ->
+                             Runtime.submit_workflow rt
+                               (Par_code_flow.workflow_of def))
                        with
-                       | Error e ->
+                       | None ->
+                         Par_code_ui.render_notice ui "[flow] cancelled"
+                       | Some (Error e) ->
                          Par_code_ui.render_error ui
                            ("[flow] could not start: "
                            ^ Par_code_setup.error_to_string e)
-                       | Ok run_id ->
+                       | Some (Ok run_id) ->
                          let id = Par.Types.Workflow_run_id.to_string run_id in
                          last_flow := Some id;
                          (match Runtime.get_workflow_status rt run_id with
@@ -1612,7 +1627,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                           | Ok st ->
                             Par_code_ui.render_success ui
                               (Printf.sprintf "[flow] %s %s" id
-                                 (Par_code_flow.status_line st)))))
+                                 (Par_code_flow.status_line st))))))
              | [ "status" ] | [ "status"; _ ] ->
                let id =
                  match words with
@@ -1682,18 +1697,19 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
               let tok =
                 Par.Cancellation.create_token (Par.Runtime.cancellation_root rt)
               in
-              Par_code_distill.run ~rt ~ui ~mem_db ~conv:!conv ~args:rest
-                ~cancellation_token:tok
-                ~on_invoke:(fun active ->
-                  if active then begin
-                    cancel_pending := false;
-                    in_invoke := true;
-                    turn_token_ref := Some tok
-                  end else begin
-                    turn_token_ref := None;
-                    in_invoke := false
-                  end)
-                ()
+              with_progress ~handle_keys:false (fun () ->
+                Par_code_distill.run ~rt ~ui ~mem_db ~conv:!conv ~args:rest
+                  ~cancellation_token:tok
+                  ~on_invoke:(fun active ->
+                    if active then begin
+                      cancel_pending := false;
+                      in_invoke := true;
+                      turn_token_ref := Some tok
+                    end else begin
+                      turn_token_ref := None;
+                      in_invoke := false
+                    end)
+                  ())
             end;
             loop ()
           | cmd when String.length cmd > 1 ->

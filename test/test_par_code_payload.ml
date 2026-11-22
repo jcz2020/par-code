@@ -201,6 +201,176 @@ let test_sanitize_caps_tool_message () =
       (String.length text < String.length big)
   | _ -> Alcotest.fail "expected the tool message to survive"
 
+let rec rm_rf path =
+  try
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun n -> rm_rf (Filename.concat path n));
+      Unix.rmdir path
+    end else Sys.remove path
+  with _ -> ()
+
+let with_spill_dir f =
+  let dir = Filename.temp_file "par-spill" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o700;
+  let cwd = Sys.getcwd () in
+  Fun.protect
+    ~finally:(fun () ->
+      Sys.chdir cwd;
+      Par_code_payload.configure ~max_chars:32_768 ~retention_days:7.0
+        ~spill_dir:None;
+      rm_rf dir)
+    (fun () -> Sys.chdir dir; f dir)
+
+let test_multi_field_object_is_capped () =
+  let big = String.make 60_000 'm' in
+  let payload = `Assoc [ ("a", `String big); ("b", `String big) ] in
+  match Par_code_payload.cap_handler_result ~tool_name:"mcp" (Types.Success payload) with
+  | Types.Success j ->
+    let s = Yojson.Safe.to_string j in
+    Alcotest.(check bool) "multi-field object bounded" true
+      (String.length s < 40_000);
+    Alcotest.(check bool) "marker present" true
+      (Astring.String.is_infix ~affix:"truncated" s)
+  | _ -> Alcotest.fail "expected a capped object"
+
+let test_nested_large_string_is_capped () =
+  let big = String.make 100_000 'n' in
+  let payload =
+    `Assoc [ ("content", `List [ `Assoc [ ("type", `String "text"); ("text", `String big) ] ]) ]
+  in
+  match Par_code_payload.cap_handler_result ~tool_name:"mcp" (Types.Success payload) with
+  | Types.Success j ->
+    let s = Yojson.Safe.to_string j in
+    Alcotest.(check bool) "nested text is bounded" true
+      (String.length s < 40_000);
+    Alcotest.(check bool) "marker present" true
+      (Astring.String.is_infix ~affix:"truncated" s)
+  | _ -> Alcotest.fail "expected a capped object"
+
+let test_control_payloads_untouched () =
+  let big = String.make 50_000 'a' in
+  let approval =
+    Types.Approval_required
+      { tool_name = "mcp_write"
+      ; tool_input = `Assoc [ ("content", `String big) ]
+      ; prompt = "allow?"
+      ; timeout = None
+      ; allowed_roles = [] }
+  in
+  match Par_code_payload.cap_handler_result approval with
+  | Types.Approval_required { tool_input = `Assoc fields; _ } ->
+    let content =
+      match List.assoc_opt "content" fields with Some (`String s) -> s | _ -> ""
+    in
+    Alcotest.(check int) "approval input must stay exact" (String.length big)
+      (String.length content)
+  | _ -> Alcotest.fail "approval payload must pass through"
+
+let test_error_payload_capped () =
+  let big = String.make 50_000 'e' in
+  match
+    Par_code_payload.cap_handler_result
+      (Types.Error
+         { category = Types.External_failure "x"
+         ; message = big
+         ; retryable = false
+         ; metadata = [ ("blob", `String big) ] })
+  with
+  | Types.Error { message; metadata; _ } ->
+    Alcotest.(check bool) "error message capped" true
+      (String.length message < 5_000);
+    let blob =
+      match List.assoc_opt "blob" metadata with Some (`String s) -> s | _ -> ""
+    in
+    Alcotest.(check bool) "metadata capped" true (String.length blob < 5_000)
+  | _ -> Alcotest.fail "expected an error"
+
+let test_spill_writes_full_payload () =
+  with_spill_dir (fun root ->
+      Par_code_payload.configure ~max_chars:1024 ~retention_days:7.0
+        ~spill_dir:(Some ".par/tool-results");
+      let big = String.make 5000 'q' in
+      let out =
+        Par_code_payload.cap_handler_result ~tool_name:"grep"
+          (Types.Success (`List [ `String big ]))
+      in
+      match out with
+      | Types.Success (`List items) ->
+        let marker =
+          List.fold_left
+            (fun acc j ->
+              match j with
+              | `String s when Astring.String.is_infix ~affix:"full output:" s -> s
+              | _ -> acc)
+            "" items
+        in
+        Alcotest.(check bool) "marker names the file" true (marker <> "");
+        let start = String.length "full output: " in
+        let rel =
+          match Astring.String.find_sub ~sub:"full output: " marker with
+          | Some i ->
+            let tail = String.sub marker (i + start) (String.length marker - i - start) in
+            (match String.index_opt tail ']' with
+             | Some j -> String.sub tail 0 j
+             | None -> tail)
+          | None -> ""
+        in
+        Alcotest.(check bool) "spill file exists" true
+          (rel <> "" && Sys.file_exists (Filename.concat root rel));
+        let content =
+          let ic = open_in (Filename.concat root rel) in
+          let n = in_channel_length ic in
+          let s = really_input_string ic n in
+          close_in ic;
+          s
+        in
+        Alcotest.(check bool) "full payload is on disk" true
+          (Astring.String.is_infix ~affix:big content)
+      | _ -> Alcotest.fail "expected a capped list")
+
+let test_retention_prunes_old_files () =
+  with_spill_dir (fun root ->
+      let dir = Filename.concat root ".par/tool-results" in
+      Unix.mkdir (Filename.concat root ".par") 0o700;
+      Unix.mkdir dir 0o700;
+      let old = Filename.concat dir "old.txt" in
+      let oc = open_out old in
+      output_string oc "old";
+      close_out oc;
+      let eight_days_ago = Unix.gettimeofday () -. (8. *. 86400.) in
+      Unix.utimes old eight_days_ago eight_days_ago;
+      Par_code_payload.configure ~max_chars:32768 ~retention_days:7.0
+        ~spill_dir:(Some ".par/tool-results");
+      Alcotest.(check bool) "old file removed" false (Sys.file_exists old))
+
+let test_retention_zero_keeps_files () =
+  with_spill_dir (fun root ->
+      let dir = Filename.concat root ".par/tool-results" in
+      Unix.mkdir (Filename.concat root ".par") 0o700;
+      Unix.mkdir dir 0o700;
+      let old = Filename.concat dir "keep.txt" in
+      let oc = open_out old in
+      output_string oc "keep";
+      close_out oc;
+      let eight_days_ago = Unix.gettimeofday () -. (8. *. 86400.) in
+      Unix.utimes old eight_days_ago eight_days_ago;
+      Par_code_payload.configure ~max_chars:32768 ~retention_days:0.
+        ~spill_dir:(Some ".par/tool-results");
+      Alcotest.(check bool) "retention 0 keeps the file" true
+        (Sys.file_exists old))
+
+let test_spill_disabled_falls_back () =
+  with_spill_dir (fun root ->
+      Par_code_payload.configure ~max_chars:1024 ~retention_days:7.0
+        ~spill_dir:None;
+      ignore
+        (Par_code_payload.cap_handler_result ~tool_name:"grep"
+           (Types.Success (`String (String.make 5000 'z'))));
+      Alcotest.(check bool) "no .par dir created" false
+        (Sys.file_exists (Filename.concat root ".par")))
+
 let () =
   Alcotest.run "payload"
     [ ( "sanitize"
@@ -225,5 +395,22 @@ let () =
         ; Alcotest.test_case "control chars stripped" `Quick test_cap_strips_control_chars
         ; Alcotest.test_case "sanitize caps tool text" `Quick
             test_sanitize_caps_tool_message
+        ; Alcotest.test_case "nested object capped" `Quick
+            test_nested_large_string_is_capped
+        ; Alcotest.test_case "multi-field object capped" `Quick
+            test_multi_field_object_is_capped
+        ; Alcotest.test_case "error payload capped" `Quick
+            test_error_payload_capped
+        ; Alcotest.test_case "control payloads untouched" `Quick
+            test_control_payloads_untouched
+        ] )
+    ; ( "spill"
+      , [ Alcotest.test_case "full payload written" `Quick
+            test_spill_writes_full_payload
+        ; Alcotest.test_case "retention prunes" `Quick
+            test_retention_prunes_old_files
+        ; Alcotest.test_case "retention zero keeps" `Quick
+            test_retention_zero_keeps_files
+        ; Alcotest.test_case "spill disabled" `Quick test_spill_disabled_falls_back
         ] )
     ]

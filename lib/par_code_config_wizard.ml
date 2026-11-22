@@ -216,6 +216,9 @@ let run_wizard ?(ui=Par_code_ui.create_backend ()) () =
     max_candidates = Par_code_config.default.max_candidates;
     mcp_servers = Par_code_config.default.mcp_servers;
     edit_approval = Par_code_config.default.edit_approval;
+    tool_output_chars = Par_code_config.default.tool_output_chars;
+    tool_output_retention_days =
+      Par_code_config.default.tool_output_retention_days;
     skill_sources = Par_code_config.default.skill_sources;
     snapshot_enabled = Par_code_config.default.snapshot_enabled;
   } in

@@ -224,6 +224,8 @@ one. Typical fields:
 | `context_window_tokens` | Model context window (default 128000) |
 | `context_budget_tokens` | When older turns collapse into a checkpoint |
 | `bash_approval` | `ask` / `auto_project` / `always` |
+| `tool_output_chars` | One tool result's preview cap (default 32768); the full output goes to `.par/tool-results/` |
+| `tool_output_retention_days` | How long spilled tool output is kept (default 7; `0` keeps forever) |
 | `max_candidates` | Default Best-of-N width |
 | `auto_extract`, `checkpoint_*` | Memory extraction and checkpoint cadence |
 | `skill_sources` | URLs to pull remote skills from |
