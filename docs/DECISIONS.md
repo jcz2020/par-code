@@ -3267,3 +3267,21 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 - **reason**：用户判定行式界面只是权宜之计。保留第二套界面的成本是双份输入/渲染路径与双份回归面（v0.14.0 的三处缺陷都出在这条分支上），收益只剩“非 TTY 也能聊”，而 `par ask` 已经覆盖一次性调用。
 - **scope**：非 TTY 运行 `par` 不再降级为行式界面，而是走单次问答（stdin 即问题、输出纯文本，空 stdin 才报错），所以 `echo "…" | par` 这类脚本仍可用；破坏性变更主要在配置字段与界面本身，故走 minor。
 - **rollback**：回退到 v0.14.1 tag；代码侧恢复 `run` 里的 `screen = None` 分支与 `linenoise` 依赖即可。
+
+## 2026-11-22 · 工具行摘要解析运行时给出的 JSON 预览（v0.15.5）
+
+- **tag**：v0.15.5-tool-summary-json
+- **before**：`par_code_tool_summary` 把 `Tool_completed.result_preview` 当纯文本：数行数、截首行。但这个字段是 `Yojson.Safe.to_string output`，换行是转义的两字符 `\n`，于是 `read` 永远显示 `1 lines`，`bash` / `write` 把 `{"stdout":…}` 原样当摘要；单测喂的是纯文本，测的是一条生产里不存在的路径。
+- **after**：先解析 JSON——字符串取全文、列表按行拼接、对象按 content / stdout / stderr / text / output / message / result 取；`read` 报真实行数（单数 `1 line`）、`grep` / `find` / `ls` 报条目数、`bash` 报非零退出码与首行输出、`apply_patch` 报 `N files · +X/-Y`。preview 超 500 字节会被引擎截断并追加 `... (N bytes total)`，此时改为手工提取字符串字段，计数标成 `8+ lines`，不把截断值冒充全量。
+- **reason**：工具行是用户判断「刚才干了什么」的唯一入口；错误数字比没有数字更糟。旧的 15 条单测全绿，只说明实现与测试同错。
+- **scope**：只改摘要格式化，不改工具事件、参数缓存或折叠逻辑；截断标记依赖引擎现有文案，引擎改变措辞时退化为普通计数。
+- **rollback**：revert 该文件与 `test_par_code_tool_summary.ml`，工具行回到「1 lines」。
+
+## 2026-11-22 · 转写区按词折行、列表悬挂缩进（v0.15.5）
+
+- **tag**：v0.15.5-word-wrap
+- **before**：`wrap_runs` 按码点硬折：英文单词从中间断开、列表续行回到最左侧、中文的句号逗号可能落在行首；`1. **粗体**：…` 这种多 run 行还会丢掉标记后的空格。
+- **after**：按空白切 token 折行——拉丁词放不下就整体移到下一行，CJK 开头的 run 或整行放不下的 token 就地填满当前行，关闭标点（`。，、；：！？）】》」` 与 ASCII `,.;:!?)]}%`）不落行首（把前一字符一起推到下一行），列表续行按标记宽度悬挂缩进；行尾空白在折行时裁掉。
+- **reason**：折行是每屏都看到的东西，断词与错位直接影响可读性；这些规则正是终端里成熟编码工具的默认行为。
+- **scope**：只改显示层折行；markdown 渲染器、转写条目缓存与 60 行截断不变（仍按当前列宽重算）。
+- **rollback**：revert `par_code_screen.ml` 的 `wrap_runs` 及其单测，回到逐码点折行。
