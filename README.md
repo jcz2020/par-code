@@ -40,6 +40,14 @@ Or ask a single question without the interface:
 par ask "Why does the release workflow pin actions to commit SHAs?"
 ```
 
+Continue where you left off — the most recent conversation, or one by id or
+unique prefix:
+
+```sh
+par -c
+par -c 3f2a91c4
+```
+
 ## Why use it
 
 - **It is a terminal application, not a chat wrapper.** Transcript, status bar,

@@ -124,6 +124,30 @@ let test_resume_hint () =
     Alcotest.(check bool) "mentions discard" true
       (string_contains line "discard")
 
+let test_continue_bare_is_most_recent () =
+  match Par_code_repl_io.resume_target_of_cli ~resume:false ~continue:(Some "") with
+  | Par_code_repl_io.Resume_most_recent -> ()
+  | _ -> Alcotest.fail "bare -c must continue the most recent session"
+
+let test_continue_id_is_that_session () =
+  match
+    Par_code_repl_io.resume_target_of_cli ~resume:false ~continue:(Some "abc")
+  with
+  | Par_code_repl_io.Resume_of "abc" -> ()
+  | _ -> Alcotest.fail "-c <id> must resume that id"
+
+let test_resume_flag_wins_over_continue () =
+  match
+    Par_code_repl_io.resume_target_of_cli ~resume:true ~continue:(Some "abc")
+  with
+  | Par_code_repl_io.Resume_most_recent -> ()
+  | _ -> Alcotest.fail "-r must win when both are given"
+
+let test_no_resume_flag () =
+  match Par_code_repl_io.resume_target_of_cli ~resume:false ~continue:None with
+  | Par_code_repl_io.No_prior -> ()
+  | _ -> Alcotest.fail "no flag must start fresh"
+
 let () =
   Alcotest.run "par_repl"
     [ "cost_state", [
@@ -143,5 +167,9 @@ let () =
       ];
       "resume", [
         Alcotest.test_case "hint_text" `Quick test_resume_hint;
+        Alcotest.test_case "bare_continue" `Quick test_continue_bare_is_most_recent;
+        Alcotest.test_case "continue_id" `Quick test_continue_id_is_that_session;
+        Alcotest.test_case "resume_wins" `Quick test_resume_flag_wins_over_continue;
+        Alcotest.test_case "no_flag" `Quick test_no_resume_flag;
       ];
     ]

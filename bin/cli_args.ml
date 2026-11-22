@@ -77,9 +77,13 @@ let retention_days =
 
 let continue_id_opt =
   let open Cmdliner.Arg in
-  value & opt (some string) None
-  & info ["c"; "continue"] ~docv:"SESSION"
-      ~doc:"Resume the conversation with the given session id"
+  (* v0.15.7: bare [-c] continues the most recent session, the way other agent
+     CLIs do; [-c <id-or-prefix>] still picks a specific one. [opt_all] keeps
+     "absent" and "bare flag" distinguishable without printing a default or
+     absent sentinel in --help. *)
+  value & opt_all ~vopt:"" string []
+  & info ["c"; "continue"] ~docv:"[SESSION]"
+      ~doc:"Continue the most recent session, or the one with the given id/prefix"
 
 let resume_opt =
   let open Cmdliner.Arg in

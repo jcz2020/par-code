@@ -1,5 +1,37 @@
 # CHANGES
 
+## v0.15.6 — A turn you can stop (released 2026-11-22)
+
+- **Esc stops a silent provider**: cancellation was only a flag, and a
+  provider that stopped sending bytes never read it, so `esc interrupt` could
+  sit on screen for minutes with no effect. A turn now races the invoke
+  against the cancel flag and Eio cancels the blocked read, so Esc / Ctrl-C
+  return to the prompt in about a second. A forced cancel keeps the previous
+  state instead of minting an empty session.
+- **One tool result cannot sink the session**: `grep` returned whole matching
+  lines, binary content included; one real session grew to 649 MB and its
+  next request carried 136M estimated tokens. Host-registered tools now cap a
+  single result at 32K characters, drop control characters, and old sessions
+  are capped when loaded. MCP results still wait on the SDK
+  ([jcz2020/par#44](https://github.com/jcz2020/par/issues/44)).
+- **The transcript is selectable**: drag with Shift, or turn on select mode
+  with Ctrl-X and drag on a phone; the selection is copied over OSC 52 and
+  the transcript confirms `copied N characters`. Plain drags still scroll.
+- **Type while a turn runs**: Enter puts the message in a dock above the
+  composer and the runtime receives it at the next tool event; Ctrl-U
+  withdraws the newest queued message before it is sent.
+- **File edits show a diff first**: `write`, `edit` and `apply_patch` ask with
+  a red/green unified diff (`y` once, `a` for the session, `n` to deny);
+  `edit_approval` follows `bash_approval` (`ask` / `auto_project` / `always`).
+- **`par -c` continues the latest session**: a bare `-c` now works like
+  `-r`, `-c <id-or-prefix>` still picks one, and a resumed conversation keeps
+  its session id so new turns append instead of starting another session.
+- **The loop guard counts calls, not tool variety**: consecutive different
+  utilities (echo, get_time, calculator, …) are no longer a "streak"; only
+  the same call with the same arguments counts.
+- **Checked in the real interface**: a silent provider server, a live
+  provider turn with a 200 KB tool result, and the unit suites.
+
 ## v0.15.5 — A transcript that reads like text (released 2026-11-22)
 
 - **Tool lines tell the truth**: the runtime hands a tool's result preview over

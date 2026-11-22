@@ -106,12 +106,27 @@ type resume_target =
   | Resume_most_recent
   | Resume_of of string
 
+(* v0.15.7: bare [-c] means "continue the most recent session", matching the
+   habit other agent CLIs trained. [-r] always means that; an explicit
+   [-c <id>] still picks one session. [-r] wins when both are given. *)
+let resume_target_of_cli ~(resume : bool) ~(continue : string option) :
+    resume_target =
+  match resume, continue with
+  | true, _ -> Resume_most_recent
+  | false, Some "" -> Resume_most_recent
+  | false, Some id -> Resume_of id
+  | false, None -> No_prior
+
 let load_initial_conv (ui : Par_code_ui.backend) (rt : Runtime.runtime) (target : resume_target) : Types.conversation option =
   match target with
   | No_prior -> None
   | Resume_most_recent ->
     (match Par_code_session.load_most_recent_scoped () with
      | Ok (Some (sid, conv)) ->
+       (* v0.15.7: adopt the resumed session id, not just its messages, so the
+          next turns append to the same conversation (the explicit -c <id>
+          path already does this through Runtime.load_conversation). *)
+       (try Runtime.set_session_id rt sid with _ -> ());
        Par_code_ui.render_notice ui (Printf.sprintf "Resumed most recent session: %s" sid);
        Some (Par_code_payload.sanitize conv)
      | Ok None -> Par_code_ui.render_warning ui "No prior session found."; None

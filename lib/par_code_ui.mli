@@ -193,6 +193,24 @@ val set_modal_hook :
 (** Install the in-frame modal. When set, [prompt_permission] asks through it
     instead of reading /dev/tty. *)
 
+val set_styled_modal_hook :
+  (title:string -> body:(string * style) list ->
+   options:(string * string) list -> string option)
+  option ->
+  unit
+(** v0.15.6: modal hook that keeps per-line styles (the edit diff). *)
+
+val modal_installed : unit -> bool
+(** Whether a screen is driving the UI; non-interactive runs skip prompts. *)
+
+val prompt_edit :
+  ?backend:backend ->
+  title:string ->
+  lines:(string * style) list ->
+  unit ->
+  string option
+(** Ask before a file-changing tool call; returns y / a / n, or [None]. *)
+
 val prompt_permission :
   ?backend:backend ->
   command:string ->

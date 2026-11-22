@@ -3285,3 +3285,75 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 - **reason**：折行是每屏都看到的东西，断词与错位直接影响可读性；这些规则正是终端里成熟编码工具的默认行为。
 - **scope**：只改显示层折行；markdown 渲染器、转写条目缓存与 60 行截断不变（仍按当前列宽重算）。
 - **rollback**：revert `par_code_screen.ml` 的 `wrap_runs` 及其单测，回到逐码点折行。
+
+## 2026-11-22 · 转写区选中复制（v0.15.6）
+
+- **tag**：v0.15.6-selection-copy
+- **before**：鼠标只用于滚动；手机上看着一段回答想复制，没有任何办法。
+- **after**：转写区按「绝对行号 + 显示列」记录选区，绘制时把选中字符改成反色；`Shift+拖拽` 或 `Ctrl-X` 选择模式（手机没有 Shift）拖拽选字，松开即复制。剪贴板统一走 OSC 52（base64，由终端模拟器自己落到系统剪贴板；Termux 支持这一序列）。复制后追加一行 `✓ copied N characters`，字符数按码点而非字节。普通拖拽仍是滚动（按需验证过 `↑N`）。
+- **reason**：全部是显示层工作：转写条目已缓存折行后的 runs（v0.15.4 重排），选区只需在绘制前对 runs 改样式，不需要终端层面的选择支持。
+- **scope**：只覆盖转写区；输入行与弹窗内的选择仍交给终端自身。OSC 52 是否生效取决于终端，无法确认时只能给提示。
+- **rollback**：删掉 `par_code_selection` / `par_code_clipboard` 与鼠标选区分支，滚动恢复到只认 drag。
+
+## 2026-11-22 · 回合中排队投递（v0.15.6）
+
+- **tag**：v0.15.6-queued-prompts
+- **before**：回合运行时输入行被冻结，只能 Esc 打断；想补一句得整轮重来。
+- **after**：运行中输入行保持可编辑，Enter 把消息放进屏幕自己的排队区（转写区回显，composer 上方 dock 显示最多两条预览与 Ctrl-U 撤回）；每个工具事件把排队消息交给 `Runtime.steer`，引擎在下一轮循环开头并入对话；回合结束仍有剩余时由 REPL 取出发起 follow-up 回合。`Ctrl-U` 在输入为空时撤回最新一条排队消息，被撤回的不再投递。
+- **reason**：opencode 的排队消息可以查看与撤销，而 SDK 的 steering 队列没有“撤回”入口；把待发消息先留在屏幕，才能在交给运行时之前真正撤销。工具事件是天然的投递点：引擎在每一步开头 drain，不需要修改 SDK。
+- **scope**：只影响回合运行期的输入路由；空输入 Esc 仍是中断，Ctrl-C 行为不变。弹窗打开时键盘属于弹窗。
+- **rollback**：去掉 `queued` 字段、dock 与投递逻辑，运行期按键恢复为只认 Esc/滚动。
+
+## 2026-11-22 · 改文件前的 diff 审批（v0.15.6）
+
+- **tag**：v0.15.6-edit-approval
+- **before**：`write` / `edit` / `apply_patch` 直接执行，工作区快照只能事后回滚；模型改了什么，用户在执行前看不到。
+- **after**：新增工具钩子（在权限 deny 规则之后），在处理器执行前拿到完整入参：`write` 对比现有内容与 `content`，`edit` 在内存里按 `{old,new}` 套用后对比，`apply_patch` 直接展示 patch；弹窗以红删绿增的 unified diff（上下文 3 行、超长折叠）询问 `y 允许一次 / a 本次会话允许 / n 拒绝`，拒绝返回 `Block`，工具结果是 `Permission_denied`。新配置 `edit_approval`（默认 `ask`，可选 `auto_project` / `always`）与 `bash_approval` 对齐。
+- **reason**：`Hook.tool_call_context` 带 `input : Yojson.Safe.t` 且钩子在执行前运行（`lib/core/hook.ml:11-18`、`lib/core/engine.ml:1111`），所以这是纯宿主侧能力，不改 SDK。
+- **scope**：只覆盖内置写文件工具；MCP 或将来的自定义写工具不在内。工作区外路径本来就由工具拒绝，`auto_project` 因此等同于放行。没有 TUI 的入口（`par ask`、管道）无法弹窗，直接放行以保持旧行为。
+- **rollback**：`par config set edit_approval always` 即恢复现状；代码侧删掉该钩子。
+
+## 2026-11-22 · `par -c` 不带参数继续最近会话（v0.15.7）
+
+- **tag**：cli-continue-bare
+- **before**：`-c/--continue` 必须跟一个 SESSION 参数，裸 `par -c` 直接报 `option '-c' needs an argument`；只有 `-r/--resume` 能继续最近会话。而且恢复最近会话时只载入了历史消息，没沿用它的 session id（实测 `/session` 显示新 id），后续内容会写成一个新会话。
+- **after**：`-c` 的参数改成可选（不带值 = 最近会话，`-c SESSION` 语义不变），无参数时与 `-r` 等价；`Resume_most_recent` 恢复时调用 `Runtime.set_session_id`，后续回合追加到同一会话。真实验证：`par -c` 启动后 `/session` 显示恢复的 id，聊一轮后该会话从 5 条消息变为 7 条。
+- **reason**：用户按其他 agent CLI 的习惯使用 `par -c`；且 `-r`/裸 `-c` 都语义上叫“继续”，却把后续内容写进新 id，会让会话列表越用越碎。
+- **scope**：只改 CLI 参数可选性、决策函数与会话 id 继承；无 tty 时 `par -c` 仍走单次问答（没有可恢复的交互上下文）。
+- **rollback**：把 `continue_id_opt` 还原为必选 `some string`，并移除 `set_session_id` 调用。
+
+## 2026-11-22 · 守卫只把「同一调用重复」算作连击（v0.15.7）
+
+- **tag**：v0.15.7-action-streak-fingerprint
+- **before**：`action streak` 把所有既不是 bash/edit、也不带读类动词的工具都归为 `other`，于是「测试全部可用工具」这种一轮里依次调用 echo、get_time、calculator、generate_uuid… 的正常行为会在第 4 个工具时报 `Action streak signal`，第 8 个强制评审（真机截图复现）。
+- **after**：连击键改成「工具名 + 入参 JSON」：只有同一个调用以相同参数再次出现才累加，换工具或换参数都从 1 重新计数；读类工具仍清零，bash 与编辑工具仍豁免。
+- **reason**：守卫要抓的是「重复做同一件没用的事」，不是「工具种类多」；按调用指纹判定同时保留了真正卡死时的 4/8/12 三级信号。
+- **scope**：只改 action streak 的计数键与提示文案；`bash_retry`、`edit_repeat` 的判定不变。
+- **rollback**：把 action_action 分支还原为按 `kind` 计数（`other` 共用计数）。
+
+## 2026-11-22 · Esc 能打断不说话的模型请求（v0.15.7）
+
+- **tag**：v0.15.7-forced-cancel
+- **before**：取消令牌只是一个原子标志（SDK `cancellation.ml`），provider 在一段时间内一个字节都不发时没有任何代码去读这个标志，所以 Esc / Ctrl-C 要等 socket 自己返回才生效。用本地「收下请求但永不回包」的服务复现：35 秒内按 Esc、Ctrl-C 都无效。真机截图里的 317s 就是同一个形态：请求发出去后卡住，界面一直显示 `esc interrupt`。
+- **after**：交互回合把 `Runtime.invoke` 与「取消标志」赛跑（`Eio.Fiber.first`）：标志一置位就取消 invoke 所在的 Eio fiber，阻塞中的网络读会立刻抛取消，界面回到空闲并显示 `⊘ [cancelled by user]`。非用户取消（令牌路径）仍走引擎自己的 `Error (Cancelled, recovered_conv)`；强制取消没有引擎恢复的会话，因此不保存、不新建空会话。
+- **reason**：用户要的是「按 Esc 能停下来」，而不是「等 provider 超时后停下来」；Eio 取消能中断阻塞读，是 SDK 标志之外唯一真正生效的机制。
+- **scope**：只覆盖 REPL 的单个 invoke（含 max-mode 回退到单次的情况）；max-mode 候选并行、后台 judge/checkpoint 仍只靠令牌。弹窗里的 Esc 仍是「拒绝本次工具」，不是取消回合。
+- **rollback**：去掉 `single` 里的 `Eio.Fiber.first` 包装，回到只传取消令牌。
+
+## 2026-11-22 · 单个工具结果上限 32K 字符（v0.15.7）
+
+- **tag**：v0.15.7-tool-result-cap
+- **before**：工具结果原样进入会话。`grep` 会把一整行（可能是压缩文件/二进制内容）作为一条结果返回，真机会话因此长到 649 MB；上下文估算 1.36 亿 token，压缩器只能丢掉整条消息、对单条巨消息无能为力，每次请求都要先序列化巨量 JSON，于是 provider 断开、界面卡死。
+- **after**：宿主注册每个工具时套一层 `Par_code_payload.cap_handler_result`：单个结果为字符串时截到 32K 字符、列表保留能放下的项并补 `truncated` 标记、结构化结果逐字段截断，同时去掉 NUL 等控制字符；载入/保存会话时 `sanitize` 也对 Tool 消息做同样上限，旧的大会话重启后会被收敛。实测同一轮里 grep 与 read 的工具消息分别为 32,752 / 32,751 字符，持久化检查点总共 88 KB。
+- **reason**：问题不在“压缩策略不够强”，而在单条工具结果没有上限；不设上限，任何压缩都只能丢整条消息，且请求体本身就会把宿主卡住。
+- **scope**：只覆盖宿主注册的工具（内置、memory、plan、git）；MCP 工具由 SDK 自己注册，仍需上游加同样的结果上限。32K 是字符数，不是 token；读大文件仍可能被截断，模型应改用多次读取/计数命令。
+- **rollback**：去掉 `capped_handler` 包装与 `sanitize` 里的 Tool 截断。
+
+## 2026-11-22 · PAR 缺陷：静默请求无法取消、工具结果无上限
+
+- **tag**：par-defect-cancel-and-result-cap
+- **before**：SDK 0.16.1 里两处缺陷：`lib/core/cancellation.ml:21` 的 `request_cancel` 只写原子标志；`lib/core/engine.ml:219` 只在收到流式分片时检查标志，`lib/providers/openai_provider.ml` 的读循环不等数据时没有轮询，所以 provider 一个字节都不发时取消永远不生效。另外 `lib/tools/builtin_tools.ml` 的 `grep` 返回整行、不设上限也不跳过二进制，`lib/core/context_manager.mli` 的 `truncate_conversation` 只能整条丢消息；实测一条工具结果让会话长到 649 MB，上下文估算 136,793,636 token，压缩后只减了 124，请求反复被 provider 断开。
+- **after**：以本项目身份在 `jcz2020/par` 开 issue #44 报告（不在 PAR 仓库改代码）；par-code 侧只做宿主能做的缓解：Esc 用 Eio 强制取消 invoke、宿主注册的工具结果封顶 32K。MCP 工具结果与 turn 内请求体仍由 SDK 控制，等上游修复。
+- **reason**：两个问题都在 SDK 层：宿主无法用令牌打断阻塞读，也无法给 SDK 自己注册的 MCP 工具结果加帽；继续在宿主加替代实现只会掩盖缺陷。
+- **scope**：只记录与报告，不修改 `/root/dev/PAR` 或任何 PAR 产物。
+- **rollback**：无代码变更；关闭 issue 即可。

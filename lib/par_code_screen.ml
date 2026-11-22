@@ -77,7 +77,7 @@ let attr_of_style (s : Par_code_ui.style) : Notty.A.t =
 
 type modal = {
   title : string;
-  body : string list;
+  body : (string * Par_code_ui.style) list;
   options : (string * string) list;  (* key, label *)
 }
 
@@ -99,7 +99,13 @@ type search = {
 (* v0.15.4: an entry keeps the SOURCE image and renders at the width in use,
    so changing the font size re-flows the transcript instead of clipping it.
    The rendered result is cached per column count. *)
-type render_cache = { mutable rc_cols : int; mutable rc_lines : Notty.image list }
+type render_cache = {
+  mutable rc_cols : int;
+  (* v0.15.6: cache styled runs rather than images. The frame converts only
+     the visible slice to notty images, and a mouse selection has to rewrite
+     the runs of the selected cells before that. *)
+  mutable rc_runs : (string * Par_code_ui.style) list list;
+}
 
 type entry =
   | Line of Par_code_ui.image * render_cache
@@ -173,6 +179,19 @@ type t = {
   mutable menu_suppress : bool;
   (* v0.15.1: Ctrl-R reverse search over the prompt history. *)
   mutable search : search option;
+  (* v0.15.6: mouse selection over the transcript. Points are (absolute
+     transcript line, display column). [view] is the slice the last frame
+     painted, so a mouse row can be turned into a transcript line. *)
+  mutable sel :
+    (Par_code_selection.point * Par_code_selection.point) option;
+  mutable select_mode : bool;
+  mutable selecting : bool;
+  mutable view : (int * int * int) option;
+  (* v0.15.6: a turn is running inside [invoke]. Typing is allowed then; Enter
+     queues the line, which is shown above the composer and delivered to the
+     runtime as soon as the next tool boundary (or the end of the turn) comes. *)
+  mutable turn_active : bool;
+  mutable queued : string list;
   (* v0.15.4: the last frame we actually painted. The idle loop wakes every
      50ms; repainting an unchanged frame made the TUI flicker on a phone, so a
      render only happens when this signature changes. *)
@@ -221,6 +240,12 @@ let create () : t =
     menu_token = None;
     menu_suppress = false;
     search = None;
+    sel = None;
+    select_mode = false;
+    selecting = false;
+    view = None;
+    turn_active = false;
+    queued = [];
     last_sig = "" }
 
 (* Notty rejects control characters inside [I.string] (it raises on "\n"),
@@ -237,6 +262,15 @@ let sanitize_text (s : string) : string =
        | c -> Buffer.add_char b c)
     s;
   Buffer.contents b
+
+(** One-line preview of a queued prompt for the dock. *)
+let preview_text (s : string) : string =
+  let s =
+    match String.index_opt s '\n' with
+    | Some i -> String.sub s 0 i
+    | None -> s
+  in
+  if String.length s > 48 then String.sub s 0 47 ^ "…" else s
 
 let split_runs (runs : (string * Par_code_ui.style) list) :
     (string * Par_code_ui.style) list list =
@@ -263,19 +297,10 @@ let split_runs (runs : (string * Par_code_ui.style) list) :
    mid-sentence on narrow terminals (a phone is 40–60 columns). Wrap here, with
    CJK/emoji widths from uucp. Wrapping happens when text enters the transcript,
    so a resize does not re-flow what is already on screen. *)
-let display_width (u : Uchar.t) =
-  match Uucp.Break.tty_width_hint u with w when w > 0 -> w | _ -> 1
-
-(* Display columns of a UTF-8 string, for laying out two-part rows. *)
-let text_width (s : string) : int =
-  let w = ref 0 in
-  let folder () _u (v : [ `Malformed of string | `Uchar of Uchar.t ]) =
-    match v with
-    | `Malformed _ -> ()
-    | `Uchar u -> w := !w + display_width u
-  in
-  ignore (Uutf.String.fold_utf_8 folder () s);
-  !w
+(* Display width and string width live in one place so the selection and the
+   wrapper cannot disagree about where a column is. *)
+let display_width = Par_code_selection.width_of
+let text_width = Par_code_selection.text_width
 
 (* v0.15.5: wrap on word boundaries. The old folder broke at whichever
    codepoint crossed the limit, so an English word lost its tail to the next
@@ -517,34 +542,30 @@ let trim_trailing_spaces (runs : (string * Par_code_ui.style) list) =
   in
   go (List.rev runs) |> List.rev
 
-let to_notty_lines ~(cols : int) (img : Par_code_ui.image) : Notty.image list =
-  let open Notty in
+let to_notty_runs ~(cols : int) (img : Par_code_ui.image) :
+    (string * Par_code_ui.style) list list =
   List.concat_map
     (fun runs ->
-       List.map
-         (fun (runs : (string * Par_code_ui.style) list) ->
-            match runs with
-            | [] -> I.empty
-            | _ ->
-              I.hcat
-                (List.map
-                   (fun (txt, sty) ->
-                      (* v0.15.4: last line of defence — every string that reaches
-                         notty is clean, or a control character takes the frame
-                         down. *)
-                      I.string (attr_of_style sty) (sanitize_text txt))
-                   runs))
-         (List.concat_map (wrap_runs ~cols) (split_runs runs)
-          |> List.map trim_trailing_spaces))
+       List.concat_map (wrap_runs ~cols) (split_runs runs)
+       |> List.map trim_trailing_spaces)
     (Par_code_ui.lines img)
+
+let runs_to_image (runs : (string * Par_code_ui.style) list) : Notty.image =
+  let open Notty in
+  match runs with
+  | [] -> I.empty
+  | _ ->
+    I.hcat
+      (List.map
+         (fun (txt, sty) ->
+            (* v0.15.4: last line of defence — every string that reaches notty
+               is clean, or a control character takes the frame down. *)
+            I.string (attr_of_style sty) (sanitize_text txt))
+         runs)
 
 let wrap_text ~cols (s : string) : string list =
   wrap_runs ~cols [ (s, Par_code_ui.no_style) ]
   |> List.map (fun runs -> String.concat "" (List.map fst runs))
-
-let to_notty ~cols (img : Par_code_ui.image) : Notty.image =
-  let open Notty in
-  match to_notty_lines ~cols img with [] -> I.empty | ls -> I.vcat ls
 
 (* v0.15.1 phase 4: the spacing scale. A device-specific calibration should
    be a change here, not a hunt through the frame builder. [gutter] is the left
@@ -568,7 +589,7 @@ let content_cols (t : t) = max 8 (width t - 2)
 (* v0.15.4: entries keep the SOURCE image plus a render cache keyed by column
    count, so changing the font size re-flows the transcript instead of
    clipping it. *)
-let fresh_cache () : render_cache = { rc_cols = -1; rc_lines = [] }
+let fresh_cache () : render_cache = { rc_cols = -1; rc_runs = [] }
 
 let append_raw (t : t) (img : Par_code_ui.image) =
   t.transcript <- t.transcript @ [ Line (img, fresh_cache ()) ]
@@ -645,8 +666,9 @@ let max_block_lines = 8
 let fold_plan (n : int) : int * int * int =
   if n <= max_block_lines then (n, 0, 0) else (4, n - 7, 3)
 
-let block_view ~cols (b : tool_block) : Notty.image list =
-  let lines = List.concat_map (fun img -> to_notty_lines ~cols img) b.bx_imgs in
+let block_runs ~cols (b : tool_block) :
+    (string * Par_code_ui.style) list list =
+  let lines = List.concat_map (fun img -> to_notty_runs ~cols img) b.bx_imgs in
   let n = List.length lines in
   if b.bx_expanded then lines
   else begin
@@ -661,8 +683,8 @@ let block_view ~cols (b : tool_block) : Notty.image list =
     if hidden <= 0 then head_lines
     else
       head_lines
-      @ [ to_notty ~cols
-            (Par_code_ui.textf "  … %d more tool lines (Ctrl-O)" hidden) ]
+      @ to_notty_runs ~cols
+          (Par_code_ui.textf "  … %d more tool lines (Ctrl-O)" hidden)
       @ drop (n - tail) lines
   end
 
@@ -690,6 +712,30 @@ let end_line (t : t) =
 
 let set_status (t : t) (s : string) = t.status <- s
 
+(** v0.15.6: while a turn runs, the input line stays editable and Enter
+    steers instead of submitting to the (idle) REPL reader. *)
+let set_turn_active (t : t) (on : bool) = t.turn_active <- on
+
+(* v0.15.6: prompts typed during a turn wait here until the REPL hands them to
+   the runtime. Keeping them in the screen is what makes them visible and
+   withdrawable before they are delivered. *)
+let queue_prompt (t : t) (line : string) =
+  if String.trim line <> "" then t.queued <- t.queued @ [ line ]
+
+let take_queued (t : t) : string list =
+  let q = t.queued in
+  t.queued <- [];
+  q
+
+let withdraw_queued (t : t) : string option =
+  match List.rev t.queued with
+  | [] -> None
+  | last :: rest ->
+    t.queued <- List.rev rest;
+    Some last
+
+let queued_count (t : t) = List.length t.queued
+
 let set_header (t : t) (s : string) = t.header <- s
 let set_composer_label (t : t) (s : string) = t.composer_label <- s
 
@@ -698,43 +744,42 @@ let set_busy (t : t) (s : string) = t.busy <- s
 
 let activity (t : t) = t.activity
 
-let entry_lines ~cols (e : entry) : Notty.image list =
+let entry_runs ~cols (e : entry) :
+    (string * Par_code_ui.style) list list =
+  let rec take k l =
+    if k <= 0 then [] else match l with [] -> [] | h :: tl -> h :: take (k - 1) tl
+  in
   match e with
   | Line (img, cache) ->
     if cache.rc_cols <> cols then begin
-      cache.rc_lines <- to_notty_lines ~cols img;
+      cache.rc_runs <- to_notty_runs ~cols img;
       cache.rc_cols <- cols
     end;
-    cache.rc_lines
+    cache.rc_runs
   | Capped (img, cache) ->
     if cache.rc_cols <> cols then begin
-      let lines = to_notty_lines ~cols img in
+      let lines = to_notty_runs ~cols img in
       let n = List.length lines in
       let kept =
         if n <= max_lines_per_image then lines
-        else begin
-          let rec take k l =
-            if k <= 0 then []
-            else match l with [] -> [] | h :: tl -> h :: take (k - 1) tl
-          in
+        else
           take max_lines_per_image lines
-          @ [ to_notty ~cols
-                (Par_code_ui.textf "… (%d more lines)"
-                   (n - max_lines_per_image)) ]
-        end
+          @ to_notty_runs ~cols
+              (Par_code_ui.textf "… (%d more lines)"
+                 (n - max_lines_per_image))
       in
-      cache.rc_lines <- kept;
+      cache.rc_runs <- kept;
       cache.rc_cols <- cols
     end;
-    cache.rc_lines
-  | Tools b -> block_view ~cols b
+    cache.rc_runs
+  | Tools b -> block_runs ~cols b
 
 let line_count (t : t) =
   let cols = content_cols t in
-  List.fold_left (fun acc e -> acc + List.length (entry_lines ~cols e)) 0
+  List.fold_left (fun acc e -> acc + List.length (entry_runs ~cols e)) 0
     t.transcript
   + List.fold_left
-      (fun acc (_, img) -> acc + List.length (to_notty_lines ~cols img))
+      (fun acc (_, img) -> acc + List.length (to_notty_runs ~cols img))
       0 t.tool_block
 
 (* ------------------------------------------------------------------ *)
@@ -1161,22 +1206,34 @@ let history_move (t : t) (delta : int) =
 (* Frame                                                               *)
 (* ------------------------------------------------------------------ *)
 
-let visible_lines (t : t) ~(height : int) : Notty.image list =
-  let all =
-    let cols = content_cols t in
-    let base =
-      List.concat_map (entry_lines ~cols) t.transcript
-      @ List.concat_map (fun (_, img) -> to_notty_lines ~cols img) t.tool_block
-    in
-    if t.partial = "" then base
-    else base @ [ to_notty ~cols:(content_cols t) (Par_code_ui.text t.partial) ]
-  in
+let all_runs (t : t) ~(cols : int) :
+    (string * Par_code_ui.style) list list =
+  List.concat_map (entry_runs ~cols) t.transcript
+  @ List.concat_map (fun (_, img) -> to_notty_runs ~cols img) t.tool_block
+  @ (if t.partial = "" then []
+     else to_notty_runs ~cols (Par_code_ui.text t.partial))
+
+let visible_runs (t : t) ~(height : int) :
+    int * (int * (string * Par_code_ui.style) list) list =
+  let all = all_runs t ~cols:(content_cols t) in
   let n = List.length all in
   let start = max 0 (n - height - t.scroll) in
   let start = min start n in
   let rec drop k l = if k <= 0 then l else match l with [] -> [] | _ :: tl -> drop (k - 1) tl in
   let rec take k l = if k <= 0 then [] else match l with [] -> [] | h :: tl -> h :: take (k - 1) tl in
-  take height (drop start all)
+  let taken = take height (drop start all) in
+  (start, List.mapi (fun i runs -> (start + i, runs)) taken)
+
+(* v0.15.6: a selected line renders in reverse video; the selection is stored
+   in transcript coordinates so it survives scrolling and re-wrapping. *)
+let selection_runs (t : t) (line : int)
+    (runs : (string * Par_code_ui.style) list) =
+  match t.sel with
+  | None -> runs
+  | Some (a, b) ->
+    (match Par_code_selection.line_span a b line with
+     | None -> runs
+     | Some (from, to_) -> Par_code_selection.select_runs runs ~from ~to_)
 
 let frame (t : t) : Notty.image =
   let open Notty in
@@ -1238,7 +1295,34 @@ let frame (t : t) : Notty.image =
     end
   in
   let menu_h = List.length menu_rows in
-  let body_h = max 1 (room - header_h - composer_h - menu_h) in
+  (* v0.15.6: prompts queued during a turn get a dock of their own above the
+     composer. Two are shown in full, the rest as a count; Ctrl-U withdraws the
+     newest before it is delivered. *)
+  let queue_rows =
+    match t.queued with
+    | [] -> []
+    | msgs ->
+      let shown =
+        List.filteri (fun i _ -> i < 2) msgs
+        |> List.map (fun msg ->
+               I.hsnap ~align:`Left w
+                 (I.string A.(fg lightblack)
+                    (sanitize_text (" \xe2\x8f\xb3 queued \xc2\xb7 " ^ preview_text msg))))
+      in
+      let more = List.length msgs - 2 in
+      if more > 0 then
+        shown
+        @ [ I.hsnap ~align:`Left w
+              (I.string A.(fg lightblack)
+                 (sanitize_text (Printf.sprintf " \xe2\x8f\xb3 … %d more queued \xc2\xb7 Ctrl-U withdraw" more))) ]
+      else
+        shown
+        @ [ I.hsnap ~align:`Left w
+              (I.string A.(fg lightblack)
+                 (sanitize_text "   Ctrl-U withdraws the newest")) ]
+  in
+  let queue_h = List.length queue_rows in
+  let body_h = max 1 (room - header_h - composer_h - menu_h - queue_h) in
   (* v0.15.4: a drag keeps adding to [scroll]; without a ceiling, scrolling
      past the top left a large value behind and the next drag down appeared
      stuck. Clamp before drawing. *)
@@ -1246,7 +1330,14 @@ let frame (t : t) : Notty.image =
   let max_top = max 0 (total - body_h) in
   if t.scroll > max_top then t.scroll <- max_top;
   let body =
-    I.vcat (visible_lines t ~height:body_h)
+    let start, lines = visible_runs t ~height:body_h in
+    (* v0.15.6: remember which transcript lines this frame shows, so a mouse
+       row maps back to the line the pointer is over. *)
+    t.view <- Some (start, header_h, body_h);
+    I.vcat
+      (List.map
+         (fun (idx, runs) -> runs_to_image (selection_runs t idx runs))
+         lines)
     |> fun img ->
     I.vsnap ~align:`Top body_h
       (I.pad ~l:gutter ~r:0 img)
@@ -1344,13 +1435,33 @@ let frame (t : t) : Notty.image =
       | b, "" -> b
       | b, s -> b ^ " · " ^ s
     in
+    (* v0.15.6: while the pointer is selecting, the bar says what the drag
+       does instead of the usual facts. *)
+    let text =
+      if t.select_mode then "select · drag to copy · Ctrl-X/Esc exit"
+      else text
+    in
     let left = " " ^ scroll_hint ^ text ^ hint in
     (* v0.15.1: while a turn runs, the right edge says how to stop it. *)
     let left_w = text_width left in
     (* A long bar wins: the hint is dropped rather than clipping the facts. *)
     let right =
-      if t.busy = "" || left_w + text_width "esc interrupt " + 2 > w then ""
-      else "esc interrupt "
+      if t.busy = "" then ""
+      else begin
+        let wanted =
+          if t.turn_active && String.trim t.input <> "" then
+            [ "enter queue \xc2\xb7 esc interrupt "; "esc interrupt " ]
+          else [ "esc interrupt " ]
+        in
+        (* v0.15.6: the steer hint is longer; on a narrow bar the plain
+           interrupt hint is still better than nothing. *)
+        let rec pick = function
+          | [] -> ""
+          | s :: tl ->
+            if left_w + text_width s + 2 <= w then s else pick tl
+        in
+        pick wanted
+      end
     in
     let gap = max 1 (w - left_w - text_width right) in
     I.hsnap ~align:`Left w
@@ -1370,23 +1481,39 @@ let frame (t : t) : Notty.image =
           (l ^ String.concat "" (List.init inner_w (fun _ -> "─")) ^ r)
       in
       (* v0.15.1: one visual language for every box — the title carries the
-         accent and the weight, body rows are plain, the key legend is dim. *)
-      let row0 attr s =
+         accent and the weight, body rows are plain, the key legend is dim.
+         v0.15.6: rows carry their own style so a diff can be red/green. *)
+      let row0 (sty : Par_code_ui.style) s =
         I.hcat
           [ I.string A.(fg lightblack) "│"
-            ; I.hsnap ~align:`Left inner_w (I.string attr (sanitize_text s))
+            ; I.hsnap ~align:`Left inner_w
+                (I.string (attr_of_style sty) (sanitize_text s))
             ; I.string A.(fg lightblack) "│" ]
       in
-      let row = row0 A.(st bold) in
-      let title_row = row0 A.(fg cyan ++ st bold) in
-      let footer_row = row0 A.(fg lightblack) in
+      let styled_row (s, sty) = row0 sty s in
+      (* A body taller than the window would be clipped mid-line by vsnap;
+         keep the head and say how much is left. *)
+      let rows =
+        let cap = max 3 (body_h - 8) in
+        let n = List.length rows in
+        if n <= cap then rows
+        else begin
+          let rec take k l =
+            if k <= 0 then []
+            else match l with [] -> [] | h :: tl -> h :: take (k - 1) tl
+          in
+          take (cap - 1) rows
+          @ [ ( Printf.sprintf "  … (%d more lines)" (n - cap + 1),
+                Par_code_ui.style ~dim:true () ) ]
+        end
+      in
       let content =
         I.vcat
           (border "┌" "┐"
-           :: List.map title_row title
+           :: List.map styled_row title
            @ [ border "├" "┤" ]
-           @ List.map row rows
-           @ List.map footer_row footer
+           @ List.map styled_row rows
+           @ List.map styled_row footer
            @ [ border "└" "┘" ])
       in
       I.vsnap ~align:`Middle body_h (I.hsnap ~align:`Middle w content)
@@ -1401,10 +1528,15 @@ let frame (t : t) : Notty.image =
         List.filteri (fun i _ -> i >= first && i < first + visible) p.p_items
         |> List.mapi (fun j s ->
                let i = first + j in
-               (if i = p.p_index then " ▸ " else "   ") ^ s)
+               ( (if i = p.p_index then " ▸ " else "   ") ^ s,
+                 Par_code_ui.style ~bold:true () ))
       in
-      box ~title:[ " " ^ p.p_title ] ~rows:items
-        ~footer:[ "  ↑/↓ move · Enter select · Esc close" ]
+      box
+        ~title:[ (" " ^ p.p_title, Par_code_ui.style ~fg:Par_code_ui.Cyan ~bold:true ()) ]
+        ~rows:items
+        ~footer:
+          [ ("  ↑/↓ move · Enter select · Esc close",
+             Par_code_ui.style ~dim:true ()) ]
     | Some m, _ ->
       let inner_w = min (max 32 (w - 12)) 84 in
       let leading_spaces s =
@@ -1412,18 +1544,22 @@ let frame (t : t) : Notty.image =
         while !n < String.length s && s.[!n] = ' ' do incr n done;
         !n
       in
-      let wrapped s =
+      let wrapped_with (s, sty) =
         let lead = leading_spaces s in
         let body = String.sub s lead (String.length s - lead) in
         let indent = " " ^ String.make lead ' ' in
         wrap_text ~cols:(max 8 (inner_w - 1 - lead)) body
-        |> List.map (fun l -> indent ^ l)
+        |> List.map (fun l -> (indent ^ l, sty))
       in
+      let title_sty = Par_code_ui.style ~fg:Par_code_ui.Cyan ~bold:true () in
       let legend =
         String.concat "   " (List.map (fun (k, label) -> k ^ ": " ^ label) m.options)
       in
-      box ~title:(wrapped m.title) ~rows:(List.concat_map wrapped m.body)
-        ~footer:(wrapped legend)
+      box
+        ~title:(wrapped_with (m.title, title_sty))
+        ~rows:(List.concat_map wrapped_with m.body)
+        ~footer:
+          (wrapped_with (legend, Par_code_ui.style ~dim:true ()))
   in
   let header =
     if header_h = 0 then I.empty
@@ -1452,6 +1588,7 @@ let frame (t : t) : Notty.image =
            ("\xe2\x95\xb0" ^ String.concat "" (List.init w (fun _ -> "\xe2\x94\x80"))))
   in
   header <-> I.vsnap ~align:`Top body_h body <-> composer <-> I.vcat menu_rows
+  <-> I.vcat queue_rows
   <-> input_line <-> bottom_rule <-> status
 
 (** v0.14.0 S2: Ctrl-C follows Claude Code — with input it clears the line, with
@@ -1472,6 +1609,30 @@ let ctrl_c (t : t) =
     | _ ->
       t.last_ctrl_c <- Some now;
       t.status <- "press Ctrl-C again to exit"
+
+(* v0.15.6: selection mode for a terminal without a Shift key (a phone):
+   Ctrl-X turns a plain drag into a text selection. *)
+let toggle_select_mode (t : t) =
+  t.select_mode <- not t.select_mode;
+  if not t.select_mode then begin
+    t.sel <- None;
+    t.selecting <- false
+  end;
+  t.last_key <- ""
+
+(* v0.15.6: the echo a sent message leaves in the transcript, shared by the
+   normal submit path and a steer sent during a turn. *)
+let echo_user_line (t : t) (line : string) =
+  (if t.partial <> "" then end_line t);
+  (if t.tool_block <> [] then flush_tools t);
+  if String.trim line <> "" then begin
+    for _ = 1 to turn_gap do
+      append t (Par_code_ui.text "")
+    done;
+    append t
+      (Par_code_ui.textf "\xe2\x80\xba %s" line
+         ~style:(Par_code_ui.style ~fg:Par_code_ui.Green ~bold:true ()))
+  end
 
 let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
   let ctrl = List.mem `Ctrl mods in
@@ -1527,7 +1688,7 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
        end
      | None, _ -> ());
   if not t.csi_drop then
-  if t.editing then
+  if t.editing || t.turn_active then
     match k with
     | `Arrow `Up when t.menu <> [] ->
       t.menu_index <- max 0 (t.menu_index - 1)
@@ -1548,6 +1709,15 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
     | `Escape when t.menu <> [] ->
       t.menu <- [];
       t.menu_suppress <- true
+    | `Enter when t.turn_active ->
+      let line = t.input in
+      if String.trim line <> "" then begin
+        echo_user_line t line;
+        t.input <- "";
+        t.cursor <- 0;
+        history_push t line;
+        queue_prompt t line
+      end
     | `Enter when List.mem `Meta mods ->
       (* Alt+Enter: compose a multi-line message; Enter still submits. *)
       put_back t "\n"
@@ -1573,19 +1743,12 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
         (* The frame owns the screen: once the input line clears, the message
            the user just sent would be gone. Keep it in the transcript, the way
            a shell keeps the command line it echoed. *)
-        match String.trim line with
-        | "" -> ()
-        | _ ->
-          (* v0.15.1 visual pass: a blank line separates the end of one turn
-             from the next, and the echo is bold so it reads as the start of a
-             turn rather than as more output. *)
-          for _ = 1 to turn_gap do
-            append t (Par_code_ui.text "")
-          done;
-          append t
-            (Par_code_ui.textf "\xe2\x80\xba %s" line
-               ~style:(Par_code_ui.style ~fg:Par_code_ui.Green ~bold:true ()))
+        echo_user_line t line
       end
+    | `Escape when t.select_mode ->
+      t.select_mode <- false;
+      t.sel <- None;
+      t.selecting <- false
     | `Escape ->
       (* Hold the decision until the next key: a lone ESC is a key press, but
          the same byte starts every CSI sequence, and a terminal may write the
@@ -1601,6 +1764,8 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
     | `Delete -> delete_forward t
     | `Arrow `Left -> move_left t
     | `Arrow `Right -> move_right t
+    | `Arrow `Up when List.mem `Shift mods -> t.scroll <- t.scroll + 1
+    | `Arrow `Down when List.mem `Shift mods -> t.scroll <- max 0 (t.scroll - 1)
     | `Arrow `Up -> history_move t 1
     | `Arrow `Down -> history_move t (-1)
     | `Home -> t.cursor <- 0
@@ -1620,11 +1785,21 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
          end
        | 'a' -> t.cursor <- 0
        | 'e' -> t.cursor <- String.length t.input
-       | 'u' -> kill_to_start t
+       | 'u' ->
+         if t.turn_active && t.input = "" && t.queued <> [] then begin
+           match withdraw_queued t with
+           | Some line ->
+             append t
+               (Par_code_ui.textf "  \xe2\x8f\xb3 withdrawn: %s"
+                  (preview_text line)
+                  ~style:(Par_code_ui.style ~dim:true ()))
+           | None -> ()
+         end else kill_to_start t
        | 'k' -> kill_to_end t
        | 'w' -> kill_word t
        | 'r' -> search_begin t
        | 'o' -> toggle_last_block t
+       | 'x' -> toggle_select_mode t
        | _ -> ())
     | `ASCII c ->
       (* Control keys arrive as bare ASCII codes (Tab = 0x09, Ctrl-C = 0x03),
@@ -1666,6 +1841,11 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
     | _ -> ()
   else
     match k with
+    | `ASCII ('x' | 'X') when List.mem `Ctrl mods -> toggle_select_mode t
+    | `Escape when t.select_mode ->
+      t.select_mode <- false;
+      t.sel <- None;
+      t.selecting <- false
     | `ASCII ('q' | 'Q') -> t.running <- false
     | `ASCII 'j' -> t.scroll <- max 0 (t.scroll - 1)
     | `ASCII 'k' -> t.scroll <- t.scroll + 1
@@ -1683,11 +1863,17 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
   end
 
 let frame_sig (t : t) : string =
-  Printf.sprintf "%d|%d|%d|%d|%s|%d|%d|%s|%s|%s|%b|%b|%b"
+  let sel =
+    match t.sel with
+    | None -> ""
+    | Some ((a, b), (c, d)) -> Printf.sprintf "%d,%d:%d,%d" a b c d
+  in
+  Printf.sprintf "%d|%d|%d|%d|%s|%d|%d|%s|%s|%s|%b|%b|%b|%s|%b|%d|%b"
     (List.length t.transcript) (String.length t.partial) t.scroll
     (List.length t.tool_block) t.status t.menu_index (List.length t.menu)
     t.activity t.header t.composer_label (t.picker <> None)
-    (t.modal <> None) t.editing
+    (t.modal <> None) t.editing sel t.select_mode
+    (List.length t.queued) t.turn_active
 
 let render (t : t) =
   t.last_sig <- frame_sig t;
@@ -1702,18 +1888,83 @@ let render (t : t) =
     input line; every other key is ignored. Modals keep their own reader. *)
 (* One place for pointer scrolling: the wheel steps by three lines, a drag
    scrolls by however far the finger moved (content follows the finger). *)
+(* v0.15.6: turn a mouse position into (transcript line, display column).
+   [view] is set every frame; rows outside the body clamp to its edges so a
+   drag can run past the bottom of the screen and still extend. *)
+let body_point (t : t) (x, y) : Par_code_selection.point option =
+  match t.view with
+  | None -> None
+  | Some (first, top, height) ->
+    let y = max top (min (top + height - 1) y) in
+    Some (first + (y - top), max 0 (x - gutter))
+
+let selection_text (t : t) : string =
+  match t.sel with
+  | None -> ""
+  | Some (a, b) ->
+    let lines = all_runs t ~cols:(content_cols t) in
+    Par_code_selection.text_of_lines lines a b
+
+let copy_selection (t : t) =
+  match t.sel with
+  | None -> ()
+  | Some (a, b) when a = b -> t.sel <- None
+  | Some (a, b) ->
+    let text = selection_text t in
+    if text = "" then t.sel <- None
+    else begin
+      (match Par_code_clipboard.copy_any text with
+       | Ok () ->
+         append t
+           (Par_code_ui.textf "  \xe2\x9c\x93 copied %d characters"
+              (Par_code_selection.char_count text)
+              ~style:(Par_code_ui.style ~fg:Par_code_ui.Green ~dim:true ()))
+       | Error e ->
+         append t
+           (Par_code_ui.textf "  \xe2\x9a\xa0 clipboard unavailable: %s" e
+              ~style:(Par_code_ui.style ~fg:Par_code_ui.Yellow ())));
+      t.sel <- Some (a, b)
+    end
+
 let handle_mouse (t : t) (m : Notty.Unescape.mouse) =
   match m with
   | `Press (`Scroll `Up), _, _ -> t.scroll <- t.scroll + 3
   | `Press (`Scroll `Down), _, _ -> t.scroll <- max 0 (t.scroll - 3)
-  | (`Press _ | `Drag), (_, y), _ ->
-    (match t.drag_y with
-     | Some last ->
-       let delta = y - last in
-       if delta <> 0 then t.scroll <- max 0 (t.scroll + delta)
-     | None -> ());
-    t.drag_y <- Some y
-  | `Release, _, _ -> t.drag_y <- None
+  | `Press `Left, pos, mods ->
+    if t.select_mode || List.mem `Shift mods then begin
+      (match body_point t pos with
+       | Some p ->
+         t.sel <- Some (p, p);
+         t.selecting <- true;
+         t.drag_y <- None
+       | None -> ())
+    end else begin
+      (match t.drag_y with
+       | Some last ->
+         let delta = snd pos - last in
+         if delta <> 0 then t.scroll <- max 0 (t.scroll + delta)
+       | None -> ());
+      t.drag_y <- Some (snd pos)
+    end
+  | `Drag, pos, _ ->
+    if t.selecting then begin
+      (match t.sel, body_point t pos with
+       | Some (a, _), Some p -> t.sel <- Some (a, p)
+       | _ -> ())
+    end else begin
+      (match t.drag_y with
+       | Some last ->
+         let delta = snd pos - last in
+         if delta <> 0 then t.scroll <- max 0 (t.scroll + delta)
+       | None -> ());
+      t.drag_y <- Some (snd pos)
+    end
+  | `Release, _, _ ->
+    if t.selecting then begin
+      t.selecting <- false;
+      copy_selection t
+    end else t.drag_y <- None
+  | _ -> ()
 
 (* v0.15.4: a font-size change makes the terminal send SIGWINCH, and an
    interrupted [Unix.select] raises EINTR. That used to escape as an uncaught
@@ -1731,23 +1982,32 @@ let poll_interrupt (t : t) : bool =
     let read_fd, _ = Notty_unix.Term.fds t.term in
     let hit = ref false in
     let page = 10 in
+    (* v0.15.6: a modal opened by the turn itself takes over the keyboard; the
+       ticker must stop reading so the two event loops cannot fight over the
+       terminal. *)
+    let failed = ref false in
     while
-      t.running
+      t.running && (not !failed) && t.modal = None
       && (Notty_unix.Term.pending t.term || select_ready read_fd 0.0)
     do
-      (match Notty_unix.Term.event t.term with
-       | `Key (`Escape, _) -> hit := true
-       | `Key (`ASCII 'c', mods) when List.mem `Ctrl mods -> hit := true
-       (* v0.15.2: a running turn used to swallow these, which is exactly when
-          the transcript is long enough to want them. *)
-       | `Key (`Page `Up, _) -> t.scroll <- t.scroll + page
-       | `Key (`Page `Down, _) -> t.scroll <- max 0 (t.scroll - page)
-       | `Key (`Arrow `Up, mods) when List.mem `Shift mods ->
-         t.scroll <- t.scroll + 1
-       | `Key (`Arrow `Down, mods) when List.mem `Shift mods ->
-         t.scroll <- max 0 (t.scroll - 1)
-       | `Mouse m -> handle_mouse t m
-       | _ -> ())
+      (try
+         (match Notty_unix.Term.event t.term with
+          | `Key ((`Escape, _) as k) when not t.select_mode ->
+            ignore k;
+            hit := true
+          | `Key ((`ASCII c, mods) as k)
+            when (c = 'c' || c = 'C') && List.mem `Ctrl mods ->
+            ignore k;
+            hit := true
+          | `Key k ->
+            (* v0.15.6: typing is allowed during a turn; Enter hands the line to
+               the steer hook instead of the (idle) REPL reader. *)
+            handle_key t ~page k
+          | `Mouse m -> handle_mouse t m
+          | _ -> ())
+       with exn ->
+         failed := true;
+         Printf.eprintf "[tui] poll: %s\n%!" (Printexc.to_string exn))
     done;
     !hit
   end
@@ -1854,7 +2114,15 @@ let read_line (t : t) ~(prompt : string) : string option =
 let stop (t : t) = t.running <- false
 
 (* In-frame modal. Returns the chosen key, or None on Esc. *)
-let ask (t : t) ~(title : string) ~(body : string list)
+let rec ask (t : t) ~(title : string) ~(body : string list)
+    ~(options : (string * string) list) : string option =
+  let bold = Par_code_ui.style ~bold:true () in
+  ask_styled t ~title ~body:(List.map (fun s -> (s, bold)) body) ~options
+
+(** v0.15.6: the same modal with per-line styles, used by the edit approval so
+    a diff reads red/green. *)
+and ask_styled (t : t) ~(title : string)
+    ~(body : (string * Par_code_ui.style) list)
     ~(options : (string * string) list) : string option =
   t.modal <- Some { title; body; options };
   t.modal_answer <- None;

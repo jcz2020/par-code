@@ -227,24 +227,42 @@ let record (t : t) (evt : tool_event) : action =
       t.action_kind <- kind;
       t.action_count <- 0;
       Continue
-    end else if kind = t.action_kind && t.action_count > 0 then begin
-      t.action_count <- t.action_count + 1;
-      let n = t.action_count in
-      if n >= 3 * thr.action_streak && not t.action_aborted then begin
-        t.action_aborted <- true;
-        Abort (Printf.sprintf "Action streak signal: %d consecutive %s actions — stopping here" n kind)
-      end else if n >= 2 * thr.action_streak && not t.action_judged then begin
-        t.action_judged <- true;
-        Force_judge (Printf.sprintf "Action streak signal: %d consecutive %s actions — forcing judge evaluation" n kind)
-      end else if n >= thr.action_streak && not t.action_nudged then begin
-        t.action_nudged <- true;
-        Nudge (Printf.sprintf "Action streak signal: %d consecutive %s actions — reassess your approach" n kind)
-      end else
-        Continue
     end else begin
-      t.action_kind <- kind;
-      t.action_count <- 1;
-      Continue
+      (* v0.15.7: a streak means *the same call again*, not simply "a tool that
+         is neither bash nor edit". Testing a handful of distinct utilities
+         (echo, get_time, calculator, …) used to read as four consecutive
+         "other actions". The key includes the arguments, so a model doing
+         different work each time is not a loop, while an identical retry is. *)
+      let key =
+        evt.tool_name ^ "\000" ^ Yojson.Safe.to_string evt.args_json
+      in
+      if key = t.action_kind && t.action_count > 0 then begin
+        t.action_count <- t.action_count + 1;
+        let n = t.action_count in
+        let label =
+          Printf.sprintf "%d consecutive %s calls with identical arguments"
+            n evt.tool_name
+        in
+        if n >= 3 * thr.action_streak && not t.action_aborted then begin
+          t.action_aborted <- true;
+          Abort (Printf.sprintf "Action streak signal: %s — stopping here" label)
+        end else if n >= 2 * thr.action_streak && not t.action_judged then begin
+          t.action_judged <- true;
+          Force_judge
+            (Printf.sprintf "Action streak signal: %s — forcing judge evaluation"
+               label)
+        end else if n >= thr.action_streak && not t.action_nudged then begin
+          t.action_nudged <- true;
+          Nudge
+            (Printf.sprintf "Action streak signal: %s — reassess your approach"
+               label)
+        end else
+          Continue
+      end else begin
+        t.action_kind <- key;
+        t.action_count <- 1;
+        Continue
+      end
     end
   in
 

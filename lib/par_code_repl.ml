@@ -119,9 +119,16 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
     Par_code_screen.install_cleanup s;
     Par_code_screen.load_history s
       ~path:(Filename.concat (Par_code_config.config_dir ()) "history");
+    (* v0.15.6: Enter during a turn queues the line in the screen; the tool
+       event wrapper below hands it to the runtime so the model sees it at the
+       next step. *)
     Par_code_ui.set_modal_hook
       (Some (fun ~title ~body ~options ->
            Par_code_screen.ask s ~title ~body ~options));
+    (* v0.15.6: the edit approval keeps its diff colours. *)
+    Par_code_ui.set_styled_modal_hook
+      (Some (fun ~title ~body ~options ->
+           Par_code_screen.ask_styled s ~title ~body ~options));
     s
   in
   let ui =
@@ -169,27 +176,30 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
             let i = ref 0 in
             while not !finished do
               (try Eio.Time.sleep clock 0.15 with _ -> ());
-              if not !finished then begin
-                incr i;
-                (if Par_code_screen.poll_interrupt screen then
-                   match !turn_token_ref with
-                   | Some tok ->
-                     cancel_pending := true;
-                     Par.Cancellation.request_cancel tok Types.User_cancelled
-                   | None -> ());
-                let elapsed = Unix.gettimeofday () -. start in
-                let activity = Par_code_screen.activity screen in
-                let label =
-                  frames.(!i mod Array.length frames)
-                  ^ (if activity = "" then "" else " " ^ activity)
-                in
-                (* v0.15.1: the clock only appears once a turn actually takes
-                   time; a fast turn should not flash "0s"/"1s". *)
-                Par_code_screen.set_busy screen
-                  (if elapsed < 2.0 then label
-                   else Printf.sprintf "%s %.0fs" label elapsed);
-                (try Par_code_screen.render screen with _ -> ())
-              end
+              if not !finished then
+                (* v0.15.6: one bad tick must not kill the only reader the turn
+                   has. Log it and keep the loop alive. *)
+                (try
+                   incr i;
+                   (if Par_code_screen.poll_interrupt screen then
+                      match !turn_token_ref with
+                      | Some tok ->
+                        cancel_pending := true;
+                        Par.Cancellation.request_cancel tok Types.User_cancelled
+                      | None -> ());
+                   let elapsed = Unix.gettimeofday () -. start in
+                   let activity = Par_code_screen.activity screen in
+                   let label =
+                     frames.(!i mod Array.length frames)
+                     ^ (if activity = "" then "" else " " ^ activity)
+                   in
+                   Par_code_screen.set_busy screen
+                     (if elapsed < 2.0 then label
+                      else Printf.sprintf "%s %.0fs" label elapsed);
+                   (try Par_code_screen.render screen with _ -> ())
+                 with exn ->
+                   Printf.eprintf "[tui] progress tick: %s\n%!"
+                     (Printexc.to_string exn))
             done)
      | None -> ());
     Fun.protect
@@ -335,7 +345,17 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
         | Par_code_doom_loop.Force_judge _ -> doom_force_judge := true
         | _ -> ()) ()
   in
-  let on_tool_event = make_tool_event ~rt () in
+  let on_tool_event_base = make_tool_event ~rt () in
+  (* v0.15.6: a tool boundary is the cheapest point to hand queued prompts to
+     the runtime: the engine drains steering at the start of the next loop, and
+     the screen no longer needs to know about the runtime. *)
+  let on_tool_event ev =
+    on_tool_event_base ev;
+    (match ev with
+     | Types.Tool_invoked _ | Types.Tool_completed _ | Types.Tool_failed _ ->
+       List.iter (Runtime.steer rt) (Par_code_screen.take_queued screen)
+     | _ -> ())
+  in
   (* Replaying the winning candidate's events must render them (and feed the
      doom detector) without recording their tool invocations a second time. *)
   let replay_tool_event = make_tool_event () in
@@ -432,6 +452,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
              cancel_pending := false;
              in_invoke := true;
              let turn_cancelled = ref false and turn_errored = ref false and turn_exn = ref false in
+             let forced_cancel = ref false in
              let stream_cancelled = ref false in
             (try
               (match !conv with
@@ -531,22 +552,53 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                  let turn_token =
                    Par.Cancellation.create_token (Par.Runtime.cancellation_root rt) in
                  turn_token_ref := Some turn_token;
+                 Par_code_screen.set_turn_active screen true;
                  Fun.protect
-                   ~finally:(fun () -> turn_token_ref := None; in_invoke := false)
+                   ~finally:(fun () ->
+                     turn_token_ref := None;
+                     in_invoke := false;
+                     Par_code_screen.set_turn_active screen false)
                    (fun () ->
                       let single msg =
-                        Runtime.invoke rt
-                          ~agent_id:(Par_code_mode.agent_id_for !Par_code_mode.current)
-                          ~message:msg
-                          ?conversation:!conv
-                          ~on_tool_event
-                          ~on_chunk:(Some stream_cb)
-                          ~enable_handoff:true
-                          ?system_prompt_appendix:turn_appendix
-                          ?skills
-                          ~cancellation_token:turn_token
-                          ~durable:true
-                          ()
+                        let invoke () =
+                          Runtime.invoke rt
+                            ~agent_id:(Par_code_mode.agent_id_for !Par_code_mode.current)
+                            ~message:msg
+                            ?conversation:!conv
+                            ~on_tool_event
+                            ~on_chunk:(Some stream_cb)
+                            ~enable_handoff:true
+                            ?system_prompt_appendix:turn_appendix
+                            ?skills
+                            ~cancellation_token:turn_token
+                            ~durable:true
+                            ()
+                        in
+                        (* v0.15.7: the cancellation token is only a flag; a
+                           provider that goes silent (no bytes at all) never
+                           looks at it, so Esc used to do nothing until the
+                           socket returned. Racing the invoke against the
+                           interrupt flag lets Eio cancel the blocked read
+                           itself, which is what makes Esc immediate. *)
+                        match Par_code_setup.clock () with
+                        | None -> invoke ()
+                        | Some clock ->
+                          let result = ref None in
+                          Eio.Fiber.first
+                            (fun () -> result := Some (invoke ()))
+                            (fun () ->
+                               while not !cancel_pending do
+                                 Eio.Time.sleep clock 0.05
+                               done);
+                          (match !result with
+                           | Some r -> r
+                           | None ->
+                             forced_cancel := true;
+                             Error
+                               ( Types.Cancelled Types.User_cancelled
+                               , (match !conv with
+                                  | Some c -> c
+                                  | None -> { Types.messages = []; metadata = [] }) ))
                       in
                       if not max_turn then single message
                       else begin
@@ -675,10 +727,19 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                 (match invoke_result with
                 | Error (Types.Cancelled reason, recovered_conv) ->
                    turn_cancelled := true;
-                   conv := Some (Par_code_payload.sanitize recovered_conv);
+                   (* A forced cancel (Eio cancelling a silent provider read)
+                      has no engine-recovered conversation: [recovered_conv]
+                      is the pre-turn one. Saving it would mint an empty
+                      session, so keep the old state untouched. *)
+                   if not !forced_cancel then begin
+                     conv := Some (Par_code_payload.sanitize recovered_conv)
+                   end;
                   Par_code_ui.flush_markdown ui;
-                  let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in ();
-                  incr turn_count;
+                  (if not !forced_cancel then
+                     let _ =
+                       Runtime.save_conversation rt ?conversation:!conv ~scope ()
+                     in
+                     incr turn_count);
                   (match Par_code_chain.cancel_outcome reason with
                    | Par_code_chain.Pause_goal ->
                      (match !Par_code_goal.current with
@@ -899,7 +960,26 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
       | Par_code_chain.Chain_stop -> ()
       | Par_code_chain.Chain_continue next -> run_chain next)
    in
+  (* v0.15.6: prompts typed while a turn was running live in the screen until
+     delivered. At the start of every prompt hand them to the runtime, then run
+     whatever the runtime has queued as a follow-up turn, so nothing typed is
+     dropped even when the turn ended before a tool boundary. *)
+  let rec deliver_queued_turns (fuel : int) : unit =
+    if fuel > 0 then begin
+      let local = Par_code_screen.take_queued screen in
+      List.iter (Runtime.steer rt) local;
+      match Runtime.drain_steering rt with
+      | [] -> ()
+      | msgs ->
+        let message = String.concat "\n\n" msgs in
+        (match with_progress (fun () -> execute_turn ~chained:true message) with
+         | Par_code_chain.Chain_stop -> ()
+         | Par_code_chain.Chain_continue next -> run_chain next);
+        deliver_queued_turns (fuel - 1)
+    end
+  in
   let rec loop () =
+    deliver_queued_turns 8;
     (* Flush first so output rendered by a slash command (which does not flush)
        is on screen before the frame redraws around the input line. *)
     flush stdout;

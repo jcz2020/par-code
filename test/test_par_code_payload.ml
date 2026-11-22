@@ -137,6 +137,70 @@ let test_duplicate_result_dropped () =
   in
   Alcotest.(check int) "one result kept" 3 (List.length out.Types.messages)
 
+let test_cap_large_string () =
+  let big = String.make 100_000 'x' in
+  match Par_code_payload.cap_handler_result (Types.Success (`String big)) with
+  | Types.Success (`String s) ->
+    Alcotest.(check bool) "bounded length" true
+      (String.length s <= Par_code_payload.max_tool_result_chars + 80);
+    Alcotest.(check bool) "says truncated" true
+      (Astring.String.is_infix ~affix:"truncated" s)
+  | _ -> Alcotest.fail "expected a capped string"
+
+let test_cap_small_string_untouched () =
+  let small = "hello" in
+  match Par_code_payload.cap_handler_result (Types.Success (`String small)) with
+  | Types.Success (`String s) -> Alcotest.(check string) "unchanged" small s
+  | _ -> Alcotest.fail "expected the string back"
+
+let test_cap_list_drops_tail () =
+  let big = String.make 100_000 'y' in
+  match
+    Par_code_payload.cap_handler_result
+      (Types.Success (`List [ `String "first"; `String big; `String "last" ]))
+  with
+  | Types.Success (`List items) ->
+    Alcotest.(check bool) "tail bounded" true (List.length items <= 3);
+    let any_truncated =
+      List.exists
+        (fun j ->
+          Astring.String.is_infix ~affix:"truncated" (Yojson.Safe.to_string j))
+        items
+    in
+    Alcotest.(check bool) "a truncation marker is present" true any_truncated
+  | _ -> Alcotest.fail "expected a capped list"
+
+let test_cap_strips_control_chars () =
+  match
+    Par_code_payload.cap_handler_result
+      (Types.Success (`String "a\000b\001c\nok"))
+  with
+  | Types.Success (`String s) ->
+    Alcotest.(check string) "NUL and C0 dropped" "abc\nok" s
+  | _ -> Alcotest.fail "expected the string back"
+
+let test_sanitize_caps_tool_message () =
+  let big = String.make 100_000 'z' in
+  let tool_msg =
+    { Types.role = Types.Tool
+    ; content_blocks = [ Types.Text_block { text = big; cache_control = None } ]
+    ; tool_calls = None
+    ; tool_call_id = Some "call_1"
+    ; name = None }
+  in
+  let out =
+    Par_code_payload.sanitize
+      (conv
+         [ msg Types.System
+         ; msg ~tool_calls:[ tc "call_1" (`Assoc []) ] Types.Assistant
+         ; tool_msg ])
+  in
+  match List.rev out.Types.messages with
+  | { Types.content_blocks = [ Types.Text_block { text; _ } ]; _ } :: _ ->
+    Alcotest.(check bool) "tool text capped" true
+      (String.length text < String.length big)
+  | _ -> Alcotest.fail "expected the tool message to survive"
+
 let () =
   Alcotest.run "payload"
     [ ( "sanitize"
@@ -153,5 +217,13 @@ let () =
         ; Alcotest.test_case "duplicate result" `Quick
             test_duplicate_result_dropped
         ; Alcotest.test_case "idempotent" `Quick test_idempotent
+        ] )
+    ; ( "cap"
+      , [ Alcotest.test_case "long string capped" `Quick test_cap_large_string
+        ; Alcotest.test_case "short string untouched" `Quick test_cap_small_string_untouched
+        ; Alcotest.test_case "list tail dropped" `Quick test_cap_list_drops_tail
+        ; Alcotest.test_case "control chars stripped" `Quick test_cap_strips_control_chars
+        ; Alcotest.test_case "sanitize caps tool text" `Quick
+            test_sanitize_caps_tool_message
         ] )
     ]

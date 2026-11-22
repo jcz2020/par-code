@@ -134,6 +134,31 @@ let test_research_tools_never_trip_streak () =
   Alcotest.(check bool) "searches and fetches never trip action streak" true
     (!r = Continue)
 
+let test_distinct_other_tools_never_trip_streak () =
+  (* A user asking "test every tool" produces a run of different utilities.
+     They share the "other" bucket, so the old kind-based counter read them as
+     a loop and warned at four. Only the same call repeated is a streak. *)
+  let d = create ~bash_retries:100 ~edit_matches:100 ~action_streak:2 () in
+  let r = ref Continue in
+  List.iter
+    (fun n -> r := record d (make_evt n))
+    [ "echo"; "get_time"; "calculator"; "generate_uuid"; "json_format";
+      "convert_temperature"; "url_encode"; "recall_memory"; "search_history" ];
+  Alcotest.(check bool) "distinct tools never trip action streak" true
+    (!r = Continue)
+
+let test_same_tool_different_args_not_a_streak () =
+  let d = create ~bash_retries:100 ~edit_matches:100 ~action_streak:2 () in
+  ignore
+    (record d
+       (make_evt "calculator" ~args:(`Assoc [ ("expression", `String "2 + 3") ])));
+  let r =
+    record d
+      (make_evt "calculator" ~args:(`Assoc [ ("expression", `String "3 * 4") ]))
+  in
+  Alcotest.(check bool) "same tool, different arguments is new work" true
+    (r = Continue)
+
 let test_custom_thresholds () =
   let d = create ~bash_retries:2 ~edit_matches:1 ~action_streak:3 () in
   let _ = record d (make_bash_evt "pytest") in
@@ -209,12 +234,16 @@ let () =
         Alcotest.test_case "apply_patch counts as an edit" `Quick test_apply_patch_counts_as_edit;
         Alcotest.test_case "failed edits ignored" `Quick test_failed_edits_never_abort ];
       "action_streak",
-      [ Alcotest.test_case "4 same-kind nudges" `Quick test_action_streak_nudge;
+      [ Alcotest.test_case "4 identical calls nudge" `Quick test_action_streak_nudge;
         Alcotest.test_case "info resets streak" `Quick test_info_resets_action_streak;
         Alcotest.test_case "bash is exempt" `Quick test_action_streak_ignores_bash;
         Alcotest.test_case "edits are exempt" `Quick test_action_streak_ignores_edits;
         Alcotest.test_case "research tools are exempt" `Quick
-          test_research_tools_never_trip_streak ];
+          test_research_tools_never_trip_streak;
+        Alcotest.test_case "distinct tools are not a loop" `Quick
+          test_distinct_other_tools_never_trip_streak;
+        Alcotest.test_case "same tool, new arguments" `Quick
+          test_same_tool_different_args_not_a_streak ];
       "config_and_state",
       [ Alcotest.test_case "custom thresholds" `Quick test_custom_thresholds;
         Alcotest.test_case "action count tracks" `Quick test_action_count_tracks ];

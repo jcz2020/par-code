@@ -237,6 +237,12 @@ let set_model (model : string) : (unit, string) result =
   | Some f -> f model
   | None -> Error "runtime not ready"
 
+(* v0.15.7: every host-registered tool gets the same output budget. A grep
+   hit can be a whole minified file or a binary blob; the SDK stores results
+   verbatim, so one such result grew a session to 649 MB. *)
+let capped_handler (tb : Types.tool_binding) input tok =
+  Par_code_payload.cap_handler_result (tb.handler input tok)
+
 let setup_runtime (cfg : Par_code_config.config) ~f =
   ensure_rng ();
   let pers = make_persistence_service cfg in
@@ -295,7 +301,7 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
          ~name:tb.descriptor.Types.name
          ~description:tb.descriptor.Types.description
          ~input_schema:tb.descriptor.Types.input_schema
-         ~handler:tb.handler
+         ~handler:(capped_handler tb)
          ?permission:(match tb.descriptor.Types.permission with Types.Allow -> None | p -> Some p)
          ?timeout:tb.descriptor.Types.timeout
          ?concurrency_limit:tb.descriptor.Types.concurrency_limit
@@ -315,7 +321,7 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
             ~name:tb.descriptor.Types.name
             ~description:tb.descriptor.Types.description
             ~input_schema:tb.descriptor.Types.input_schema
-            ~handler:tb.handler
+            ~handler:(capped_handler tb)
             ?permission:(match tb.descriptor.Types.permission with Types.Allow -> None | p -> Some p)
             ?timeout:tb.descriptor.Types.timeout
             ?concurrency_limit:tb.descriptor.Types.concurrency_limit
@@ -335,7 +341,7 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
          ~name:tb.descriptor.Types.name
          ~description:tb.descriptor.Types.description
          ~input_schema:tb.descriptor.Types.input_schema
-         ~handler:tb.handler
+         ~handler:(capped_handler tb)
          ?permission:(match tb.descriptor.Types.permission with Types.Allow -> None | p -> Some p)
          ?timeout:tb.descriptor.Types.timeout
          ?concurrency_limit:tb.descriptor.Types.concurrency_limit
@@ -361,7 +367,7 @@ let setup_runtime (cfg : Par_code_config.config) ~f =
          ~name:tb.descriptor.Types.name
          ~description:tb.descriptor.Types.description
          ~input_schema:tb.descriptor.Types.input_schema
-         ~handler:tb.handler
+         ~handler:(capped_handler tb)
          ?permission:(match tb.descriptor.Types.permission with Types.Allow -> None | p -> Some p)
          ?timeout:tb.descriptor.Types.timeout
          ?concurrency_limit:tb.descriptor.Types.concurrency_limit
@@ -701,6 +707,38 @@ This is the LAST thing you do. The user will be asked to confirm.
     ];
     Runtime.register_tool_call_hook rt
       (Par_code_permissions.hook (Par_code_permissions.load ()));
+    (* v0.15.6: a file-changing tool shows what it will do before it does it.
+       The hook runs before the handler and sees the full input, so the diff is
+       built from the arguments plus the file on disk. *)
+    Runtime.register_tool_call_hook rt (fun (ctx : Hook.tool_call_context) ->
+        match
+          Par_code_edit_preview.for_tool ~cwd:(Sys.getcwd ())
+            ~tool:ctx.tool_name ~input:ctx.input
+        with
+        | None -> Hook.Allow
+        | Some proposal ->
+          if not (Par_code_ui.modal_installed ()) then Hook.Allow
+          else begin
+            let policy =
+              match Par_code_config.load () with
+              | Some (c : Par_code_config.config) -> c.edit_approval
+              | None -> "ask"
+            in
+            if not (Par_code_edit_preview.should_ask ~policy) then Hook.Allow
+            else
+              (match
+                 Par_code_ui.prompt_edit ~backend:(Lazy.force ui)
+                   ~title:proposal.Par_code_edit_preview.title
+                   ~lines:proposal.Par_code_edit_preview.body ()
+               with
+               | Some "y" -> Hook.Allow
+               | Some "a" ->
+                 Par_code_edit_preview.allow_session := true;
+                 Hook.Allow
+               | _ ->
+                 Hook.Block
+                   { reason = "the user declined this file change" })
+          end);
     (* v0.15.3: tool events carry no arguments, so the transcript would only
        ever say "read (1.2ms)". Remember each call's input so the renderer can
        describe what was asked for; the queue is per tool, in call order. *)

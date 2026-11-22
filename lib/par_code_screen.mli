@@ -61,6 +61,23 @@ val set_composer_label : t -> string -> unit
 
 val set_status : t -> string -> unit
 
+val set_turn_active : t -> bool -> unit
+(** v0.15.6: mark a turn as running. While it is, the input line stays
+    editable and Enter queues the line instead of submitting to the REPL
+    reader. *)
+
+val queue_prompt : t -> string -> unit
+(** Remember a line typed during a turn; the dock shows it and the REPL
+    delivers it (inside the turn when possible, otherwise as the next turn). *)
+
+val take_queued : t -> string list
+(** Remove and return every queued prompt, oldest first. *)
+
+val withdraw_queued : t -> string option
+(** Remove and return the newest queued prompt (Ctrl-U). *)
+
+val queued_count : t -> int
+
 val set_busy : t -> string -> unit(** Transient text (a spinner, elapsed time) shown before the status line while
     a turn runs. Empty clears it. *)
 
@@ -97,6 +114,14 @@ val ask :
   string option
 (** In-frame modal: returns the key the user pressed (a member of [options]),
     or [None] when Esc dismisses it. Blocks until answered. *)
+
+val ask_styled :
+  t ->
+  title:string ->
+  body:(string * Par_code_ui.style) list ->
+  options:(string * string) list ->
+  string option
+(** v0.15.6: the modal with per-line styles (red/green diff rows). *)
 
 val load_history : t -> path:string -> unit
 (** Load prompt history from [path] (oldest line first on disk) and remember it

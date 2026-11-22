@@ -356,6 +356,19 @@ let modal_hooks :
 
 let set_modal_hook f = modal_hooks := f
 
+(* v0.15.6: the edit approval needs per-line styles for the diff. *)
+let styled_modal_hooks :
+  (title:string -> body:(string * style) list ->
+   options:(string * string) list -> string option) option ref =
+  ref None
+
+let set_styled_modal_hook f = styled_modal_hooks := f
+
+(** True when a screen is driving the UI. Non-interactive entry points
+    ([par ask], pipes) have no way to answer a prompt, so the edit approval is
+    skipped there instead of blocking on a tty that may not exist. *)
+let modal_installed () = !modal_hooks <> None || !styled_modal_hooks <> None
+
 (** Render + FLUSH + read one line from /dev/tty (stdin fallback), for the CLI
     flows that ask a question outside the frame.
     The flush is load-bearing: without it the prompt stays in stdout's
@@ -414,6 +427,23 @@ let prompt_confirm ?(backend=create_backend ()) ?style msg =
     (match style with
      | Some s -> render backend (text ~style:s msg)
      | None -> render backend (text msg));
+    prompt_read ~backend ()
+
+(** v0.15.6: the file-change approval. The body carries its own styles so the
+    diff keeps red/green; without a screen hook it degrades to plain lines on
+    the backend. *)
+let prompt_edit ?(backend=create_backend ()) ~(title : string)
+    ~(lines : (string * style) list) () : string option =
+  match !styled_modal_hooks with
+  | Some ask ->
+    ask ~title ~body:lines
+      ~options:
+        [ ("y", "allow once"); ("a", "allow edits this session");
+          ("n", "deny") ]
+  | None ->
+    List.iter
+      (fun (line, sty) -> render_line backend (text ~style:sty line))
+      lines;
     prompt_read ~backend ()
 
 (* B. LLM chunk rendering *)
@@ -1049,6 +1079,9 @@ let render_help backend =
            item "Ctrl-C" "clear the line; press twice to exit";
            item "Ctrl-Left/Right" "move by word (Alt+Backspace deletes one)";
            item "Ctrl-R" "search the prompt history backwards";
+           item "Ctrl-X" "select mode: drag over the transcript to copy (Shift+drag also works)";
+           item "Enter (while a turn runs)" "queue the line; it is sent at the next step or as the next turn";
+           item "Ctrl-U (empty line, turn running)" "withdraw the newest queued message";
            item "!command" "run a command directly (no model round-trip)";
            item "Ctrl-O" "expand or fold the last block of tool calls";
            item "PgUp/PgDn" "scroll the transcript (wheel works too)" ])

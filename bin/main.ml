@@ -19,11 +19,15 @@ let cmd_chat
       ~event_retention_days:retention_days_opt
       ()
   in
+  let continue_opt =
+    match continue_id_opt with
+    | [] -> None
+    | "" :: _ -> Some ""
+    | id :: _ -> Some id
+  in
   let resume_target : Par_code_repl.resume_target =
-    match resume_opt, continue_id_opt with
-    | true, _ -> Par_code_repl.Resume_most_recent
-    | false, Some id -> Par_code_repl.Resume_of id
-    | false, None -> Par_code_repl.No_prior
+    Par_code_repl_io.resume_target_of_cli ~resume:resume_opt
+      ~continue:continue_opt
   in
   Par_code_setup.setup_runtime cfg ~f:(fun rt mem_db ->
     (* No terminal to paint a frame on: treat stdin as the question and answer in
