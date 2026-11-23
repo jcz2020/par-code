@@ -1701,8 +1701,8 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
     (* A modal owns the keyboard: only its keys, Esc, and Ctrl-C matter. *)
     (match k, mods with
      | `ASCII c, mods
-       when List.mem `Ctrl mods
-            && (c = 'c' || c = 'C' || c = '\003') ->
+       when ((List.mem `Ctrl mods && (c = 'c' || c = 'C'))
+              || c = '\003') ->
        (* Ctrl-C denies this step and cancels the active run (a turn, or a
           command like /distill that raised the modal). *)
        if t.turn_active || t.busy <> "" then begin
@@ -2069,7 +2069,8 @@ let poll_interrupt ?(handle_keys = true) (t : t) : bool =
             ignore k;
             hit := true
           | `Key ((`ASCII c, mods) as k)
-            when (c = 'c' || c = 'C') && List.mem `Ctrl mods ->
+            when ((c = 'c' || c = 'C') && List.mem `Ctrl mods)
+                 || c = '\003' ->
             ignore k;
             note_turn_interrupt t;
             hit := true
