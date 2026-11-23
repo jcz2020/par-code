@@ -156,6 +156,31 @@ let test_hint_idle () =
   in
   Alcotest.(check string) "no hint when idle" "" h
 
+(* v0.15.7: a scrolled-up viewport must stay on the same top line when
+   streaming or a resize changes the frame; the bottom keeps following. *)
+let test_scroll_anchor () =
+  let check name expected =
+    Alcotest.(check int) name expected
+  in
+  check "bottom follows new output" 0
+    (Par_code_screen.scroll_after_layout ~scroll:0 ~total:130 ~body:20
+       ~prev_total:100 ~prev_body:20);
+  check "middle keeps the same top" 15
+    (Par_code_screen.scroll_after_layout ~scroll:10 ~total:105 ~body:20
+       ~prev_total:100 ~prev_body:20);
+  check "top stays at the top" 85
+    (Par_code_screen.scroll_after_layout ~scroll:80 ~total:105 ~body:20
+       ~prev_total:100 ~prev_body:20);
+  check "taller body keeps the same top" 8
+    (Par_code_screen.scroll_after_layout ~scroll:10 ~total:100 ~body:22
+       ~prev_total:100 ~prev_body:20);
+  check "shorter body keeps the same top" 12
+    (Par_code_screen.scroll_after_layout ~scroll:10 ~total:100 ~body:18
+       ~prev_total:100 ~prev_body:20);
+  check "shrinking content clamps at the bottom" 0
+    (Par_code_screen.scroll_after_layout ~scroll:10 ~total:90 ~body:20
+       ~prev_total:100 ~prev_body:20)
+
 let () =
   Alcotest.run "par_screen"
     [ ( "fold",
@@ -202,4 +227,8 @@ let () =
         ; Alcotest.test_case "running" `Quick test_hint_running
         ; Alcotest.test_case "queue" `Quick test_hint_queue
         ; Alcotest.test_case "idle" `Quick test_hint_idle
+        ] )
+    ; ( "scroll",
+        [ Alcotest.test_case "anchor_keeps_top_line" `Quick
+            test_scroll_anchor
         ] ) ]

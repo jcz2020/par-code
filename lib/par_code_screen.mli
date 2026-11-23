@@ -100,7 +100,15 @@ val clear_cancel_request : t -> unit
 (** Drop a stale request at the start of a turn. *)
 
 val line_count : t -> int
-(** Lines currently in the transcript (for tests and the status bar). *)
+(** Lines currently in the transcript, including the streamed half line (for
+    tests and the scroll ceiling). *)
+
+val scroll_after_layout :
+  scroll:int -> total:int -> body:int -> prev_total:int -> prev_body:int -> int
+(** [scroll_after_layout ~scroll ~total ~body ~prev_total ~prev_body] keeps a
+    scrolled-up viewport on the same transcript line when a stream, a resize
+    or an input-line change alters the frame. A viewport at the bottom
+    (scroll = 0) keeps following new output. Exposed for unit tests. *)
 
 val run : t -> tick:(t -> unit) -> unit
 (** Frame loop: drain keys, call [tick], render. In browsing mode q quits and

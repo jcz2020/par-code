@@ -199,6 +199,11 @@ type t = {
      50ms; repainting an unchanged frame made the TUI flicker on a phone, so a
      render only happens when this signature changes. *)
   mutable last_sig : string;
+  (* v0.15.7: previous frame's line count and body height, used to keep a
+     scrolled-up viewport on the same transcript line while a stream or a
+     resize changes the frame around it. *)
+  mutable last_total : int;
+  mutable last_body_h : int;
   (* Terminal attributes as they were before notty took the tty. A signal
      handler cannot safely call into notty (it can deadlock on a lock the
      interrupted code holds), so the cleanup path restores from here. *)
@@ -250,7 +255,9 @@ let create () : t =
     view = None;
     turn_active = false;
     queued = [];
-    last_sig = "" }
+    last_sig = "";
+    last_total = 0;
+    last_body_h = 0 }
 
 (* Notty rejects control characters inside [I.string] (it raises on "\n"),
    and model output is full of them. Split runs on newlines into separate lines
@@ -804,6 +811,15 @@ let entry_runs ~cols (e : entry) :
     cache.rc_runs
   | Tools b -> block_runs ~cols b
 
+(* v0.15.7: the streamed half line is part of what the viewport draws.
+   Leaving it out of [line_count] made the scroll ceiling too small whenever a
+   chunk carried more than one line: scrolling to the top stopped in the
+   middle of the transcript, and the frame then reflowed as the chunk grew. *)
+let partial_runs (t : t) ~(cols : int) :
+    (string * Par_code_ui.style) list list =
+  if t.partial = "" then []
+  else to_notty_runs ~cols (Par_code_ui.text t.partial)
+
 let line_count (t : t) =
   let cols = content_cols t in
   List.fold_left (fun acc e -> acc + List.length (entry_runs ~cols e)) 0
@@ -811,6 +827,20 @@ let line_count (t : t) =
   + List.fold_left
       (fun acc (_, img) -> acc + List.length (to_notty_runs ~cols img))
       0 t.tool_block
+  + List.length (partial_runs t ~cols)
+
+(* v0.15.7: when the frame gains or loses lines, a viewport that is scrolled
+   up must stay on the same content. [scroll] is measured from the bottom, so
+   keep the top index fixed by moving the offset with the layout; at the
+   bottom (scroll = 0) new output keeps following the tail. *)
+let scroll_after_layout ~(scroll : int) ~(total : int) ~(body : int)
+    ~(prev_total : int) ~(prev_body : int) : int =
+  if scroll <= 0 then 0
+  else begin
+    let next = scroll + (total - prev_total) - (body - prev_body) in
+    let next = max 0 next in
+    min next (max 0 (total - body))
+  end
 
 (* ------------------------------------------------------------------ *)
 (* Input line                                                          *)
@@ -1240,8 +1270,7 @@ let all_runs (t : t) ~(cols : int) :
     (string * Par_code_ui.style) list list =
   List.concat_map (entry_runs ~cols) t.transcript
   @ List.concat_map (fun (_, img) -> to_notty_runs ~cols img) t.tool_block
-  @ (if t.partial = "" then []
-     else to_notty_runs ~cols (Par_code_ui.text t.partial))
+  @ partial_runs t ~cols
 
 let visible_runs (t : t) ~(height : int) :
     int * (int * (string * Par_code_ui.style) list) list =
@@ -1357,6 +1386,11 @@ let frame (t : t) : Notty.image =
      past the top left a large value behind and the next drag down appeared
      stuck. Clamp before drawing. *)
   let total = line_count t in
+  t.scroll <-
+    scroll_after_layout ~scroll:t.scroll ~total ~body:body_h
+      ~prev_total:t.last_total ~prev_body:t.last_body_h;
+  t.last_total <- total;
+  t.last_body_h <- body_h;
   let max_top = max 0 (total - body_h) in
   if t.scroll > max_top then t.scroll <- max_top;
   let body =
@@ -1627,6 +1661,15 @@ let ctrl_c (t : t) =
       t.last_ctrl_c <- Some now;
       t.status <- "press Ctrl-C again to exit"
 
+(* v0.15.7: a Ctrl-C that interrupts a turn also prepares the idle exit
+   ladder. Without this the next press only cleared the input and a second
+   one was needed, so a user pressing Ctrl-C to stop a stuck turn saw the
+   session "not exiting" for several presses. *)
+let note_turn_interrupt (t : t) =
+  t.input <- "";
+  t.cursor <- 0;
+  t.last_ctrl_c <- Some (Unix.gettimeofday ())
+
 (* v0.15.6: selection mode for a terminal without a Shift key (a phone):
    Ctrl-X turns a plain drag into a text selection. *)
 let toggle_select_mode (t : t) =
@@ -1662,7 +1705,10 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
             && (c = 'c' || c = 'C' || c = '\003') ->
        (* Ctrl-C denies this step and cancels the active run (a turn, or a
           command like /distill that raised the modal). *)
-       if t.turn_active || t.busy <> "" then t.cancel_requested <- true;
+       if t.turn_active || t.busy <> "" then begin
+         t.cancel_requested <- true;
+         note_turn_interrupt t
+       end;
        t.modal_answer <- None;
        t.modal <- None
      | _ ->
@@ -2025,6 +2071,7 @@ let poll_interrupt ?(handle_keys = true) (t : t) : bool =
           | `Key ((`ASCII c, mods) as k)
             when (c = 'c' || c = 'C') && List.mem `Ctrl mods ->
             ignore k;
+            note_turn_interrupt t;
             hit := true
           | `Key k ->
             (* v0.15.6: typing is allowed during a turn; Enter hands the line to
