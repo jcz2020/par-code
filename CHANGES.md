@@ -1,5 +1,36 @@
 # CHANGES
 
+## v0.15.7 — A host that holds up (released 2026-11-23)
+
+- **Cancellation is native again**: PAR 0.18 closes the provider socket on
+  cancel, so a silent request stops in about a second instead of waiting for
+  a byte that never arrives. The host race and the checkpoint snapshot are
+  gone; max-mode and `/distill` use the same token, while `/flow run` keeps
+  the host fallback because it has no token.
+- **Every tool result has one ceiling**: built-in and MCP results share
+  `tool_output_chars` (default 32K); an oversized result is written to
+  `.par/tool-results/` with a preview and a readable path, and old spill
+  files expire. PAR 0.18 also caps results in the engine registry, including
+  bash handlers rebuilt by the SDK.
+- **Modal keys mean one thing**: inside an approval modal `Esc` denies the
+  step and `Ctrl-C` cancels the whole turn; the status bar shows
+  `esc deny · ctrl-c cancel` instead of promising an interrupt.
+- **The scroll ceiling includes the streamed line**: the unfinished line was
+  drawn by the frame but left out of `line_count`, so a long answer could
+  stop short of the real top. The streamed partial is counted now, and a
+  scrolled-up viewport stays on the same top line while content or the
+  composer height changes; PageUp/PageDown, the wheel and drag all reach both
+  ends.
+- **Ctrl-C exits cleanly**: both the modified `Ctrl+c` and the raw `0x03`
+  byte interrupt a running turn; after that cancel, the next Ctrl-C exits
+  instead of only clearing the composer.
+- **Checked in the real interface**: an arm64 TUI binary built by CI was run
+  in the proot terminal against a real provider (300 lines at 50×15) and a
+  loopback silent provider; the transcript reached `Line 1` and `Line 300`,
+  and the silent turn returned `⊘ [cancelled by user]`. The unit suites ran
+  on Ubuntu x64/arm64 and macOS, and the Linux jobs also ran the integration
+  suite.
+
 ## v0.15.6 — A turn you can stop (released 2026-11-22)
 
 - **Esc stops a silent provider**: cancellation was only a flag, and a
