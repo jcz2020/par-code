@@ -46,6 +46,8 @@ Flat directory — no subdirs; the module set IS the architecture. All modules a
 - 手动 `/checkpoint` 传 `~extract:false`；周期 `maybe_checkpoint` 仍提取记忆（v0.8.2+）。
 - doom-loop action-streak 排除 bash 与编辑类工具（各有 bash_retry / edit_repeat）；其余非 info 工具仍计数（v0.8.2+）。
 - Pure-core extraction for testability: decision logic lives in side-effect-free modules (`progress`, `chain`, `doom_loop`, `json_extract`, `plan_tools.gate_response`).
+- 启动提示（v0.15.8）：启动路径**只读缓存**（`Par_code_upgrade.cached_update_notice`），过期由 `bin/main.ml` fork 的脱离子进程刷新；`fetch_latest_tag` 的 timeout 参数至今无效，任何同步调用都会把首帧拖住。提示由 `Par_code_repl.run ?update_notice` 写进 TUI 转写区，不要再打到 stdout（会被 notty 首帧覆盖）。
+- 升级可观测（未发布）：`par_code_upgrade` 每个阶段向 **stderr** 打一行带 flush 的 `[info]`（current / checking / download 大小 + 每 2 MB 进度 / checksum / extract / install），stdout 只留最终结果；进度钩子是 `http_get` 的可选 `on_start` / `on_chunk`。`decide_upgrade` 是纯函数：同版本与“本地比发行版新”都返回 `Up_to_date` 不下载，只有显式 `--to` 才允许降级；`perform_upgrade` 返回 `` [`Upgraded of string | `Up_to_date of string] ``，安装（rename/smoke）失败单列 `` `Rename_failed `` 而不是混进下载错误。
 - Errors are polymorphic variants RETURNED across module boundaries, never raised: ``[> `Db_error of string]``, ``[> `Plan_error of string]``, upgrade's ``[> `Http of string | `Offline]``.
 - Atomic writes for ALL persisted state: temp file + `Sys.rename` (config, approvals, goal, doom-loop incidents). This fixed a ~10% config-save flake.
 - Every auxiliary LLM agent (checkpoint/extractor/distiller/judge/selector/synthesizer/delegate/candidate) runs on the user's Runtime with `~save:false ~update_current:false` — no second runtime.

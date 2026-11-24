@@ -185,7 +185,10 @@ curl -fsSL https://github.com/jcz2020/par-code/releases/latest/download/install.
 ```
 
 `par upgrade` checks for and installs newer releases; `par upgrade --check`
-only reports. Release archives ship a `checksums.txt`.
+only reports. It prints each step (version lookup, download size and
+progress, checksum, install) and does nothing when you are already on the
+latest release; `--to <tag>` overrides the version, downgrades included.
+Release archives ship a `checksums.txt`.
 
 ### Platform support
 

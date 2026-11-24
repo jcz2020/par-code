@@ -3402,3 +3402,30 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 - **reason**：宿主强杀会抢在 SDK 优雅取消之前，丢掉引擎恢复的半轮流式文本；上游已修，继续保留反而降低行为质量。
 - **scope**：bash 现在受 SDK 32K 封顶但没有落盘；`/flow` 仍是宿主取消；MCP 结果由宿主落盘 + SDK 封顶双保险。
 - **rollback**：把 `dune-project`/三处 pin 改回 0.17.3，恢复主回合的 race/snapshot（历史实现），并去掉 `max_tool_result_chars` 接线。
+
+## 2026-11-23 · 接受 `par -v` 作为 `--version` 别名（未发布）
+
+- **tag**：v-next-version-short-flag
+- **before**：Cmdliner 只为 `Cmd.info ~version` 生成 `--version`；`par -v` 落到默认 term 解析，报 unknown option 并以非零退出。`is_chat_mode` 早已把 `-v` 当作非 chat 模式，入口却从未实现。
+- **after**：`bin/main.ml` 的 `let ()` 在 `Cmd.eval cmd` 之前判断 `Sys.argv` 是否恰好为 `["par"; "-v"]`，是则打印 `Par_code_version.version_info` 并 exit 0；同时跳过启动更新检查。集成测试 `version_config_test.sh` 新增 `-v` 与"无配置也能用 `-v`"两条断言。
+- **reason**：`-v` 是 `--version` 的通行简写（git、docker、rg 都接受），缺失时用户只看到 unknown option。走 argv 预判而不加 term flag，是因为默认 term 会先调 `Par_code_config.require_config`，没配 provider 的新机器上 `par -v` 会先报"未配置"。
+- **scope**：只处理唯一参数形式的 `-v`；`par -v <其它参数>`、子命令上的 `--version` 仍由 Cmdliner 报错。`--version` 行为不变（仍由 Cmdliner 输出）。
+- **rollback**：删掉 `is_version_alias` 及其在 `let ()` 里的分支，测试里删两条用例。
+
+## 2026-11-23 · upgrade/update 分阶段进度与防呆判定（未发布）
+
+- **tag**：v-next-upgrade-visible
+- **before**：`par upgrade` / `par update` 从查到版本、下载整个包、校验、解压到替换二进制全程无输出，几十秒里只有光标在闪，用户以为卡住；已经是新版时仍会静默重下重装；本地构建比发行版新时会被静默降级；替换失败（如没有写权限）被归成 "Upgrade failed (download)"，指向错误方向。
+- **after**：升级流程每个阶段向 stderr 打一行带 flush 的 `[info]`（current / checking latest / downloading 大小与每 2 MB 进度 / verifying checksum / extracting / installing）；`decide_upgrade` 纯函数决定 Already_current / Current_is_ahead / Newer_available / Downgrade 四种走向，同版本与"本地更新"直接返回 `Up_to_date` 不下载，降级只接受显式 `--to`；`perform_upgrade` 返回值改为 `[\`Upgraded | \`Up_to_date]`，新增 `Rename_failed` 错误分支并把提示指向二进制写权限；`--check` 先打印 "Checking latest release..."，`--uninstall` 先打印将删除的路径；单测补 `decide_upgrade` 五条断言。
+- **reason**：长时间静默是"卡住"观感的唯一来源；升级是最不能猜的命令（会改写正在运行的二进制），必须每步可观测、可解释，并且默认不动比当前更本地的构建。
+- **scope**：进度走 stderr，stdout 只留最终结果；下载进度按 2 MB 粒度（服务端没给 Content-Length 时只报累计字节）。版本查询本身仍无硬超时，只靠文案说明在等网络。
+- **rollback**：删掉 `info` 调用、`decide_upgrade` 与 `Up_to_date`/`Rename_failed` 分支，恢复 `perform_upgrade` 返回 string 与旧错误映射。
+
+## 2026-11-24 · 启动不再等 GitHub（v0.15.8）
+
+- **tag**：v0.15.8-startup-cache-only
+- **before**：`maybe_check_version` 在 `Cmd.eval` 之前同步请求 `releases/latest`；`fetch_latest_tag ~timeout:2.0` 的 timeout 参数从未生效，缓存过期时首帧被整段阻塞（proot/移动网络实测 0.86–8.6 秒）。提示还打到 stdout，随后被 notty 首帧整屏覆盖——用户既等了，也没看到。
+- **after**：启动只读 `~/.par/.latest-cache.json`（`cached_update_notice`，零网络）；缓存缺失或超过 24h 时 fork 一个脱离子进程调 `fetch_latest_tag` 刷新缓存（下一次启动生效），父进程立即继续。提示字符串传给 `Par_code_repl.run ?update_notice`，写进 TUI 转写区。`is_chat_mode` 随旧路径一起删除。
+- **reason**：分解实测显示启动成本几乎全在这一次网络请求上（runtime 构建 54–75ms，`--version` 37–42ms；`--check` 单次 2.6s）；提示在 TUI 里又看不见，等待等于白等。
+- **scope**：只覆盖启动提示；`par upgrade --check` / `par upgrade` 仍同步联网（显式命令）。fork 依赖 POSIX；子进程不碰终端。首个缓存刷新在一代之内才生效（首启后第二次才会提示新版本）。
+- **rollback**：`startup_update_notice` 改回同步 `fetch_latest_tag` + `render_notice`，恢复 `maybe_check_version`/`is_chat_mode`，`Par_code_repl.run` 去掉 `?update_notice`。

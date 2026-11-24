@@ -37,7 +37,7 @@ let forget_orphan (id : string) : (unit, string) result =
      | Error e -> Error (Par_code_setup.error_to_string e))
 
 let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goal
-    ?max () =
+    ?max ?update_notice () =
   (* v0.15.0: the full-screen interface is the only one; [cmd_chat] sends a
      non-TTY run down the one-shot path before it gets here. *)
   let git_branch =
@@ -138,6 +138,15 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
            so nobody else would. *)
         Par_code_screen.render screen)
   in
+  (* v0.15.8: the startup update notice lives in the transcript. It used to be
+     printed to stdout before notty took the screen, which wiped it. *)
+  (match update_notice with
+   | Some tag ->
+     Par_code_screen.append_truncated screen
+       (Par_code_ui.textf
+          "info: par %s is available (current: %s). Run 'par upgrade'."
+          tag Par_code_version.version)
+   | None -> ());
   (* v0.15.1: stream the unfinished line. The markdown machine emits a line at
      a time, so without this hook the frame only moved in whole-line bursts. *)
   Par_code_ui.set_partial_sink ui (fun s ->

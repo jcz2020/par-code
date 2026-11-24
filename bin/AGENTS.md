@@ -22,10 +22,11 @@ Subcommand tree: `par` (REPL, default), `ask`, `config show|set`, `upgrade`, `me
 - Chat-mode flags (`--provider`, `--model`, `-c/--continue`, `-r/--resume`, `--goal`, `--max`, …) merge over `~/.par/config.json` via `Par_code_config.merge` before `Par_code_setup.setup_runtime`.
 - `par` with no subcommand → `Par_code_repl.run`; `par ask "…"` → `run_single_shot`.
 - Version string comes from `Par_code_version.version_info` (dune-generated; see lib/AGENTS.md).
+- `-v` is an accepted alias for `--version`: `main.ml` intercepts a lone `-v` in `let ()` BEFORE `Cmd.eval` (Cmdliner only wires `--version`), so it works without a config file and skips the startup update check. Keep that intercept ahead of the group parse; do not turn it into a term flag, since the default term calls `Par_code_config.require_config` first.
 
 ## ANTI-PATTERNS
 
-- `is_chat_mode ()` in `main.ml` scans `Sys.argv` for the literals `config|ask|upgrade|memory|plan|session`. A new subcommand WITHOUT updating this list makes the startup update-check fire incorrectly.
+- `is_chat_mode ()` 已删除（v0.15.8）：启动提示不再扫 `Sys.argv`。`startup_update_notice` 只读 `~/.par/.latest-cache.json`，**永远不要**在启动路径上调 `fetch_latest_tag`——它会把首帧阻塞 0.9–8.6 秒（移动网络实测）；缓存过期时用一个 `fork` 出来的子进程在后台刷新，下一次启动才能看到新 tag。升级提示现在由 `Par_code_repl.run ?update_notice` 写进 TUI 转写区（以前打到 stdout，被 notty 首帧抹掉）。
 - A new flag needs an entry in `cli_args.ml` AND a term chain in `main.ml` — one without the other silently drops the flag.
 - `par upgrade --purge` requires `--uninstall` plus an interactive TTY; otherwise error + exit 2. It must never delete `~/.par` silently.
 - `PAR_NO_UPDATE_CHECK=1` disables the startup version check — set it in scripted/CI invocations.

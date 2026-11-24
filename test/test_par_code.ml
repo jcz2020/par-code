@@ -1,5 +1,5 @@
 let test_version () =
-  Alcotest.(check string) "version is 0.15.7" "0.15.7" Par_code_version.version
+  Alcotest.(check string) "version is 0.15.7" "0.15.8" Par_code_version.version
 
 let test_version_info_prefix () =
   Alcotest.(check bool) "version_info starts with 'par '"
@@ -61,11 +61,32 @@ let test_version_compare () =
   Alcotest.(check bool) "pre-release suffix ignored" false
     (newer ~latest:"v0.15.0-beta.1" ~current:"0.15.0")
 
+let test_upgrade_decision () =
+  let decide ~current ~resolved ~explicit =
+    Par_code_upgrade.decide_upgrade ~current ~resolved ~explicit
+  in
+  Alcotest.(check bool) "same version is a no-op" true
+    (decide ~current:"0.15.7" ~resolved:"v0.15.7" ~explicit:false
+     = Par_code_upgrade.Already_current);
+  Alcotest.(check bool) "explicit --to the current version is still a no-op" true
+    (decide ~current:"0.15.7" ~resolved:"0.15.7" ~explicit:true
+     = Par_code_upgrade.Already_current);
+  Alcotest.(check bool) "newer release upgrades" true
+    (decide ~current:"0.15.7" ~resolved:"v0.15.8" ~explicit:false
+     = Par_code_upgrade.Newer_available "v0.15.8");
+  Alcotest.(check bool) "older release downgrades only when explicit" true
+    (decide ~current:"0.15.7" ~resolved:"v0.15.6" ~explicit:true
+     = Par_code_upgrade.Downgrade "v0.15.6");
+  Alcotest.(check bool) "a newer local build is never replaced by an older release" true
+    (decide ~current:"0.16.0" ~resolved:"v0.15.7" ~explicit:false
+     = Par_code_upgrade.Current_is_ahead)
+
 let () =
   Alcotest.run "par"
     [ "version", [ Alcotest.test_case "version" `Quick test_version;
                    Alcotest.test_case "version_info prefix" `Quick test_version_info_prefix;
-                   Alcotest.test_case "compare" `Quick test_version_compare ];
+                   Alcotest.test_case "compare" `Quick test_version_compare;
+                   Alcotest.test_case "upgrade decision" `Quick test_upgrade_decision ];
       "identity", [ Alcotest.test_case "agent_id" `Quick test_agent_id ];
       "config", [ Alcotest.test_case "paths are ~/.par" `Quick test_config_paths;
                   Alcotest.test_case "JSON round-trip" `Quick test_config_roundtrip;

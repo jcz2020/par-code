@@ -1,5 +1,33 @@
 # CHANGES
 
+## v0.15.8 — Fast to start, clear to upgrade (released 2026-11-24)
+
+- **`par` reaches its first frame without waiting for GitHub**: the update
+  check used to run a blocking release lookup before the CLI parsed arguments —
+  0.86-8.6 s on a mobile network, with the 2 s timeout never enforced — and its
+  notice was printed to stdout where the first notty frame wiped it. Startup now
+  reads the cached release tag only (zero network), renders the notice in the
+  TUI transcript, and refreshes a stale cache from a detached child process so
+  the next launch sees a fresh tag. Measured first frame in the proot terminal:
+  0.30-0.47 s, down from 2.6 s.
+- **`par -v` is accepted**: Cmdliner only wires `--version`, so a lone `-v`
+  is now intercepted before the group is parsed. It prints the same version
+  line, needs no config file, and skips the update check.
+- **`par upgrade` / `par update` show their work and refuse to waste it**:
+  every phase prints one flushed `[info]` line on stderr (current version,
+  latest lookup, asset name and size, progress every 2 MB, checksum, extract,
+  install); stdout keeps only the final result. Already-current is a no-op
+  instead of a silent re-download, a build newer than the release is never
+  downgraded, and a downgrade requires an explicit `--to`. Install failures
+  (rename or smoke test) report as install failures with a permission hint
+  instead of "download failed", and a dropped connection says plainly that
+  nothing was changed.
+- **Checked in the real binary**: a copy in the proot terminal upgraded itself
+  to v0.15.6 — 10.3 MB with progress lines, checksum verified, archive
+  extracted, binary swapped, smoke test passed, `--version` reporting 0.15.6 —
+  and a mid-download connection reset left the original binary untouched. The
+  unit suites and the integration suite passed.
+
 ## v0.15.7 — A host that holds up (released 2026-11-23)
 
 - **Cancellation is native again**: PAR 0.18 closes the provider socket on

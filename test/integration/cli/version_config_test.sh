@@ -13,6 +13,17 @@ test_version_format() {
   par_cli --version 2>&1 | assert_contains '[0-9]+\.[0-9]+\.[0-9]+'
 }
 
+test_short_version_alias() {
+  setup_home; trap teardown_home EXIT
+  par_cli -v 2>&1 | assert_contains '^par [0-9]+\.[0-9]+\.[0-9]+'
+}
+
+test_short_version_without_config() {
+  setup_home; trap teardown_home EXIT
+  rm -f "$HOME/.par/config.json"
+  par_cli -v 2>&1 | assert_contains '^par [0-9]+\.[0-9]+\.[0-9]+'
+}
+
 test_config_show_no_config() {
   setup_home; trap teardown_home EXIT
   rm -f "$HOME/.par/config.json"
@@ -26,6 +37,8 @@ test_config_show_with_config() {
 
 test_case "version exits zero"      test_version_exits_zero
 test_case "version format"          test_version_format
+test_case "-v alias"                test_short_version_alias
+test_case "-v needs no config"      test_short_version_without_config
 test_case "config show no config"   test_config_show_no_config
 test_case "config show with config" test_config_show_with_config
 run_tests "$@"

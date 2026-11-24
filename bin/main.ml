@@ -3,13 +3,32 @@ open Par
 
 let ui = Par_code_ui.create_backend ()
 
+(* Startup reads the cached release tag only. It used to block on a GitHub
+   request before [Cmd.eval] (0.9-8.6s measured on a mobile network, and the
+   "2s timeout" was never enforced), and the notice went to stdout where
+   notty's first frame wiped it. The notice is now rendered inside the TUI;
+   a stale cache is refreshed by a detached child so the next launch sees a
+   fresh tag. *)
+let startup_update_notice () =
+  match Sys.getenv_opt "PAR_NO_UPDATE_CHECK" with
+  | Some "1" | Some "true" -> None
+  | _ ->
+    (if Par_code_upgrade.cache_needs_refresh () then
+       match (try `Ok (Unix.fork ()) with _ -> `Failed) with
+       | `Ok 0 ->
+         (try Par_code_upgrade.fetch_latest_tag ~timeout:5.0 () |> ignore
+          with _ -> ());
+         exit 0
+       | `Ok _ | `Failed -> ());
+    Par_code_upgrade.cached_update_notice
+      ~current:(Par_code_upgrade.current_version ())
+
 let cmd_chat
     provider_opt api_key_opt api_base_opt model_opt
     persistence_opt db_uri_opt temp_opt prompt_opt max_iter_opt
     max_tokens_opt top_p_opt no_parallel_tools retention_days_opt
     continue_id_opt resume_opt goal_opt max_opt =
-  let cfg = Par_code_config.require_config () in
-  let cfg =
+  let cfg = Par_code_config.require_config () in  let cfg =
     Par_code_config.merge cfg
       ~provider:provider_opt ~api_key:api_key_opt ~api_base:api_base_opt
       ~model:model_opt ~persistence:persistence_opt ~db_uri:db_uri_opt
@@ -29,12 +48,14 @@ let cmd_chat
     Par_code_repl_io.resume_target_of_cli ~resume:resume_opt
       ~continue:continue_opt
   in
+  let update_notice = startup_update_notice () in
   Par_code_setup.setup_runtime cfg ~f:(fun rt mem_db ->
     (* No terminal to paint a frame on: treat stdin as the question and answer in
        plain text (same path as `par ask`), so `echo "…" | par` still works. *)
     let interactive = try Unix.isatty Unix.stdout with Unix.Unix_error _ -> false in
     if interactive then
-      Par_code_repl.run rt ~mem_db ~resume:resume_target ?goal:goal_opt ?max:max_opt ()
+      Par_code_repl.run rt ~mem_db ~resume:resume_target ?goal:goal_opt ?max:max_opt
+        ?update_notice ()
     else begin
       let buf = Buffer.create 4096 in
       (try
@@ -175,6 +196,7 @@ let cmd_upgrade check_opt to_opt uninstall_opt purge_opt =
     end;
     let bin = Filename.concat (Filename.concat dir "bin") "par" in
     let cache = Filename.concat dir ".latest-cache.json" in
+    Par_code_ui.render_notice ui (Printf.sprintf "Removing %s" bin);
     (try Sys.remove bin with _ -> ());
     (try Sys.remove cache with _ -> ());
     if purge_opt then begin
@@ -191,6 +213,7 @@ let cmd_upgrade check_opt to_opt uninstall_opt purge_opt =
   end;
   if check_opt then begin
     let cur = Par_code_upgrade.current_version () in
+    Par_code_ui.render_notice ui "Checking latest release...";
     (match Par_code_upgrade.fetch_latest_tag ~timeout:2.0 () with
      | Error `Offline ->
        Par_code_ui.render_notice ui (Printf.sprintf "current: %s" cur);
@@ -206,16 +229,25 @@ let cmd_upgrade check_opt to_opt uninstall_opt purge_opt =
           (if Par_code_upgrade.is_newer ~latest ~current:cur then 1 else 0))
   end;
   match Par_code_upgrade.perform_upgrade ?target:to_opt () with
-  | Ok new_ver ->
+  | Ok (`Up_to_date ver) ->
+    Par_code_ui.render_notice ui
+      (Printf.sprintf "Already at %s - nothing to do" ver)
+  | Ok (`Upgraded new_ver) ->
     Par_code_ui.render_success ui (Printf.sprintf "Upgraded to %s" new_ver)
   | Error (`Download_failed msg) ->
     Par_code_ui.render_error ui (Printf.sprintf "Upgrade failed (download): %s" msg);
     exit 1
   | Error `Checksum_mismatch ->
-    Par_code_ui.render_error ui "Upgrade failed: checksum mismatch";
+    Par_code_ui.render_error ui
+      "Upgrade failed: checksum mismatch (the download may be corrupt - run it again)";
     exit 1
   | Error (`Smoke_test_failed msg) ->
     Par_code_ui.render_error ui (Printf.sprintf "Upgrade failed (smoke test): %s" msg);
+    exit 1
+  | Error (`Rename_failed msg) ->
+    Par_code_ui.render_error ui
+      (Printf.sprintf
+         "Upgrade failed (install): %s - check write permission on the par binary" msg);
     exit 1
 
 let term_upgrade =
@@ -692,36 +724,16 @@ let cmd =
       cmd_plan;
       cmd_session; ]
 
-let is_chat_mode () =
-  let args = Array.to_list Sys.argv in
-  let rec scan = function
-    | [] -> true
-    | "--help" :: _ | "-h" :: _ -> false
-    | "--version" :: _ | "-v" :: _ -> false
-    | "config" :: _ | "ask" :: _ | "upgrade" :: _ | "update" :: _ | "memory" :: _ | "plan" :: _ | "session" :: _ -> false
-    | _ :: rest -> scan rest
-  in
-  match args with _ :: rest -> scan rest | [] -> true
-
-let maybe_check_version () =
-  match Sys.getenv_opt "PAR_NO_UPDATE_CHECK" with
-  | Some "1" | Some "true" -> ()
-  | _ ->
-    if is_chat_mode () then begin
-      (try
-         let cur = Par_code_upgrade.current_version () in
-          (match Par_code_upgrade.fetch_latest_tag ~timeout:2.0 () with
-           | Ok latest when Par_code_upgrade.is_newer ~latest ~current:cur ->
-             Par_code_ui.render_notice ui
-               (Printf.sprintf
-                  "info: par %s is available (current: %s). Run 'par upgrade'."
-                  latest cur)
-           | Ok _ | Error _ -> ())
-       with _ -> ())
-    end
+(* Cmdliner wires only --version; accept the conventional -v alias before the
+   group is parsed so it needs no config file and skips the update check. *)
+let is_version_alias () =
+  Array.length Sys.argv = 2 && Sys.argv.(1) = "-v"
 
 let () =
   Mirage_crypto_rng_unix.use_default ();
   if not (Unix.isatty Unix.stdout) then Unix.putenv "TERM" "dumb";
-  maybe_check_version ();
+  if is_version_alias () then begin
+    print_endline Par_code_version.version_info;
+    exit 0
+  end;
   exit (Cmd.eval cmd)
