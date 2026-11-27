@@ -1,31 +1,32 @@
 # lib/ — the `par_code` library
 
-**Score 15** — 62 files (35 `.ml`, 27 `.mli`, `dune`), ~11k LOC. Earned its file: the entire product core; every other directory consumes it.
+**Score 15** — 71 files (42 `.ml`, 27 `.mli`, `dune`), ~17k LOC. Earned its file: the entire product core; every other directory consumes it.
 
-Flat directory — no subdirs; the module set IS the architecture. All modules are top-level `Par_code_*` (`(wrapped false)` in `dune`).
+Flat directory — no subdirs; the module set IS the architecture. All modules are top-level `Par_code_*` (`(wrapped false)` in `dune`). Adding a module = one file; `lib/dune` is a single library stanza.
 
 ## WHERE TO LOOK
 
 | Task | Modules (LOC) |
 |---|---|
-| Runtime bootstrap: tools, agents, middleware, bash approval | `par_code_setup.ml` (680) |
-| User/project skills: discovery, registration, body read | `par_code_skills.ml` (v0.9.0 W0/W1) |
-| Skill distillation: /distill proposal + atomic write | `par_code_distill.ml` (v0.9.0 W2) |
-| REPL loop, slash commands, goal-chain driver | `par_code_repl.ml` (880) + `par_code_repl_io.ml` (333) |
-| Rendering: image algebra, ANSI backend, `render_*` | `par_code_ui.ml` (776) + `par_code_ui_markdown.ml` (320) |
-| Full-screen terminal UI (v0.14): frame, status bar, modal, scrollback | `par_code_screen.ml` (651) |
-| Config (38 fields) + wizard | `par_code_config.ml` (699) + `par_code_config_wizard.ml` (218) |
-| Memory: Sqlite_memory proxy, FTS5/vec0, export | `par_code_memory.ml` (609) + `par_code_memory_tools.ml` (282) |
-| Plan mode: six-section gate, synthesizer fallback | `par_code_plan_tools.ml` (574) |
-| Long-session continuity | `par_code_checkpoint.ml` (449) |
-| Goals: lifecycle / judge / chain / doom-loop / progress | `par_code_goal.ml` (134), `par_code_judge.ml` (128), `par_code_chain.ml` (300), `par_code_doom_loop.ml` (278), `par_code_progress.ml` (46) |
+| Runtime bootstrap: tools, agents, middleware, bash approval | `par_code_setup.ml` (960) |
+| Skills: discovery, remote sync, body injection, `/distill` proposal + atomic write | `par_code_skills.ml` (350) + `par_code_distill.ml` (374) |
+| REPL loop, slash commands, goal/chain driver, resume, cancellation, save gating | `par_code_repl.ml` (1842) + `par_code_repl_io.ml` (301) |
+| Full-screen Notty TUI: frame, status, input editing, modal, scrollback, mouse | `par_code_screen.ml` (2291) — sole terminal owner |
+| Rendering: image algebra, ANSI backend, tables/cost, streaming markdown | `par_code_ui.ml` (1123) + `par_code_ui_markdown.ml` (349) |
+| Config (38 fields, embedded main-agent prompt) + wizard | `par_code_config.ml` (805) + `par_code_config_wizard.ml` (226) |
+| Memory: SQLite/FTS5/vec0, export, prune + tool bindings | `par_code_memory.ml` (625) + `par_code_memory_tools.ml` (282) |
+| Plan mode: six-section gate, synthesizer fallback, plan files | `par_code_plan_tools.ml` (574) |
+| Long-session continuity: periodic/manual checkpoint + memory extraction | `par_code_checkpoint.ml` (449) + `par_code_extractor.ml` (258) |
+| Goals: lifecycle / judge / chain / doom-loop / progress | `par_code_goal.ml` (134), `par_code_judge.ml` (128), `par_code_chain.ml` (300), `par_code_doom_loop.ml` (311), `par_code_progress.ml` (46) |
 | Best-of-N: candidates + selector | `par_code_max_mode.ml` (168) + `par_code_selector.ml` (133) |
-| Subagents / sessions / approvals / upgrade | `par_code_delegate.ml` (300), `par_code_session.ml` (210), `par_code_approvals.ml` (136), `par_code_upgrade.ml` (350) |
-| Workflows on files (v0.10.0) | `par_code_flow.ml` (60) — `.par/flows/<id>.json` → `/flow` |
+| Model sandbox: approvals, permission rules, edit preview, line diff | `par_code_approvals.ml`, `par_code_permissions.ml` (145), `par_code_edit_preview.ml` (153), `par_code_diff.ml` (127) |
+| Tool plumbing: result capping/hygiene, one-line summaries, `!cmd` passthrough | `par_code_payload.ml` (348), `par_code_tool_summary.ml` (284), `par_code_shell.ml` |
+| Sessions / subagents / upgrade / snapshot / git | `par_code_session.ml` (210), `par_code_delegate.ml` (340), `par_code_upgrade.ml` (487), `par_code_snapshot.ml`, `par_code_git_tools.ml` (218) |
+| Workflows on files (v0.10.0) | `par_code_flow.ml` (185) — `.par/flows/<id>.json` → `/flow` |
 
 ## CONVENTIONS
 
-- 800-line file limit — extract when exceeded. `repl` (868) is the known violation; `repl_io` and `config_wizard` exist because of this rule.
+- 800-line file limit — extract when exceeded. Over the line today: `screen` (2291), `repl` (1842), `ui` (1123), `setup` (960), `config` (805). `repl_io`/`config_wizard` exist because of this rule; split off pure cores, not new coupling.
 - v0.9.0 W0/W1: user skills live at `./.par/skills/<id>/skill.md` (project first) and `~/.par/skills/`; only `trigger: manual` is registered; the REPL adds `/skills` and `/<id>`; the SDK does not consume `body_path`, so `Par_code_skills.read_body` injects the body via `~system_prompt_appendix`.
 - v0.9.0 W2: `/distill` calls the tools-free `skill-distiller` agent for one JSON proposal; `par_code_distill` validates id/reserved/builtin/existing/description/body, shows it, writes via temp-file parse + rename, backs up to `.par/backups/skills/` on `--force`, then reloads; Build mode only. `--id <id>` pins the target id (overriding the model's pick) and is what makes `--force` reachable; the model call runs on `Runtime.invoke` with a REPL cancellation token (`?on_invoke` scopes it to the call), so Ctrl+C cancels instead of exiting.
 - v0.11.0 远程 skill：`skill_sources` 里的 URL 在启动与 `/skills reload` 下载到 `~/.par/skills-remote/<id>/skill.md`，再作为 `Remote` 来源扫描；优先级 project > user > remote，远程永远不覆盖本地同名 id。远程内容按不可信输入处理：只收 markdown，id 必须匹配 `[a-z0-9-]` 且不撞保留命令/内置 skill，单文件 256 KiB 上限，失败保留旧缓存。Eio 的 brand 参数放不进模块级 ref，按 SDK 的做法用 `Obj.repr` 存、`Obj.obj` 取。
@@ -47,6 +48,7 @@ Flat directory — no subdirs; the module set IS the architecture. All modules a
 - doom-loop action-streak 排除 bash 与编辑类工具（各有 bash_retry / edit_repeat）；其余非 info 工具仍计数（v0.8.2+）。
 - Pure-core extraction for testability: decision logic lives in side-effect-free modules (`progress`, `chain`, `doom_loop`, `json_extract`, `plan_tools.gate_response`).
 - 启动提示（v0.15.8）：启动路径**只读缓存**（`Par_code_upgrade.cached_update_notice`），过期由 `bin/main.ml` fork 的脱离子进程刷新；`fetch_latest_tag` 的 timeout 参数至今无效，任何同步调用都会把首帧拖住。提示由 `Par_code_repl.run ?update_notice` 写进 TUI 转写区，不要再打到 stdout（会被 notty 首帧覆盖）。
+- 启动/退出热路径（未发布）：`create_conversations_fts` 只在建表时 `rebuild`，之后靠 `conv_ai/ad/au` 触发器；REPL 退出只在 `conv` 自上次保存后被替换过时 `save_conversation`（每轮已保存），且不再同步提取记忆——`auto_extract` / `PAR_NO_AUTO_EXTRACT` 已接到周期 `maybe_checkpoint ?extract`。回合进行中的 `/exit` / `/quit` 等同“取消 + 退出”，其它输入仍排队。新增「每次启动全量扫描/重建」或「退出时调 LLM」的写法都会在大会话上放大成秒级。
 - 升级可观测（未发布）：`par_code_upgrade` 每个阶段向 **stderr** 打一行带 flush 的 `[info]`（current / checking / download 大小 + 每 2 MB 进度 / checksum / extract / install），stdout 只留最终结果；进度钩子是 `http_get` 的可选 `on_start` / `on_chunk`。`decide_upgrade` 是纯函数：同版本与“本地比发行版新”都返回 `Up_to_date` 不下载，只有显式 `--to` 才允许降级；`perform_upgrade` 返回 `` [`Upgraded of string | `Up_to_date of string] ``，安装（rename/smoke）失败单列 `` `Rename_failed `` 而不是混进下载错误。
 - Errors are polymorphic variants RETURNED across module boundaries, never raised: ``[> `Db_error of string]``, ``[> `Plan_error of string]``, upgrade's ``[> `Http of string | `Offline]``.
 - Atomic writes for ALL persisted state: temp file + `Sys.rename` (config, approvals, goal, doom-loop incidents). This fixed a ~10% config-save flake.
@@ -64,9 +66,10 @@ Flat directory — no subdirs; the module set IS the architecture. All modules a
 - Parallel agents (explore subagent, max-mode candidates) share ONE read-only tool list by construction — no candidate races another on the workspace.
 - NEVER assume `skill_descriptor.body_path` is injected by the SDK — 0.12-beta has no runtime consumer; read it in `Par_code_skills` and pass it as a system-prompt appendix.
 - Approval classification fails CLOSED: `..` or `:` in a path, or any unmapped error → `Unknown` → human prompt; delete-class commands (`rm/mv/dd/shred/truncate`) are always `External_path`.
-- Do NOT await the checkpoint fiber — fire-and-forget (`par_code_checkpoint.ml:428`).
+- Do NOT await the checkpoint fiber — fire-and-forget (`Eio.Fiber.fork` on the cancellation root, `in_flight` throttle released via `Fun.protect`).
 - NEVER render a tool/status line while markdown has a pending half-line — route through `render_event_line` / `flush_pending_line` first.
 - NEVER call `Runtime.record_tool_invocation` from the max-mode winner replay callback — replay is render/doom only, or `/cost` double-counts.
 - Config key `doom_loop_threshold` is DEPRECATED → `doom_bash_retries` / `doom_edit_matches` / `doom_action_streak`.
 - `lib/par_code_version.ml` is GENERATED by the `dune` rule from `dune-project (version …)` — gitignored, never hand-edit.
-- Embedded agent prompt (`par_code_config.ml:65,79,82`): NEVER amend git config, NEVER commit unless the user explicitly asks, never bypass safety checks, never retry failing commands in a loop.
+- Embedded agent prompt (`par_code_config.ml`): NEVER amend git config, NEVER commit unless the user explicitly asks, never bypass safety checks, never retry failing commands in a loop.
+- `Par_code_screen` owns the terminal: everything else appends images to the transcript. First frame / exit path stays free of network rescans, full rebuilds and LLM calls (`/exit` mid-turn = cancel + exit).
