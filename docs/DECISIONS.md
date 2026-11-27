@@ -3447,3 +3447,12 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 - **reason**：磁盘占用是用户直接感知的成本；会话存储格式（单行 JSON、每轮整段重写）属 SDK 的 `Sqlite_persistence`，而空闲页回收是纯数据库维护，宿主侧可以独立收口，不必等上游。
 - **scope**：`par_code_memory.storage_stats` / `reclaim`、`prune_stale` 的回收联动、`bin/main.ml` 的 `memory vacuum` 子命令与 `cli_args` 的 `--full`；不改表结构、不在启动路径做 `VACUUM`、不做压缩编码。单行 JSON 的整段重写另报 PAR issue。
 - **rollback**：删掉子命令与 prune 联动即可；`auto_vacuum=INCREMENTAL` 是库级持久设置，回滚无需改回（不改变数据）。
+
+## 2026-11-27 · 会话保存每次整段重写（报 PAR #45）
+
+- **tag**：upstream-save-conversation-full-rewrite
+- **before**：PAR SDK `par__Sqlite_persistence.save_conversation`（`~/.opam/5.4.0/lib/par/`，0.18.0-beta.20261122）先用 `conversation_messages_to_json` 重新编码整段消息，再 `INSERT OR REPLACE` 整行；620 MB 会话实测单次保存约 4.9 s，且单行 JSON 让回收只能靠 VACUUM。
+- **after**：本侧不改存储，以本项目身份在 jcz2020/par#45 报缺陷/需求（要增量持久化，如按轮追加或 metadata-only 更新），等上游发版后 par-code 再跟进验证；本侧只做删除后的空间回收（见 storage-reclaim-vacuum）。
+- **reason**：项目定位是 PAR SDK 验证案例，在宿主侧另做一套增量存储会把 SDK 的限制盖住，抵消验证价值（STRATEGY §2）。紧迫性：中——不阻塞功能，但长会话每轮保存的代价随体量线性增长。
+- **scope**：只报 issue（https://github.com/jcz2020/par/issues/45）；不改 PAR 仓库，不在 par-code 侧自建替代实现。
+- **rollback**：不适用（无代码变更）。
