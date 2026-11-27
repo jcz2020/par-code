@@ -109,6 +109,6 @@ docker build --build-arg VERSION=… -f scripts/docker/linux-bundle.Dockerfile -
 - `docs/DECISIONS.md` 3440 行、~140 条，append-only；`STRATEGY.md` 400 行已过期
 - CI 只容忍 PAR pin 的 exit code 31，其他非零一概失败；matrix：ubuntu-22.04 / ubuntu-24.04-arm / macos-15（OCaml 5.4.0），integration 仅 Linux
 - CI 失败后重发：fix → push main → 删旧 tag → 建新 tag → push tag；release.yml `cancel-in-progress: false`
-- 开发机 opam switch（Linux 主机）：`/root/dev/PAR`（OCaml 5.4.1）；当前 Termux checkout 无 OCaml 工具链，改动验证走 GitHub Actions CI
+- 本机可验证：Termux 自身没有 OCaml，但 Ubuntu proot 里有 `~/.opam/5.4.0`（OCaml 5.4.0 + dune 3.24.2）和现成脚本 `~/par-code-build.sh` / `~/par-code-test.sh`；把脚本**路径**交给 `proot-distro login ubuntu -- /bin/bash <script>`（不要用 `bash -lc` 内联，`$()` 会被外层展开）。作者 Linux 主机的 switch 是 `/root/dev/PAR`（OCaml 5.4.1）
 - 子目录知识库：`lib/`、`bin/`、`test/`、`test/integration/`——细节在彼处，本文件不重复；`scripts/`、`docs/` 无子文件（分数不足），跨切面规则只在本文件
 - 超 800 行限额的文件：`screen` 2291、`repl` 1842、`ui` 1123、`setup` 960、`config` 805、`bin/main.ml` 739——新增功能优先拆模块，勿继续堆行
