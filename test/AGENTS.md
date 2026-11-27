@@ -8,7 +8,7 @@ One executable per lib module: `test_par_code_<feature>.ml` mirrors `lib/par_cod
 
 | Task | File |
 |---|---|
-| Release bump: hardcoded version assertion | `test_par_code.ml:2` — expected string `0.15.8`; the check NAME still says `0.15.7`, so bump both on release |
+| Release bump: hardcoded version assertion | `test_par_code.ml:2` — label and expected string both `0.15.9`, so bump both on release |
 | v0.8.2 P2 regressions | `test_par_code_doom_loop.ml` (action-streak exemptions), `test_par_code_ui.ml` (table/tool-boundary), `test_par_code_repl.ml` (metric helpers), `test_par_code_session.ml` (migration stderr) |
 | Skill discovery (v0.9.0 W0/W1) | `test_par_code_skills.ml` — temp dirs, frontmatter parse, project-over-user precedence, body read |
 | Skill distillation (v0.9.0 W2) | `test_par_code_distill.ml` — proposal parse, id/size validation, atomic write + force backup |

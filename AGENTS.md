@@ -2,11 +2,11 @@
 
 > 项目级规则 + 项目地图。优先级高于全局 agent 指令文件。本文件是全库索引；模块细节在各子目录 AGENTS.md，此处不重复。
 
-**Generated:** 2026-11-27 · **Commit:** 8d9cfe9 · **Branch:** main
+**Generated:** 2026-11-27 · **Commit:** ef2a4c1 · **Branch:** main
 
 ## OVERVIEW
 
-par-code 是基于 PAR SDK 的 OCaml 终端编码 agent：`par` 启动 REPL，agent 能读写编辑代码、跑 bash、跨会话记忆项目知识；同时是 PAR SDK 的验证项目——每个功能反哺 PAR 的能力缺口。栈：OCaml 5.4 + dune + Cmdliner + Eio + PAR SDK（Runtime.invoke → ReAct）+ SQLite（WAL，FTS5 + vec0）。当前 `dune-project` 版本 0.15.8；发布史以 `CHANGES.md` 为权威。
+par-code 是基于 PAR SDK 的 OCaml 终端编码 agent：`par` 启动 REPL，agent 能读写编辑代码、跑 bash、跨会话记忆项目知识；同时是 PAR SDK 的验证项目——每个功能反哺 PAR 的能力缺口。栈：OCaml 5.4 + dune + Cmdliner + Eio + PAR SDK（Runtime.invoke → ReAct）+ SQLite（WAL，FTS5 + vec0）。当前 `dune-project` 版本 0.15.9；发布史以 `CHANGES.md` 为权威。
 
 ## STRUCTURE
 
