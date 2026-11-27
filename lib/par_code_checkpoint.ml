@@ -396,7 +396,7 @@ let run_checkpoint ?(extract = true) ~rt mem_db ~session_id ~project_id conv ~tu
           | Error (`Db_error e) ->
             ui_error (Printf.sprintf "[checkpoint store failed: %s]" e)))
 
-let maybe_checkpoint ~rt mem_db ~in_flight ~session_id ~project_id conv
+let maybe_checkpoint ?(extract = true) ~rt mem_db ~in_flight ~session_id ~project_id conv
     ~turn_number ~enabled ~interval =
   if not enabled then ()
   else if turn_number mod interval <> 0 then ()
@@ -429,7 +429,7 @@ let maybe_checkpoint ~rt mem_db ~in_flight ~session_id ~project_id conv
         (* Caveat 1: try/with guards against fiber death on unexpected exn.
            Caveat 4: in_flight reset on every exit path via Fun.protect. *)
         let body () =
-          run_checkpoint ~rt mem_db
+          run_checkpoint ~rt mem_db ~extract
             ~session_id:session_id_snapshot
             ~project_id:project_id_snapshot
             conv_snapshot

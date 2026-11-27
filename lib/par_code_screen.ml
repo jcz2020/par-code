@@ -1789,7 +1789,16 @@ let handle_key (t : t) ~(page : int) ((k, mods) : Notty.Unescape.key) =
         t.input <- "";
         t.cursor <- 0;
         history_push t line;
-        queue_prompt t line
+        (* (unreleased): /exit and /quit are commands, not model input. Queuing
+           them made quitting wait for a turn the provider can keep open long
+           after its text has arrived. Treat them like the second Ctrl-C:
+           cancel the turn and let the REPL exit when it unwinds. *)
+        if String.trim line = "/exit" || String.trim line = "/quit" then begin
+          t.cancel_requested <- true;
+          t.running <- false;
+          t.submitted <- None;
+          note_turn_interrupt t
+        end else queue_prompt t line
       end
     | `Enter when List.mem `Meta mods ->
       (* Alt+Enter: compose a multi-line message; Enter still submits. *)

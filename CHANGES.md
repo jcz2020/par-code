@@ -1,5 +1,36 @@
 # CHANGES
 
+## Unreleased — Start and quit stop scaling with stored history
+
+- **Startup no longer rebuilds the conversation index**: `conversations_fts`
+  was rebuilt (`INSERT INTO … VALUES('rebuild')`) on every launch, which
+  re-tokenizes every stored conversation. One 620 MB conversation made that a
+  fixed ~10 s tax before the first frame; the v0.15.8 "0.3-0.5 s" figure was
+  measured with a small history. The rebuild now runs only when the FTS table
+  is first created; the three sync triggers keep it current afterwards.
+  Measured on the same database: first frame 10.0 s → 0.33-0.47 s, resuming
+  the 620 MB session 18.7 s → 0.41-0.47 s.
+- **Quitting no longer rewrites or summarizes**: exit used to save the whole
+  conversation unconditionally (4.9 s for 620 MB) and then run a synchronous
+  memory-extraction LLM call (3-15 s measured). Exit now writes only when the
+  conversation changed since the last save — every turn already saves — and
+  memory extraction runs on the periodic checkpoint path only, where
+  `auto_extract` and `PAR_NO_AUTO_EXTRACT` now gate it. Measured exit:
+  4.9 s / 3-15 s → 0.27-0.49 s.
+- **`/exit` works while a turn is running**: a typed `/exit` was queued as
+  model input, so quitting waited for the provider to close a stream that had
+  already shown its answer (30 s in the measured case). `/exit` and `/quit`
+  are now commands during a turn: they cancel it and exit the way a second
+  Ctrl-C does.
+- **Peer baseline on the same phone**: Pi reaches its composer in ~0.9 s and
+  leaves in ~0.6 s; opencode in ~1.4 s and ~0.5 s. Neither rebuilds an index
+  or calls a model on the quit path, and both paint a frame before their
+  stores are ready. par's binary load was never the problem (`par --version`
+  is ~30 ms inside the proot).
+- **Known limit**: the 649 MB conversation is still stored as one JSON blob
+  and the database keeps ~650 MB of free pages after retention deletes.
+  Compacting stored conversations is a separate change.
+
 ## v0.15.8 — Fast to start, clear to upgrade (released 2026-11-24)
 
 - **`par` reaches its first frame without waiting for GitHub**: the update

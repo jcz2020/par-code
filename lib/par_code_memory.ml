@@ -213,6 +213,19 @@ let reinsert_migrated db memories =
 (* -- conversations_fts (par-code specific, not in Sqlite_memory) --------- *)
 
 let create_conversations_fts db =
+  (* (unreleased): [rebuild] walks and re-tokenizes every conversation. It is only
+     needed once, when the FTS table is created over rows that already exist;
+     the triggers below keep it current afterwards. Running it on every start
+     cost ~10 s on a 620 MB conversation (measured on a phone). *)
+  let existed =
+    let stmt =
+      Sqlite3.prepare db
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'conversations_fts'"
+    in
+    let found = Sqlite3.step stmt = Sqlite3.Rc.ROW in
+    ignore (Sqlite3.finalize stmt);
+    found
+  in
   let stmts = [
     "CREATE VIRTUAL TABLE IF NOT EXISTS conversations_fts USING fts5(messages_json, content='conversations')";
     {|CREATE TRIGGER IF NOT EXISTS conv_ai AFTER INSERT ON conversations BEGIN
@@ -229,9 +242,12 @@ let create_conversations_fts db =
         INSERT INTO conversations_fts(rowid, messages_json)
         VALUES (new.rowid, new.messages_json);
     END|};
-    "INSERT INTO conversations_fts(conversations_fts) VALUES('rebuild')";
   ] in
-  List.iter (fun s -> ignore (Sqlite3.exec db s)) stmts
+  List.iter (fun s -> ignore (Sqlite3.exec db s)) stmts;
+  if not existed then
+    ignore
+      (Sqlite3.exec db
+         "INSERT INTO conversations_fts(conversations_fts) VALUES('rebuild')")
 
 (* -- open/close ---------------------------------------------------------- *)
 

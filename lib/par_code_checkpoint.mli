@@ -63,6 +63,7 @@ val run_checkpoint :
     Non-fatal on error. *)
 
 val maybe_checkpoint :
+  ?extract:bool ->
   rt:Par.Runtime.runtime ->
   Par_code_memory.t ->
   in_flight:bool ref ->
@@ -73,7 +74,8 @@ val maybe_checkpoint :
 (** v0.4.1 Pillar A: async PERIODIC checkpoint dispatcher. Gate:
     if enabled && turn_number mod interval == 0 && not !in_flight,
     dispatch run_checkpoint as a background Eio.Fiber.fork on
-    rt.cancellation_root. The [in_flight] ref is set true when a fiber is
+    rt.cancellation_root. [extract] defaults to true and carries the
+    [auto_extract] setting; the manual /checkpoint command is unaffected. The [in_flight] ref is set true when a fiber is
     dispatched and reset false on every exit path (Ok/Error/exception) via
     Fun.protect. Concurrent calls while in_flight are dropped (throttle).
     Non-fatal — errors are logged to stderr from inside the fiber. *)

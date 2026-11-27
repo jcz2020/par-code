@@ -142,34 +142,6 @@ let load_initial_conv (ui : Par_code_ui.backend) (rt : Runtime.runtime) (target 
         | Ok None -> Par_code_ui.render_error ui (Printf.sprintf "Session not found: %s" sid); None
         | Error e -> Par_code_ui.render_error ui (Printf.sprintf "Failed to load session %s: %s" sid (Par_code_setup.error_to_string e)); None))
 
-let maybe_extract (ui : Par_code_ui.backend) (rt : Runtime.runtime) (conv : Types.conversation option) =
-  let enabled =
-    match Sys.getenv_opt "PAR_NO_AUTO_EXTRACT" with
-    | Some "1" | Some "true" -> false
-    | _ ->
-      (match Par_code_config.load () with
-       | Some cfg -> cfg.Par_code_config.auto_extract
-       | None -> true)
-  in
-  if enabled then begin
-    match conv with
-    | None -> ()
-    | Some c ->
-      if List.length c.Types.messages <= 1 then ()
-      else begin
-        (try
-           let project_id = Par_code_memory.resolve_project_id () in
-           (match Par_code_memory.open_db () with
-            | Error (`Db_error msg) ->
-              Par_code_ui.render_warning ui (Printf.sprintf "[extraction skipped: %s]" msg)
-            | Ok mem_db ->
-              Par_code_extractor.run_extraction rt mem_db ~project_id c;
-              Par_code_memory.close mem_db)
-         with ex ->
-           Par_code_ui.render_error ui (Printf.sprintf "[extraction failed: %s]" (Printexc.to_string ex)))
-      end
-  end
-
 let build_memory_appendix (mem_db : Par_code_memory.t option) =
   match mem_db with
   | Some t ->

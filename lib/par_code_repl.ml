@@ -248,6 +248,16 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
      no longer opens with a banner line. *)
   ();
   let conv : Types.conversation option ref = ref (load_initial_conv ui rt resume) in
+  (* (unreleased): exiting only rewrites the conversation when it changed since the
+     last save. Every turn already saves; on a 620 MB conversation the
+     redundant exit write cost ~5 s (measured on a phone). [conv] is replaced
+     by a fresh record on every turn, so physical inequality is the dirty bit. *)
+  let saved_conv : Types.conversation option ref = ref !conv in
+  let save_conv () =
+    let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in
+    saved_conv := !conv
+  in
+  let save_conv_if_dirty () = if !conv != !saved_conv then save_conv () in
   let orphans = ref (Runtime.list_orphaned_invokes rt) in
   let last_flow : string option ref = ref None in
   (match resume_hint !orphans with
@@ -292,6 +302,15 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
   let goal_auto_chain = match loaded_cfg with Some c -> c.Par_code_config.goal_auto_chain | None -> true in
   let goal_verify_cmd = match loaded_cfg with Some c -> c.Par_code_config.goal_verify_command | None -> None in
   let env_no_ckpt = match Sys.getenv_opt "PAR_NO_CHECKPOINT" with Some "1" | Some "true" -> true | _ -> false in
+  (* (unreleased): [auto_extract] now gates the periodic checkpoint's memory
+     extraction. It used to gate only the synchronous exit extraction, which
+     was removed from the quit path; keeping the setting inert would leave
+     `config set auto_extract false` doing nothing. *)
+  let auto_extract_on =
+    match Sys.getenv_opt "PAR_NO_AUTO_EXTRACT" with
+    | Some "1" | Some "true" -> false
+    | _ -> (match loaded_cfg with Some c -> c.Par_code_config.auto_extract | None -> true)
+  in
   let max_mode_on =
     ref (match loaded_cfg with Some c -> c.Par_code_config.max_mode | None -> false)
   in
@@ -408,21 +427,25 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
            "\n[cancelling \xe2\x80\x94 Ctrl+C again to force exit]"
        | None ->
          (* tiny race: invoke just returned; treat as prompt-time *)
-         let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in
+         save_conv_if_dirty ();
          Par_code_ui.render_notice ui "\nBye!";
          exit 0)
     | Par_code_chain.Force_exit ->
       Sys.set_signal Sys.sigint Sys.Signal_ignore;
-      let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in
+      save_conv_if_dirty ();
       Par_code_ui.render_notice ui "\nBye!";
       exit 0
     | Par_code_chain.Exit_now ->
-      let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in
+      save_conv_if_dirty ();
       Par_code_ui.render_notice ui "\nBye!";
       exit 0));
    let exit_normally () =
-     let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in
-     maybe_extract ui rt !conv;
+     save_conv_if_dirty ();
+     (* (unreleased): extraction no longer runs on the quit path. It was one LLM
+        round trip over the transcript — measured 3-15 s here — and the
+        per-turn checkpoint already extracts mid-session. DECISIONS 2026-07-06
+        accepted that cost only because background extraction did not exist;
+        it does now. *)
      Par_code_ui.render_notice ui "\nBye!";
      exit 0
    in
@@ -740,9 +763,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                    if recovered_conv.Types.messages <> [] then begin
                      conv := Some (Par_code_payload.sanitize recovered_conv);
                      Par_code_ui.flush_markdown ui;
-                     let _ =
-                       Runtime.save_conversation rt ?conversation:!conv ~scope ()
-                     in
+                     save_conv ();
                      incr turn_count
                    end else Par_code_ui.flush_markdown ui;
                   (match Par_code_chain.cancel_outcome reason with
@@ -786,7 +807,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                     Par_code_ui.render_cancel ui "[cancelled by user]"
                   end else
                     Par_code_ui.render_error ui (Par_code_setup.error_to_string e);
-                 let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in ()
+                 save_conv ()
               | Ok { Types.response = resp; conversation = returned_conv; _ } ->
                  conv := Some (Par_code_payload.sanitize returned_conv);
                  if !stream_cancelled then begin
@@ -816,7 +837,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                  end;
                  if not !cost_precounted then cost := add_usage !cost resp.Types.usage;
                  consecutive_invoke_errors := 0;
-                let _ = Runtime.save_conversation rt ?conversation:!conv ~scope () in ();
+                save_conv ();
                 incr turn_count;
                 if !session_id = None then begin
                   (try session_id := Some (Runtime.get_session_id rt) with _ -> ())
@@ -829,6 +850,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                         ~in_flight:in_flight_checkpoint
                         ~session_id:sid ~project_id:pid c
                         ~turn_number:!turn_count ~enabled:ckpt_enabled ~interval:ckpt_interval
+                        ~extract:auto_extract_on
                     | _ -> ())
                  end);
               (if mode_before_invoke = Par_code_mode.Plan
@@ -857,7 +879,7 @@ let run (rt : Runtime.runtime) ~(mem_db : Par_code_memory.t option) ~resume ?goa
                  doom_force_judge := false;
                  Par_code_ui.flush_markdown ui;
                  (match !conv with
-                  | Some c -> ignore (Runtime.save_conversation rt ~conversation:c ~scope ())
+                  | Some _ -> save_conv ()
                   | None -> ());
                  Par_code_ui.render_cancel ui "[cancelled by user]"
                | _ ->

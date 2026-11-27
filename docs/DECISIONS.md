@@ -3429,3 +3429,12 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 - **reason**：分解实测显示启动成本几乎全在这一次网络请求上（runtime 构建 54–75ms，`--version` 37–42ms；`--check` 单次 2.6s）；提示在 TUI 里又看不见，等待等于白等。
 - **scope**：只覆盖启动提示；`par upgrade --check` / `par upgrade` 仍同步联网（显式命令）。fork 依赖 POSIX；子进程不碰终端。首个缓存刷新在一代之内才生效（首启后第二次才会提示新版本）。
 - **rollback**：`startup_update_notice` 改回同步 `fetch_latest_tag` + `render_notice`，恢复 `maybe_check_version`/`is_chat_mode`，`Par_code_repl.run` 去掉 `?update_notice`。
+
+## 2026-11-25 · 启动/退出热路径只做局部工作（未发布）
+
+- **tag**：unreleased-startup-exit-hot-path
+- **before**：`Par_code_memory.create_conversations_fts` 每次启动都执行 `INSERT INTO conversations_fts(...) VALUES('rebuild')`，把 `conversations.messages_json` 全量重新分词；本机 649 MB 的会话让首帧固定多等约 10 秒（`sqlite3` 单独计时 rebuild = 10.3 s）。退出路径做两件重活：无条件 `save_conversation`（整段会话 JSON 重写，649 MB 实测 4.9 s）和同步 `maybe_extract`（一次 LLM 调用，实测 3–15 s）。
+- **after**：FTS 重建只在 `conversations_fts` 表不存在时执行，之后由 `conv_ai/ad/au` 三个触发器增量维护。退出只在 `conv` 自上次保存后被替换过时保存（物理不等判定）；移除退出提取，`auto_extract` / `PAR_NO_AUTO_EXTRACT` 改接周期 checkpoint 的提取开关（`maybe_checkpoint ?extract`）。实测：首帧 10.0 s → 0.33–0.47 s；恢复 649 MB 会话 18.7 s → 0.41–0.47 s；退出 4.9 s / 3–15 s → 0.27–0.49 s。同机对照 pi 0.9 s / 0.6 s、opencode 1.4 s / 0.5 s。
+- **reason**：启动和退出是每次都发生、用户直接感知的路径，只能做与数据量无关的局部工作；全量索引重建有现成增量替代（触发器），退出提取有现成替代（周期 checkpoint，v0.4.0 起就有）。DECISIONS 2026-07-06 接受退出提取是因为当时没有后台/周期提取，2026-07-11 已计划把它移出退出路径。
+- **scope**：只动 `par_code_memory.create_conversations_fts`、`par_code_repl` 的保存/退出路径、`par_code_checkpoint.maybe_checkpoint`、`par_code_repl_io.maybe_extract`（删除）与 `par_code_screen` 的忙时回车分支。回合进行中的 `/exit` / `/quit` 现在等同“取消 + 退出”（同连按两次 Ctrl-C），不再是排队输入；其它斜杠命令仍排队。`/checkpoint` 仍 `~extract:false`；`par ask` 的单次路径不变；会话体量（649 MB 单行 / 650 MB 空闲页）未处理，压缩是后续独立项。
+- **rollback**：`create_conversations_fts` 恢复无条件 rebuild；退出路径恢复 `save_conversation` + `maybe_extract`；`maybe_checkpoint` 的 `?extract` 与 `auto_extract` 接线一起回退。
