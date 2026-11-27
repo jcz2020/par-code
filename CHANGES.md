@@ -1,6 +1,6 @@
 # CHANGES
 
-## Unreleased — Start and quit stop scaling with stored history
+## v0.15.9 — Start and quit stop scaling with stored history (released 2026-11-27)
 
 - **Startup no longer rebuilds the conversation index**: `conversations_fts`
   was rebuilt (`INSERT INTO … VALUES('rebuild')`) on every launch, which
