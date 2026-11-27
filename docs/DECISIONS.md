@@ -3438,3 +3438,12 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 - **reason**：启动和退出是每次都发生、用户直接感知的路径，只能做与数据量无关的局部工作；全量索引重建有现成增量替代（触发器），退出提取有现成替代（周期 checkpoint，v0.4.0 起就有）。DECISIONS 2026-07-06 接受退出提取是因为当时没有后台/周期提取，2026-07-11 已计划把它移出退出路径。
 - **scope**：只动 `par_code_memory.create_conversations_fts`、`par_code_repl` 的保存/退出路径、`par_code_checkpoint.maybe_checkpoint`、`par_code_repl_io.maybe_extract`（删除）与 `par_code_screen` 的忙时回车分支。回合进行中的 `/exit` / `/quit` 现在等同“取消 + 退出”（同连按两次 Ctrl-C），不再是排队输入；其它斜杠命令仍排队。`/checkpoint` 仍 `~extract:false`；`par ask` 的单次路径不变；会话体量（649 MB 单行 / 650 MB 空闲页）未处理，压缩是后续独立项。
 - **rollback**：`create_conversations_fts` 恢复无条件 rebuild；退出路径恢复 `save_conversation` + `maybe_extract`；`maybe_checkpoint` 的 `?extract` 与 `auto_extract` 接线一起回退。
+
+## 2026-11-27 · 删除后回收磁盘空间（v0.16.0 未发布）
+
+- **tag**：storage-reclaim-vacuum
+- **before**：删除会话/记忆只把页放回 SQLite freelist，数据库文件不缩；被保留期删掉的 649 MB 会话仍让库占着约 650 MB 空闲页。
+- **after**：新增 `par memory vacuum [--full]`。默认把库切到 `auto_vacuum=INCREMENTAL`（首次转换是一次全量重写）并释放空闲页，`--full` 直接 `VACUUM`；`memory prune` 删除后若库已是增量模式则顺手回收。回收结束后做 `wal_checkpoint(TRUNCATE)`，避免释放的页停在 `-wal` 里。合成库实测（210 MB、删掉 180 MB）：全量 146 ms、增量 308 ms，两者都缩到 21 MB 且 freelist 归零。
+- **reason**：磁盘占用是用户直接感知的成本；会话存储格式（单行 JSON、每轮整段重写）属 SDK 的 `Sqlite_persistence`，而空闲页回收是纯数据库维护，宿主侧可以独立收口，不必等上游。
+- **scope**：`par_code_memory.storage_stats` / `reclaim`、`prune_stale` 的回收联动、`bin/main.ml` 的 `memory vacuum` 子命令与 `cli_args` 的 `--full`；不改表结构、不在启动路径做 `VACUUM`、不做压缩编码。单行 JSON 的整段重写另报 PAR issue。
+- **rollback**：删掉子命令与 prune 联动即可；`auto_vacuum=INCREMENTAL` 是库级持久设置，回滚无需改回（不改变数据）。

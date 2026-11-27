@@ -485,6 +485,46 @@ let cmd_memory_prune_term =
 
 let info_memory_prune = Cmd.info "prune" ~doc:"Remove stale unused memories"
 
+let format_bytes n =
+  let f = float_of_int n in
+  let gib = 1024.0 *. 1024.0 *. 1024.0 in
+  let mib = 1024.0 *. 1024.0 in
+  if f >= gib then Printf.sprintf "%.1f GiB" (f /. gib)
+  else if f >= mib then Printf.sprintf "%.1f MiB" (f /. mib)
+  else if f >= 1024.0 then Printf.sprintf "%.1f KiB" (f /. 1024.0)
+  else Printf.sprintf "%d B" n
+
+let cmd_memory_vacuum full =
+  with_memory_db (fun mem_db ->
+    let mode = if full then `Full else `Incremental in
+    match Par_code_memory.reclaim mem_db ~mode with
+    | Error (`Db_error msg) ->
+      Par_code_ui.render_error ui
+        (Printf.sprintf "Error reclaiming database space: %s" msg);
+      exit 1
+    | Ok (before, after) ->
+      let size s = s.Par_code_memory.page_count * s.Par_code_memory.page_size in
+      let before_bytes = size before and after_bytes = size after in
+      let freed = max 0 (before_bytes - after_bytes) in
+      let mode_note =
+        if full then "VACUUM"
+        else if before.Par_code_memory.auto_vacuum = 2 then "incremental"
+        else "incremental (converted the database to auto_vacuum=INCREMENTAL)"
+      in
+      Par_code_ui.render_notice ui
+        (Printf.sprintf "Reclaimed %s (%s): %s \xe2\x86\x92 %s, free pages %d \xe2\x86\x92 %d"
+           (format_bytes freed) mode_note
+           (format_bytes before_bytes) (format_bytes after_bytes)
+           before.Par_code_memory.freelist_count after.Par_code_memory.freelist_count))
+
+let cmd_memory_vacuum_term =
+  let open Term in
+  const cmd_memory_vacuum $ Cli_args.memory_vacuum_full_arg
+
+let info_memory_vacuum =
+  Cmd.info "vacuum"
+    ~doc:"Reclaim disk space freed by pruned sessions and memories"
+
 let cmd_memory_search query =
   with_memory_db (fun mem_db ->
     let project_id = Par_code_memory.resolve_project_id () in
@@ -540,7 +580,8 @@ let cmd_memory =
       Cmd.v info_memory_export cmd_memory_export_term;
       Cmd.v info_memory_prune cmd_memory_prune_term;
       Cmd.v info_memory_search cmd_memory_search_term;
-      Cmd.v info_memory_search_history cmd_memory_search_history_term; ]
+      Cmd.v info_memory_search_history cmd_memory_search_history_term;
+      Cmd.v info_memory_vacuum cmd_memory_vacuum_term; ]
 
 let cmd_plan_list limit =
   match Par_code_plan_tools.list_plans ~limit with

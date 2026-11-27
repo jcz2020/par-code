@@ -181,6 +181,12 @@ let memory_dry_run_arg =
   Arg.(value & flag &
     info ["dry-run"] ~doc:"Preview how many memories would be pruned, without deleting")
 
+let memory_vacuum_full_arg =
+  let open Cmdliner in
+  Arg.(value & flag &
+    info ["full"]
+      ~doc:"Rewrite the whole database (VACUUM) instead of releasing free pages in place")
+
 (* Plan subcommand args *)
 
 let plan_limit_arg =

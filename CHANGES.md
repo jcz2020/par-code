@@ -1,5 +1,22 @@
 # CHANGES
 
+## Unreleased — Give deleted sessions back their disk space
+
+- **`par memory vacuum`** releases pages that deleted sessions and memories
+  left on the SQLite freelist: deleting rows never shrinks the file, and a
+  pruned 649 MB conversation used to keep ~650 MB of dead pages. The default
+  releases the freelist in place and, on first use, switches the database to
+  `auto_vacuum=INCREMENTAL` (that conversion is one full rewrite); `--full`
+  always runs `VACUUM`. Both print `Reclaimed <size>: <before> → <after>,
+  free pages <n> → <m>` on success.
+- **`par memory prune` reclaims immediately** once the database is in
+  incremental mode, so routine cleanup does not need a second command.
+- Measured on a synthetic 210 MB database with 180 MB deleted: full rewrite
+  146 ms, incremental 308 ms, both ending at 21 MB with no free pages left.
+- **Not changed**: a conversation is still one JSON blob and the SDK rewrites
+  that blob on every save. Compacting the representation itself is an upstream
+  change, not a local workaround.
+
 ## v0.15.9 — Start and quit stop scaling with stored history (released 2026-11-27)
 
 - **Startup no longer rebuilds the conversation index**: `conversations_fts`

@@ -100,6 +100,13 @@ test_memory_show_bad_prefix() {
   echo "$out" | assert_contains 'No memory matches'
 }
 
+test_memory_vacuum() {
+  setup_home; trap teardown_home EXIT
+  par_cli memory add --kind convention --summary "vacuum test" --content "vacuum content" >/dev/null 2>&1
+  par_cli memory vacuum 2>&1 | assert_contains 'Reclaimed'
+  par_cli memory vacuum --full 2>&1 | assert_contains 'Reclaimed'
+}
+
 test_case "memory list empty"         test_memory_list_empty
 test_case "memory add"                test_memory_add
 test_case "memory list after add"     test_memory_list_after_add
@@ -110,4 +117,5 @@ test_case "memory prune dry-run"      test_memory_prune_dry_run
 test_case "memory forget"             test_memory_forget
 test_case "memory list after forget"  test_memory_list_after_forget
 test_case "memory show bad prefix"    test_memory_show_bad_prefix
+test_case "memory vacuum"             test_memory_vacuum
 run_tests "$@"

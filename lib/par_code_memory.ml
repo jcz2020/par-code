@@ -249,6 +249,64 @@ let create_conversations_fts db =
       (Sqlite3.exec db
          "INSERT INTO conversations_fts(conversations_fts) VALUES('rebuild')")
 
+(* -- storage reclaim (v0.16.0) -------------------------------------------- *)
+
+(* Deleting rows only moves pages to the freelist; the file keeps its size.
+   These helpers report that free space and give it back, either incrementally
+   (no full rewrite) or with a VACUUM. *)
+
+type storage_stats = {
+  page_size : int;
+  page_count : int;
+  freelist_count : int;
+  free_bytes : int;
+  auto_vacuum : int;
+}
+
+let pragma_int db name =
+  let stmt = Sqlite3.prepare db ("PRAGMA " ^ name) in
+  let value =
+    match Sqlite3.step stmt with
+    | Sqlite3.Rc.ROW -> Sqlite3.column_int stmt 0
+    | _ -> 0
+  in
+  ignore (Sqlite3.finalize stmt);
+  value
+
+let read_storage_stats t =
+  let page_size = pragma_int t.db "page_size" in
+  let page_count = pragma_int t.db "page_count" in
+  let freelist_count = pragma_int t.db "freelist_count" in
+  { page_size; page_count; freelist_count;
+    free_bytes = freelist_count * page_size;
+    auto_vacuum = pragma_int t.db "auto_vacuum" }
+
+let storage_stats t = wrap_sqlite_error (fun () -> read_storage_stats t)
+
+(* A truncated checkpoint keeps the reported file size honest under WAL: without
+   it the pages freed by VACUUM sit in the -wal file instead of leaving the
+   database files. *)
+let checkpoint t =
+  ignore (Sqlite3.exec t.db "PRAGMA wal_checkpoint(TRUNCATE)")
+
+let reclaim t ~mode =
+  wrap_sqlite_error (fun () ->
+    let before = read_storage_stats t in
+    (match mode with
+     | `Full -> ignore (Sqlite3.exec t.db "VACUUM")
+     | `Incremental ->
+       if before.auto_vacuum = 2 then
+         ignore (Sqlite3.exec t.db "PRAGMA incremental_vacuum")
+       else begin
+         (* auto_vacuum is a persistent header setting; switching to
+            INCREMENTAL only takes effect after one full rewrite. *)
+         ignore (Sqlite3.exec t.db "PRAGMA auto_vacuum=INCREMENTAL");
+         ignore (Sqlite3.exec t.db "VACUUM")
+       end);
+    checkpoint t;
+    let after = read_storage_stats t in
+    (before, after))
+
 (* -- open/close ---------------------------------------------------------- *)
 
 let open_db ?embedding_fn ?(dimension = 1536) () =
@@ -550,7 +608,15 @@ let prune_stale t ~project_id ~older_than_days =
     let rc = Sqlite3.step stmt in
     let _ = Sqlite3.finalize stmt in
     match rc with
-    | Sqlite3.Rc.DONE -> Sqlite3.changes t.db
+    | Sqlite3.Rc.DONE ->
+      let deleted = Sqlite3.changes t.db in
+      (* Once the database is in incremental mode, give the freed pages back
+         right away; otherwise leave it to the explicit `par memory vacuum`. *)
+      if deleted > 0 && pragma_int t.db "auto_vacuum" = 2 then begin
+        ignore (Sqlite3.exec t.db "PRAGMA incremental_vacuum");
+        checkpoint t
+      end;
+      deleted
     | _ -> raise (Sqlite3.Error (Sqlite3.Rc.to_string rc)))
 
 let prune_stale_dry_run t ~project_id ~older_than_days =

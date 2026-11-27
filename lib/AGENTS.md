@@ -14,7 +14,7 @@ Flat directory — no subdirs; the module set IS the architecture. All modules a
 | Full-screen Notty TUI: frame, status, input editing, modal, scrollback, mouse | `par_code_screen.ml` (2291) — sole terminal owner |
 | Rendering: image algebra, ANSI backend, tables/cost, streaming markdown | `par_code_ui.ml` (1123) + `par_code_ui_markdown.ml` (349) |
 | Config (38 fields, embedded main-agent prompt) + wizard | `par_code_config.ml` (805) + `par_code_config_wizard.ml` (226) |
-| Memory: SQLite/FTS5/vec0, export, prune + tool bindings | `par_code_memory.ml` (625) + `par_code_memory_tools.ml` (282) |
+| Memory: SQLite/FTS5/vec0, export, prune, storage reclaim + tool bindings | `par_code_memory.ml` (700) + `par_code_memory_tools.ml` (282) |
 | Plan mode: six-section gate, synthesizer fallback, plan files | `par_code_plan_tools.ml` (574) |
 | Long-session continuity: periodic/manual checkpoint + memory extraction | `par_code_checkpoint.ml` (449) + `par_code_extractor.ml` (258) |
 | Goals: lifecycle / judge / chain / doom-loop / progress | `par_code_goal.ml` (134), `par_code_judge.ml` (128), `par_code_chain.ml` (300), `par_code_doom_loop.ml` (311), `par_code_progress.ml` (46) |
@@ -48,6 +48,7 @@ Flat directory — no subdirs; the module set IS the architecture. All modules a
 - doom-loop action-streak 排除 bash 与编辑类工具（各有 bash_retry / edit_repeat）；其余非 info 工具仍计数（v0.8.2+）。
 - Pure-core extraction for testability: decision logic lives in side-effect-free modules (`progress`, `chain`, `doom_loop`, `json_extract`, `plan_tools.gate_response`).
 - 启动提示（v0.15.8）：启动路径**只读缓存**（`Par_code_upgrade.cached_update_notice`），过期由 `bin/main.ml` fork 的脱离子进程刷新；`fetch_latest_tag` 的 timeout 参数至今无效，任何同步调用都会把首帧拖住。提示由 `Par_code_repl.run ?update_notice` 写进 TUI 转写区，不要再打到 stdout（会被 notty 首帧覆盖）。
+- v0.16.0 存储回收：删除只把页放进 freelist，文件不缩；`par memory vacuum` 默认走 `PRAGMA incremental_vacuum`（首次会先把库切到 `auto_vacuum=INCREMENTAL`，那一步是全量重写），`--full` 强制 `VACUUM`；`memory prune` 在增量模式下删完顺手回收，回收后做 `wal_checkpoint(TRUNCATE)`。会话仍是一行 JSON、每轮整段重写属 SDK，不在宿主侧重写。
 - 启动/退出热路径（v0.15.9）：`create_conversations_fts` 只在建表时 `rebuild`，之后靠 `conv_ai/ad/au` 触发器；REPL 退出只在 `conv` 自上次保存后被替换过时 `save_conversation`（每轮已保存），且不再同步提取记忆——`auto_extract` / `PAR_NO_AUTO_EXTRACT` 已接到周期 `maybe_checkpoint ?extract`。回合进行中的 `/exit` / `/quit` 等同“取消 + 退出”，其它输入仍排队。新增「每次启动全量扫描/重建」或「退出时调 LLM」的写法都会在大会话上放大成秒级。
 - 升级可观测（v0.15.8）：`par_code_upgrade` 每个阶段向 **stderr** 打一行带 flush 的 `[info]`（current / checking / download 大小 + 每 2 MB 进度 / checksum / extract / install），stdout 只留最终结果；进度钩子是 `http_get` 的可选 `on_start` / `on_chunk`。`decide_upgrade` 是纯函数：同版本与“本地比发行版新”都返回 `Up_to_date` 不下载，只有显式 `--to` 才允许降级；`perform_upgrade` 返回 `` [`Upgraded of string | `Up_to_date of string] ``，安装（rename/smoke）失败单列 `` `Rename_failed `` 而不是混进下载错误。
 - Errors are polymorphic variants RETURNED across module boundaries, never raised: ``[> `Db_error of string]``, ``[> `Plan_error of string]``, upgrade's ``[> `Http of string | `Offline]``.

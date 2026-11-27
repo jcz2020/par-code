@@ -57,6 +57,26 @@ val prune_stale : t -> project_id:string -> older_than_days:float ->
 val prune_stale_dry_run : t -> project_id:string -> older_than_days:float ->
                           (int, [> `Db_error of string]) result
 
+type storage_stats = {
+  page_size : int;
+  page_count : int;
+  freelist_count : int;
+  free_bytes : int;
+  auto_vacuum : int;  (* 0 = off, 1 = full, 2 = incremental *)
+}
+(** v0.16.0: page-level picture of the shared database file. *)
+
+val storage_stats : t -> (storage_stats, [> `Db_error of string]) result
+
+val reclaim :
+  t ->
+  mode:[ `Incremental | `Full ] ->
+  (storage_stats * storage_stats, [> `Db_error of string]) result
+(** v0.16.0: release pages left on the freelist by deleted sessions/memories.
+    [`Incremental] releases the freelist in place (and switches the database to
+    auto_vacuum=INCREMENTAL first, which needs one full rewrite); [`Full] always
+    runs VACUUM. Returns the stats before and after. *)
+
 val resolve_memory_id : t -> project_id:string -> string ->
                         (string, string) result
 

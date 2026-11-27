@@ -465,6 +465,85 @@ let resolve_memory_id_no_match () =
       Alcotest.(check bool) "error mentions no match" true
         (string_contains msg "No memory matches prefix"))
 
+(* v0.16.0 storage reclaim *)
+
+let db_file_size tmpdir =
+  let path = Filename.concat (Filename.concat tmpdir ".par") "par.db" in
+  try (Unix.stat path).Unix.st_size with _ -> 0
+
+let checkpoint_raw tmpdir =
+  let raw = open_raw_db tmpdir in
+  ignore (Sqlite3.exec raw "PRAGMA wal_checkpoint(TRUNCATE)");
+  ignore (Sqlite3.db_close raw)
+
+let seed_big_conversations tmpdir ~count ~bytes =
+  let raw = open_raw_db tmpdir in
+  let payload = String.make bytes 'x' in
+  for i = 1 to count do
+    insert_raw_conversation raw
+      ~session_id:(Printf.sprintf "big-%d" i)
+      ~messages_json:(Printf.sprintf {|{"role":"user","content":"%s-%d"}|} payload i)
+      ~updated_at:(float_of_int i)
+      ~turn_count:i
+  done;
+  ignore (Sqlite3.db_close raw);
+  checkpoint_raw tmpdir
+
+let delete_all_but_first tmpdir =
+  let raw = open_raw_db tmpdir in
+  ignore (Sqlite3.exec raw
+            "DELETE FROM conversations WHERE session_id <> 'big-1'");
+  ignore (Sqlite3.db_close raw);
+  checkpoint_raw tmpdir
+
+let reclaim_full_shrinks_file () =
+  with_history_db (fun ~tmpdir db ->
+    seed_big_conversations tmpdir ~count:24 ~bytes:(256 * 1024);
+    let before = db_file_size tmpdir in
+    delete_all_but_first tmpdir;
+    match Par_code_memory.reclaim db ~mode:`Full with
+    | Error (`Db_error msg) -> failf "reclaim: %s" msg
+    | Ok (_stats_before, after) ->
+      Alcotest.(check bool) "file shrank" true (db_file_size tmpdir < before / 2);
+      Alcotest.(check int) "no free pages" 0 after.Par_code_memory.freelist_count)
+
+let reclaim_incremental_converts_and_shrinks () =
+  with_history_db (fun ~tmpdir db ->
+    seed_big_conversations tmpdir ~count:16 ~bytes:(256 * 1024);
+    let before = db_file_size tmpdir in
+    delete_all_but_first tmpdir;
+    match Par_code_memory.reclaim db ~mode:`Incremental with
+    | Error (`Db_error msg) -> failf "reclaim: %s" msg
+    | Ok (_stats_before, after) ->
+      Alcotest.(check int) "auto_vacuum is incremental" 2 after.Par_code_memory.auto_vacuum;
+      Alcotest.(check bool) "file shrank" true (db_file_size tmpdir < before / 2);
+      Alcotest.(check int) "no free pages" 0 after.Par_code_memory.freelist_count)
+
+let prune_reclaims_when_incremental () =
+  with_temp_db (fun ~tmpdir db ->
+    (match Par_code_memory.reclaim db ~mode:`Incremental with
+     | Ok _ -> ()
+     | Error (`Db_error msg) -> failf "convert: %s" msg);
+    let project_id = "test-project" in
+    let payload = String.make (8 * 1024) 'y' in
+    for i = 1 to 120 do
+      ignore (add_mem db ~project_id ~kind:Insight
+                ~content:(Printf.sprintf "%s-%d" payload i)
+                ~summary:(Printf.sprintf "summary %d" i))
+    done;
+    let raw = Par_code_memory.raw_db db in
+    ignore (Sqlite3.exec raw "PRAGMA wal_checkpoint(TRUNCATE)");
+    let before = db_file_size tmpdir in
+    match Par_code_memory.prune_stale db ~project_id ~older_than_days:(-1.0) with
+    | Error (`Db_error msg) -> failf "prune: %s" msg
+    | Ok deleted ->
+      Alcotest.(check int) "all pruned" 120 deleted;
+      let after = db_file_size tmpdir in
+      Alcotest.(check bool) "file shrank" true (after < before);
+      match Par_code_memory.storage_stats db with
+      | Ok stats -> Alcotest.(check int) "no free pages" 0 stats.Par_code_memory.freelist_count
+      | Error (`Db_error msg) -> failf "storage_stats: %s" msg)
+
 let () =
   Alcotest.run "par_memory"
     [ "schema", [ Alcotest.test_case "idempotent" `Quick schema_idempotent ];
@@ -496,5 +575,10 @@ let () =
       "recall_usage", [
         Alcotest.test_case "returns_usage_fields"    `Quick test_recall_returns_usage_fields;
         Alcotest.test_case "safe_with_metachar_ids"  `Quick test_recall_safe_with_sql_metachar_ids;
+      ];
+      "storage", [
+        Alcotest.test_case "reclaim_full"            `Quick reclaim_full_shrinks_file;
+        Alcotest.test_case "reclaim_incremental"     `Quick reclaim_incremental_converts_and_shrinks;
+        Alcotest.test_case "prune_reclaims"          `Quick prune_reclaims_when_incremental;
       ];
     ]
