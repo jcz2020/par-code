@@ -3456,3 +3456,12 @@ darwin-arm64 / darwin-x64 / windows-x64）。原 plan 在 `.sisyphus/plans/v0.2.
 - **reason**：项目定位是 PAR SDK 验证案例，在宿主侧另做一套增量存储会把 SDK 的限制盖住，抵消验证价值（STRATEGY §2）。紧迫性：中——不阻塞功能，但长会话每轮保存的代价随体量线性增长。
 - **scope**：只报 issue（https://github.com/jcz2020/par/issues/45）；不改 PAR 仓库，不在 par-code 侧自建替代实现。
 - **rollback**：不适用（无代码变更）。
+
+## 2026-11-28 · 验证 PAR #45（v2 会话存储）与检索适配缺口
+
+- **tag**：upstream-v2-conversation-store
+- **before**：上游 `main`（5b33a70，未发版）把 `conversations.messages_json` 的整段重写改成 `conversation_messages` 每条消息一行、只写后缀；v2 行把 `messages_json` 存 `''`。而 par-code 的 `conversations_fts` 正索引这一列。
+- **after**：本机把 `par` 钉到 5b33a70 验证：par-code 构建与全部套件通过；6.6 MB 会话追加保存 4–12 ms（tag 版 47–60 ms）；真实回合后 `messages_json` 长度 0、`conversation_messages` 5 行，`search-history` 对 v2 会话 0 命中。数据与三个问题已回到 #45（comment-7239472786）；验证后 pin 已恢复为 `git+https://github.com/jcz2020/par.git#v0.18.0-beta.20261122` 并重建。
+- **reason**：项目定位是 PAR 验证案例，上游修复是否破坏宿主的 FTS 扩展必须实测。会话检索是 par-code 自己的扩展，适配 `conversation_messages` 属于本侧职责；但当前 tag 没有该表，不能先合入代码。
+- **scope**：只做验证与计划（`docs/v0.16.0-STORAGE.md` 的「后续」节）；未改 PAR 仓库、未改 par-code 代码，pin 已恢复。
+- **rollback**：不适用（无代码变更；pin 已回到 tag）。
